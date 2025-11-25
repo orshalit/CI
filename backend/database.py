@@ -10,6 +10,7 @@ from sqlalchemy.pool import QueuePool
 
 from config import settings
 
+
 logger = logging.getLogger(__name__)
 
 # Use in-memory SQLite for testing, PostgreSQL otherwise
