@@ -6,9 +6,9 @@ following pytest best practices for maintainability and reusability.
 """
 
 import os
+
 import pytest
 from collections.abc import Generator
-
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -19,7 +19,7 @@ os.environ["TESTING"] = "True"
 os.environ["RATE_LIMIT_ENABLED"] = "False"
 os.environ["LOG_LEVEL"] = "ERROR"  # Reduce log noise in tests
 
-from database import Base, get_db, Greeting  # noqa: E402
+from database import Base, Greeting, get_db  # noqa: E402
 from main import app  # noqa: E402
 
 
@@ -49,7 +49,7 @@ def testing_session_local(engine):
     return sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture
 def db_session(engine, testing_session_local) -> Generator[Session, None, None]:
     """
     Create a fresh database session for each test function.
@@ -77,17 +77,17 @@ def db_session(engine, testing_session_local) -> Generator[Session, None, None]:
         Base.metadata.drop_all(bind=engine)
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture
 def client(db_session) -> Generator[TestClient, None, None]:
     """
     Create a FastAPI test client with database dependency override.
-    
+
     This fixture automatically injects the test database session
     into all API endpoints that depend on get_db().
-    
+
     Args:
         db_session: The test database session fixture
-        
+
     Yields:
         TestClient: A configured test client
     """
