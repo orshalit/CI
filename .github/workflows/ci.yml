@@ -408,24 +408,51 @@ jobs:
       - name: Wait for services to be healthy
         run: |
           echo "Waiting for services to be healthy..."
+          
+          echo "=== Waiting for database ==="
           timeout 120 bash -c '
             until docker compose ps database | grep -q "healthy"; do 
               echo "Waiting for database..."; 
               sleep 2; 
             done
           '
+          echo "✓ Database is healthy"
+          
+          echo "=== Waiting for backend ==="
           timeout 120 bash -c '
             until docker compose ps backend | grep -q "healthy"; do 
               echo "Waiting for backend..."; 
               sleep 2; 
             done
           '
+          echo "✓ Backend is healthy"
+          
+          echo "=== Waiting for frontend ==="
+          echo "Container status before wait:"
+          docker compose ps frontend
+          
           timeout 120 bash -c '
+            counter=0
             until docker compose ps frontend | grep -q "healthy"; do 
-              echo "Waiting for frontend..."; 
-              sleep 2; 
+              counter=$((counter + 1))
+              echo "Waiting for frontend... (attempt $counter)"
+              
+              # Every 10 attempts, show detailed debug info
+              if [ $((counter % 10)) -eq 0 ]; then
+                echo "--- Debug Info (attempt $counter) ---"
+                echo "Container status:"
+                docker compose ps frontend
+                echo "Health check status:"
+                docker inspect --format="{{json .State.Health}}" frontend 2>/dev/null | jq . || echo "No health info available"
+                echo "Recent logs:"
+                docker compose logs --tail=20 frontend
+                echo "---"
+              fi
+              
+              sleep 2
             done
           '
+          echo "✓ Frontend is healthy"
       
       - name: Verify service health
         run: |
@@ -485,8 +512,20 @@ jobs:
       - name: Show service logs on failure
         if: failure()
         run: |
-          echo "=== Docker Compose Logs ==="
-          docker compose logs --tail=100
+          echo "=== Container Status ==="
+          docker compose ps -a
+          
+          echo -e "\n=== Container Health Details ==="
+          for service in database backend frontend; do
+            echo "--- $service health ---"
+            docker inspect --format="{{json .State.Health}}" $service 2>/dev/null | jq . || echo "No health info for $service"
+          done
+          
+          echo -e "\n=== Full Docker Compose Logs ==="
+          docker compose logs --no-color
+          
+          echo -e "\n=== Frontend Container Inspect ==="
+          docker inspect frontend 2>/dev/null | jq '.[0].State' || echo "Frontend container not found"
       
       - name: Stop services
         if: always()
