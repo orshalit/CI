@@ -20,7 +20,7 @@ make ci-local
 
 **Exact versions required:**
 - Python 3.11 (not 3.10, not 3.12)
-- Node.js 20 (not 19, not 21)
+- Node.js 20 (not 19, not 21) - **Required for Prettier formatting**
 - Docker & Docker Compose
 
 **Verify versions:**
@@ -28,6 +28,8 @@ make ci-local
 python3 --version  # Should show 3.11.x
 node --version     # Should show v20.x.x
 ```
+
+**Important:** Prettier requires Node.js 14+, but we require Node 20 for consistency with CI. If your local Node version is older, formatting will fail locally but CI will catch it. Upgrade to Node 20 to format locally.
 
 ## 🔧 Setup Steps
 
