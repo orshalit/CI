@@ -50,7 +50,7 @@ def testing_session_local(engine):
     return sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
-@pytest.fixture()
+@pytest.fixture
 def db_session(engine, testing_session_local) -> Generator[Session, None, None]:
     """
     Create a fresh database session for each test function.
@@ -78,7 +78,7 @@ def db_session(engine, testing_session_local) -> Generator[Session, None, None]:
         Base.metadata.drop_all(bind=engine)
 
 
-@pytest.fixture()
+@pytest.fixture
 def client(db_session) -> Generator[TestClient, None, None]:
     """
     Create a FastAPI test client with database dependency override.
@@ -110,7 +110,7 @@ def client(db_session) -> Generator[TestClient, None, None]:
     app.dependency_overrides.clear()
 
 
-@pytest.fixture()
+@pytest.fixture
 def sample_greeting(db_session) -> Greeting:
     """
     Create a sample greeting in the database for testing.
@@ -131,7 +131,7 @@ def sample_greeting(db_session) -> Greeting:
     return greeting
 
 
-@pytest.fixture()
+@pytest.fixture
 def multiple_greetings(db_session) -> list[Greeting]:
     """
     Create multiple greetings for testing pagination and filtering.

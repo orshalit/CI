@@ -86,7 +86,7 @@ jobs:
       - name: Run Ruff linter ⚡ (replaces Flake8, Pylint, isort)
         working-directory: ./backend
         run: |
-          pip install ruff black
+          pip install -r requirements.txt
           ruff check . --output-format=github
       
       - name: Check Python code formatting (Black)
