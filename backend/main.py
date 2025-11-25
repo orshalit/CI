@@ -247,7 +247,8 @@ async def greet_user(
             id=greeting.id,
             created_at=greeting.created_at
         )
-    except HTTPException:
+    except (HTTPException, RequestValidationError):
+        # Re-raise HTTPException and RequestValidationError to let FastAPI handle them
         raise
     except Exception as e:
         logger.error(f"Unexpected error in greet_user: {e}", exc_info=True)

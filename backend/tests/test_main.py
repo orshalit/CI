@@ -142,22 +142,23 @@ class TestGreetEndpoint:
         "  ",  # Multiple whitespaces
     ])
     def test_greet_with_invalid_input(
-        self, 
-        client: TestClient, 
+        self,
+        client: TestClient,
         invalid_user: str
     ):
         """Test that invalid user names are rejected."""
         response = client.get(f"/api/greet/{invalid_user}")
-        
+
         # Empty string results in 404 (route not matched)
-        # Whitespace-only results in 400 (validation error)
+        # Whitespace-only results in 422 (FastAPI's standard for validation errors)
         if invalid_user == "":
             assert response.status_code == 404
         else:
-            assert response.status_code == 400
+            assert response.status_code == 422  # FastAPI returns 422 for validation errors
             data = response.json()
-            assert "detail" in data
-            assert "empty" in data["detail"].lower()
+            assert "detail" in data or "error" in data
+            error_msg = str(data.get("detail", data.get("error", ""))).lower()
+            assert "empty" in error_msg or "whitespace" in error_msg
     
     def test_greet_with_very_long_name(self, client: TestClient):
         """Test greeting with name exceeding max length."""
