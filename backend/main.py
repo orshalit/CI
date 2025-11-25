@@ -15,7 +15,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from config import settings
-from database import Greeting, get_db, init_db
+from database import get_db, Greeting, init_db
 from logging_config import setup_logging
 from middleware import ErrorHandlingMiddleware, LoggingMiddleware, SecurityHeadersMiddleware
 from schemas import (
@@ -86,7 +86,7 @@ app.add_middleware(
     summary="Health check endpoint",
     description="Check the health status of the API and database connectivity"
 )
-async def health_check(db: Session = Depends(get_db)):
+async def health_check(db: Session = Depends(get_db)):  # noqa: B008
     """Health check endpoint with database connectivity check"""
     try:
         # Test database connection
@@ -118,7 +118,7 @@ async def health_check(db: Session = Depends(get_db)):
 async def get_version():
     """
     Returns version information about the running application.
-    
+
     This endpoint provides build metadata including:
     - Application version
     - Git commit SHA
@@ -128,29 +128,29 @@ async def get_version():
     """
     # Try to read version from version.json file (created during Docker build)
     version_file = PathLib("/app/version.json")
-    
+
     if version_file.exists():
         try:
-            with open(version_file, 'r') as f:
+            with open(version_file) as f:
                 version_data = json.load(f)
-            
+
             return VersionResponse(
                 version=version_data.get("version", os.getenv("APP_VERSION", "unknown")),
                 commit=version_data.get("commit", os.getenv("GIT_COMMIT", "unknown")),
                 build_date=version_data.get("build_date", os.getenv("BUILD_DATE", "unknown")),
                 python_version=version_data.get("python_version", "3.11"),
-                environment=settings.ENVIRONMENT
+                environment=os.getenv("ENVIRONMENT", "development")
             )
-        except (json.JSONDecodeError, IOError) as e:
+        except (json.JSONDecodeError, OSError) as e:
             logger.warning(f"Failed to read version.json: {e}")
-    
+
     # Fallback to environment variables
     return VersionResponse(
         version=os.getenv("APP_VERSION", settings.API_VERSION),
         commit=os.getenv("GIT_COMMIT", "unknown"),
         build_date=os.getenv("BUILD_DATE", "unknown"),
         python_version="3.11",
-        environment=settings.ENVIRONMENT
+        environment=os.getenv("ENVIRONMENT", "development")
     )
 
 

@@ -15,7 +15,7 @@ class JSONFormatter(logging.Formatter):
             "logger": record.name,
             "message": record.getMessage(),
         }
-        
+
         # Add extra fields if present
         if hasattr(record, "method"):
             log_data["method"] = record.method
