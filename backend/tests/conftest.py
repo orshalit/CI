@@ -7,7 +7,8 @@ following pytest best practices for maintainability and reusability.
 
 import os
 import pytest
-from typing import Generator
+from collections.abc import Generator
+
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -18,8 +19,8 @@ os.environ["TESTING"] = "True"
 os.environ["RATE_LIMIT_ENABLED"] = "False"
 os.environ["LOG_LEVEL"] = "ERROR"  # Reduce log noise in tests
 
-from database import Base, get_db, Greeting
-from main import app
+from database import Base, get_db, Greeting  # noqa: E402
+from main import app  # noqa: E402
 
 
 # Test database configuration
@@ -30,7 +31,7 @@ TEST_DATABASE_URL = "sqlite:///:memory:"
 def engine():
     """
     Create a test database engine for the entire test session.
-    
+
     Uses in-memory SQLite with StaticPool to ensure the database
     persists across different test functions within the same session.
     """
@@ -43,31 +44,31 @@ def engine():
 
 
 @pytest.fixture(scope="session")
-def TestingSessionLocal(engine):
+def testing_session_local(engine):
     """Create a sessionmaker for test database sessions."""
     return sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
 @pytest.fixture(scope="function")
-def db_session(engine, TestingSessionLocal) -> Generator[Session, None, None]:
+def db_session(engine, testing_session_local) -> Generator[Session, None, None]:
     """
     Create a fresh database session for each test function.
-    
+
     This fixture:
     - Creates all tables before the test
     - Provides a clean session
     - Rolls back any changes after the test
     - Drops all tables for cleanup
-    
+
     Yields:
         Session: A SQLAlchemy database session
     """
     # Create all tables
     Base.metadata.create_all(bind=engine)
-    
+
     # Create a new session
-    session = TestingSessionLocal()
-    
+    session = testing_session_local()
+
     try:
         yield session
     finally:
