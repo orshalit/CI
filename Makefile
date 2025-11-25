@@ -33,8 +33,8 @@ format-backend: ## Format Python code with Black and Ruff
 
 format-frontend: ## Format JavaScript code with Prettier
 	@echo "Formatting frontend code..."
-	@echo "Note: Requires Node.js 20+ (CI will format if local Node is older)"
-	@cd frontend && npm run format || echo "⚠️  Formatting skipped - Node.js 20+ required. CI will format automatically."
+	@echo "Note: Requires Node.js 20+. Using Docker if local Node is older..."
+	@cd frontend && (npm run format 2>/dev/null || docker run --rm -v $$(pwd):/app -w /app node:20-alpine sh -c 'npm ci && npm run format' || echo "⚠️  Formatting failed. Ensure Node.js 20+ or Docker is available.")
 
 test: test-backend test-frontend ## Run all tests
 
