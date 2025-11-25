@@ -100,17 +100,22 @@ lint-black:
 	black --check .
 
 # Security scans (slower - run as needed or nightly in CI)
+# Note: Requires separate installation: pip install bandit safety
 lint-security:
 	@echo "Running Bandit security scan..."
+	@command -v bandit >/dev/null 2>&1 || { echo "bandit not installed. Run: pip install bandit"; exit 1; }
 	bandit -r . -f screen
 	@echo ""
 	@echo "Checking dependencies with Safety..."
+	@command -v safety >/dev/null 2>&1 || { echo "safety not installed. Run: pip install safety"; exit 1; }
 	safety check
 
 lint-bandit:
+	@command -v bandit >/dev/null 2>&1 || { echo "bandit not installed. Run: pip install bandit"; exit 1; }
 	bandit -r . -f screen
 
 lint-safety:
+	@command -v safety >/dev/null 2>&1 || { echo "safety not installed. Run: pip install safety"; exit 1; }
 	safety check
 
 # Format code automatically

@@ -17,6 +17,5 @@ faker==22.0.0
 # Code Quality & Linting
 ruff==0.1.15          # Modern fast linter (replaces flake8, pylint, isort)
 black==23.12.1        # Code formatter
-bandit==1.7.6         # Security scanner (runs nightly in CI)
-safety==3.0.1         # Dependency security (runs nightly in CI)
+# Note: bandit and safety moved to separate requirements-security.txt for nightly scans
 
