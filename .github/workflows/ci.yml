@@ -560,6 +560,13 @@ jobs:
           sarif_file: 'trivy-results-${{ matrix.service }}.sarif'
       
       # Docker Scout - Advanced vulnerability analysis and recommendations
+      - name: Login to Docker Hub (for Scout)
+        if: github.event_name != 'pull_request' && secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != ''
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      
       - name: Debug Docker authentication
         run: |
           echo "=== Docker Authentication Debug ==="
@@ -584,6 +591,16 @@ jobs:
           
           echo -e "\n=== Checking if image exists ==="
           docker manifest inspect ghcr.io/${{ github.repository_owner }}/ci-${{ matrix.service }}:latest 2>&1 | head -20 || echo "Cannot inspect image manifest"
+          
+          echo -e "\n=== Docker Scout Authentication Status ==="
+          echo "Note: Docker Scout requires Docker Hub authentication"
+          echo "Current user from docker info: $(docker info 2>&1 | grep -i 'username' | head -1 || echo 'unknown')"
+          echo ""
+          echo "If Docker Scout fails with 'not entitled', you need to:"
+          echo "  1. Create a Docker Hub account at https://hub.docker.com (free)"
+          echo "  2. Enable Docker Scout in your account (included in free Personal plan)"
+          echo "  3. Create a Personal Access Token at https://hub.docker.com/settings/security"
+          echo "  4. Add GitHub secrets: DOCKERHUB_USERNAME and DOCKERHUB_TOKEN"
       
       - name: Docker Scout CVE Analysis
         uses: docker/scout-action@v1
