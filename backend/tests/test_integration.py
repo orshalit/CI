@@ -423,19 +423,19 @@ class TestErrorHandlingIntegration:
         assert response.status_code == 404
     
     async def test_validation_errors(
-        self, 
-        async_client: httpx.AsyncClient, 
+        self,
+        async_client: httpx.AsyncClient,
         wait_for_backend
     ):
         """Test that validation errors are handled properly."""
-        # Empty user name
+        # Empty user name (whitespace only)
         response = await async_client.get("/api/greet/ ")
-        assert response.status_code == 400
-        
+        assert response.status_code == 422  # FastAPI returns 422 for validation errors
+
         # Very long user name
         long_name = "A" * 101
         response = await async_client.get(f"/api/greet/{long_name}")
-        assert response.status_code == 400
+        assert response.status_code == 422  # FastAPI returns 422 for validation errors
     
     async def test_invalid_pagination(
         self, 
