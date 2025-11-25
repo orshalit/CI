@@ -270,7 +270,7 @@ async def get_greetings(
     request: Request,
     skip: int = Query(0, ge=0, description="Number of records to skip"),
     limit: int = Query(10, ge=1, le=100, description="Maximum number of records to return"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db)  # noqa: B008
 ):
     """Get all greetings from database with pagination"""
     try:
@@ -285,7 +285,7 @@ async def get_greetings(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Limit must be between 1 and 100"
             )
-        
+
         # Query with error handling
         try:
             total = db.query(Greeting).count()
@@ -295,8 +295,8 @@ async def get_greetings(
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Database error occurred"
-            )
-        
+            ) from e
+
         return GreetingsListResponse(
             total=total,
             greetings=greetings,
@@ -310,7 +310,7 @@ async def get_greetings(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error"
-        )
+        ) from e
 
 
 @app.get(
@@ -324,7 +324,7 @@ async def get_greetings(
 async def get_user_greetings(
     request: Request,
     user: str = Path(..., min_length=1, max_length=100, description="User name"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db)  # noqa: B008
 ):
     """Get all greetings for a specific user"""
     try:
@@ -335,7 +335,7 @@ async def get_user_greetings(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="User name cannot be empty"
             )
-        
+
         # Query with error handling
         try:
             greetings = db.query(Greeting).filter(
@@ -346,7 +346,7 @@ async def get_user_greetings(
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Database error occurred"
-            )
+            ) from e
         
         return UserGreetingsResponse(
             user=user_clean,
@@ -360,5 +360,5 @@ async def get_user_greetings(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error"
-        )
+        ) from e
 
