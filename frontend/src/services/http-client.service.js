@@ -28,16 +28,16 @@ class HttpClientService {
     if (this._fetch && typeof this._fetch === 'function') {
       return this._fetch;
     }
-    
+
     // Otherwise, try to get from global scope (works in both Node and browser)
     if (typeof global !== 'undefined' && global.fetch && typeof global.fetch === 'function') {
       return global.fetch;
     }
-    
+
     if (typeof window !== 'undefined' && window.fetch && typeof window.fetch === 'function') {
       return window.fetch;
     }
-    
+
     // Fallback: return null and let executeRequest handle the error
     return null;
   }
@@ -65,12 +65,13 @@ class HttpClientService {
    * @private
    */
   isRetryableError(error, statusCode) {
-    const isNetworkError = error.message === 'Request timeout' || 
-                          error.message.includes('Failed to fetch') ||
-                          error.message.includes('NetworkError');
-    
-    const isRetryableStatusCode = statusCode && 
-                                  this.config.retryableStatusCodes.includes(statusCode);
+    const isNetworkError =
+      error.message === 'Request timeout' ||
+      error.message.includes('Failed to fetch') ||
+      error.message.includes('NetworkError');
+
+    const isRetryableStatusCode =
+      statusCode && this.config.retryableStatusCodes.includes(statusCode);
 
     return isNetworkError || isRetryableStatusCode;
   }
@@ -110,7 +111,9 @@ class HttpClientService {
   async parseErrorResponse(response) {
     try {
       const errorData = await response.json();
-      return errorData.error || errorData.detail || `HTTP ${response.status}: ${response.statusText}`;
+      return (
+        errorData.error || errorData.detail || `HTTP ${response.status}: ${response.statusText}`
+      );
     } catch {
       return `HTTP ${response.status}: ${response.statusText}`;
     }
@@ -125,7 +128,7 @@ class HttpClientService {
    */
   async request(url, options = {}, retriesLeft = this.config.maxRetries) {
     const requestId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    
+
     logger.debug('Starting request', { url, requestId, retriesLeft });
 
     try {
@@ -140,46 +143,45 @@ class HttpClientService {
 
       // Handle HTTP errors
       const errorMessage = await this.parseErrorResponse(response);
-      
+
       // Don't retry on client errors (4xx)
       if (response.status >= 400 && response.status < 500) {
-        logger.warn('Client error (non-retryable)', { 
-          url, 
-          requestId, 
+        logger.warn('Client error (non-retryable)', {
+          url,
+          requestId,
           status: response.status,
-          error: errorMessage 
+          error: errorMessage,
         });
         throw new Error(errorMessage);
       }
 
       // Retry on server errors (5xx) if retries available
       if (this.isRetryableError({ message: errorMessage }, response.status) && retriesLeft > 0) {
-        logger.warn('Server error, retrying', { 
-          url, 
-          requestId, 
+        logger.warn('Server error, retrying', {
+          url,
+          requestId,
           status: response.status,
-          retriesLeft: retriesLeft - 1 
+          retriesLeft: retriesLeft - 1,
         });
         await this.sleep(this.config.retryDelay);
         return this.request(url, options, retriesLeft - 1);
       }
 
       // No retries left or non-retryable error
-      logger.error('Request failed', new Error(errorMessage), { 
-        url, 
-        requestId, 
-        status: response.status 
+      logger.error('Request failed', new Error(errorMessage), {
+        url,
+        requestId,
+        status: response.status,
       });
       throw new Error(errorMessage);
-
     } catch (error) {
       // Retry on network errors if retries available
       if (this.isRetryableError(error) && retriesLeft > 0) {
-        logger.warn('Network error, retrying', { 
-          url, 
-          requestId, 
+        logger.warn('Network error, retrying', {
+          url,
+          requestId,
           error: error.message,
-          retriesLeft: retriesLeft - 1 
+          retriesLeft: retriesLeft - 1,
         });
         await this.sleep(this.config.retryDelay);
         return this.request(url, options, retriesLeft - 1);
@@ -219,4 +221,3 @@ export const httpClient = new HttpClientService();
 
 // Export class for testing
 export { HttpClientService };
-

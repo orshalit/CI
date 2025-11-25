@@ -1,89 +1,100 @@
-import { useState, useEffect, useCallback } from 'react'
-import './App.css'
-import { apiService } from './services/api.service'
-import { validationService } from './services/validation.service'
-import { useApi, useHealthCheck } from './hooks/useApi.hook'
-import { logger } from './services/logger.service'
+import { useState, useEffect, useCallback } from 'react';
+import './App.css';
+import { apiService } from './services/api.service';
+import { validationService } from './services/validation.service';
+import { useApi, useHealthCheck } from './hooks/useApi.hook';
+import { logger } from './services/logger.service';
 
 function App() {
   // Health check hook
-  const { healthStatus, checkHealth } = useHealthCheck()
-  
+  const { healthStatus, checkHealth } = useHealthCheck();
+
   // API hooks for hello and greet endpoints
   // Bind methods to ensure proper 'this' context
-  const [callHelloApi, helloState] = useApi(apiService.callHello.bind(apiService))
-  const [callGreetApi, greetState] = useApi(apiService.callGreet.bind(apiService))
-  
+  const [callHelloApi, helloState] = useApi(apiService.callHello.bind(apiService));
+  const [callGreetApi, greetState] = useApi(apiService.callGreet.bind(apiService));
+
   // Local state
-  const [userName, setUserName] = useState('')
-  const [userNameError, setUserNameError] = useState('')
+  const [userName, setUserName] = useState('');
+  const [userNameError, setUserNameError] = useState('');
 
   // Check health on mount
   useEffect(() => {
-    checkHealth()
-  }, [checkHealth])
+    checkHealth();
+  }, [checkHealth]);
 
   // Handle hello button click
   const handleHello = useCallback(async () => {
     try {
-      await callHelloApi()
+      await callHelloApi();
     } catch (error) {
       // Error is handled by useApi hook
-      logger.error('Hello button click failed', error)
+      logger.error('Hello button click failed', error);
     }
-  }, [callHelloApi])
+  }, [callHelloApi]);
 
   // Handle greet button click
   const handleGreet = useCallback(async () => {
     // Clear previous errors
-    setUserNameError('')
-    
+    setUserNameError('');
+
     // Validate input
-    const validation = validationService.validateUserName(userName)
-    
+    const validation = validationService.validateUserName(userName);
+
     if (!validation.valid) {
-      setUserNameError(validation.error)
-      return
+      setUserNameError(validation.error);
+      return;
     }
 
     try {
-      await callGreetApi(userName)
+      await callGreetApi(userName);
       // Clear input on success
-      setUserName('')
+      setUserName('');
     } catch (error) {
       // Error is handled by useApi hook
-      logger.error('Greet button click failed', error)
+      logger.error('Greet button click failed', error);
     }
-  }, [userName, callGreetApi])
+  }, [userName, callGreetApi]);
 
   // Handle input change
-  const handleUserNameChange = useCallback((e) => {
-    const value = e.target.value
-    setUserName(value)
-    // Clear error when user starts typing
-    if (userNameError) {
-      setUserNameError('')
-    }
-  }, [userNameError])
+  const handleUserNameChange = useCallback(
+    (e) => {
+      const value = e.target.value;
+      setUserName(value);
+      // Clear error when user starts typing
+      if (userNameError) {
+        setUserNameError('');
+      }
+    },
+    [userNameError]
+  );
 
   // Handle Enter key press
-  const handleKeyPress = useCallback((e) => {
-    if (e.key === 'Enter' && !greetState.loading && userName.trim()) {
-      handleGreet()
-    }
-  }, [handleGreet, greetState.loading, userName])
+  const handleKeyPress = useCallback(
+    (e) => {
+      if (e.key === 'Enter' && !greetState.loading && userName.trim()) {
+        handleGreet();
+      }
+    },
+    [handleGreet, greetState.loading, userName]
+  );
 
   // Determine if any operation is loading
-  const isLoading = helloState.loading || greetState.loading
+  const isLoading = helloState.loading || greetState.loading;
 
   return (
     <div className="app">
       <div className="container">
         <h1>Full-Stack Application</h1>
-        
+
         <div className="card">
           <h2>Health Check</h2>
-          <p className="status">Status: <span className={healthStatus === 'healthy' ? 'healthy' : 'unhealthy'}>{healthStatus}</span></p>
+          <p className="status">
+            Status:{' '}
+            <span className={healthStatus === 'healthy' ? 'healthy' : 'unhealthy'}>
+              {healthStatus}
+            </span>
+          </p>
         </div>
 
         <div className="card">
@@ -91,9 +102,7 @@ function App() {
           <button onClick={handleHello} disabled={isLoading}>
             {helloState.loading ? 'Loading...' : 'Call /api/hello'}
           </button>
-          {helloState.data?.message && (
-            <p className="result success">{helloState.data.message}</p>
-          )}
+          {helloState.data?.message && <p className="result success">{helloState.data.message}</p>}
           {helloState.error && (
             <p className="result error" role="alert">
               Error: {helloState.error}
@@ -124,9 +133,7 @@ function App() {
               {userNameError}
             </p>
           )}
-          {greetState.data?.message && (
-            <p className="result success">{greetState.data.message}</p>
-          )}
+          {greetState.data?.message && <p className="result success">{greetState.data.message}</p>}
           {greetState.error && (
             <p className="result error" role="alert">
               Error: {greetState.error}
@@ -135,8 +142,7 @@ function App() {
         </div>
       </div>
     </div>
-  )
+  );
 }
 
-export default App
-
+export default App;

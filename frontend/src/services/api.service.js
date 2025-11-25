@@ -28,7 +28,7 @@ class ApiService {
     try {
       logger.debug('Checking health status');
       const data = await httpClient.get(`${this.baseUrl}/health`);
-      
+
       logger.info('Health check completed', { status: data.status });
       return {
         status: data.status || 'unhealthy',
@@ -52,7 +52,7 @@ class ApiService {
     try {
       logger.debug('Calling hello endpoint');
       const data = await httpClient.get(`${this.baseUrl}/api/hello`);
-      
+
       logger.info('Hello endpoint called successfully', { message: data.message });
       return data;
     } catch (error) {
@@ -69,11 +69,11 @@ class ApiService {
   async callGreet(userName) {
     // Validate input
     const validation = validationService.validateUserName(userName);
-    
+
     if (!validation.valid) {
-      logger.warn('Greet endpoint called with invalid input', { 
-        userName, 
-        error: validation.error 
+      logger.warn('Greet endpoint called with invalid input', {
+        userName,
+        error: validation.error,
       });
       throw new Error(validation.error);
     }
@@ -82,13 +82,13 @@ class ApiService {
       // Sanitize and encode
       const sanitized = validationService.sanitizeInput(validation.value);
       const encoded = encodeURIComponent(sanitized);
-      
+
       logger.debug('Calling greet endpoint', { userName: sanitized });
       const data = await httpClient.get(`${this.baseUrl}/api/greet/${encoded}`);
-      
-      logger.info('Greet endpoint called successfully', { 
+
+      logger.info('Greet endpoint called successfully', {
         userName: sanitized,
-        message: data.message 
+        message: data.message,
       });
       return data;
     } catch (error) {
@@ -99,4 +99,3 @@ class ApiService {
 }
 
 export const apiService = new ApiService();
-

@@ -7,7 +7,7 @@
 // Ensure fetch is available globally before any modules are imported
 // This is critical for the http-client service singleton
 if (typeof global.fetch === 'undefined') {
-  global.fetch = jest.fn(() => 
+  global.fetch = jest.fn(() =>
     Promise.resolve({
       ok: false,
       status: 500,
@@ -17,4 +17,3 @@ if (typeof global.fetch === 'undefined') {
     })
   );
 }
-

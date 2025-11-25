@@ -115,12 +115,11 @@ input:focus {
   margin-bottom: 0;
 }
 
-input[aria-invalid="true"] {
+input[aria-invalid='true'] {
   border-color: #dc3545;
 }
 
-input[aria-invalid="true"]:focus {
+input[aria-invalid='true']:focus {
   border-color: #dc3545;
   box-shadow: 0 0 0 0.2rem rgba(220, 53, 69, 0.25);
 }
-

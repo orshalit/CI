@@ -16,26 +16,29 @@ export function useApi(apiFunction) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const execute = useCallback(async (...args) => {
-    setLoading(true);
-    setError(null);
-    setData(null);
+  const execute = useCallback(
+    async (...args) => {
+      setLoading(true);
+      setError(null);
+      setData(null);
 
-    try {
-      logger.debug('Executing API call', { function: apiFunction.name, args });
-      const result = await apiFunction(...args);
-      setData(result);
-      logger.debug('API call successful', { function: apiFunction.name });
-      return result;
-    } catch (err) {
-      const errorMessage = err.message || 'An error occurred';
-      setError(errorMessage);
-      logger.error('API call failed', err, { function: apiFunction.name });
-      throw err;
-    } finally {
-      setLoading(false);
-    }
-  }, [apiFunction]);
+      try {
+        logger.debug('Executing API call', { function: apiFunction.name, args });
+        const result = await apiFunction(...args);
+        setData(result);
+        logger.debug('API call successful', { function: apiFunction.name });
+        return result;
+      } catch (err) {
+        const errorMessage = err.message || 'An error occurred';
+        setError(errorMessage);
+        logger.error('API call failed', err, { function: apiFunction.name });
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [apiFunction]
+  );
 
   return [execute, { data, loading, error }];
 }
@@ -65,4 +68,3 @@ export function useHealthCheck() {
 
   return { healthStatus, error, checkHealth };
 }
-
