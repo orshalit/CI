@@ -14,7 +14,7 @@ ARG GIT_BRANCH=unknown
 ################################################################################
 # Stage 1: Builder - Build React application
 ################################################################################
-FROM node:${NODE_VERSION}-alpine as builder
+FROM node:${NODE_VERSION}-alpine AS builder
 
 # Set build arguments for this stage
 ARG BUILD_DATE
@@ -33,8 +33,9 @@ RUN npm ci --only=production=false
 # Copy source code and configuration
 COPY . .
 
-# Create version info file
-RUN echo "{\
+# Create version info file (ensure public directory exists)
+RUN mkdir -p /app/public && \
+    echo "{\
   \"version\": \"${BUILD_VERSION}\",\
   \"commit\": \"${GIT_COMMIT}\",\
   \"build_date\": \"${BUILD_DATE}\",\

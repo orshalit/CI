@@ -13,7 +13,7 @@ ARG GIT_BRANCH=unknown
 ################################################################################
 # Stage 1: Builder - Install dependencies
 ################################################################################
-FROM python:${PYTHON_VERSION}-slim as builder
+FROM python:${PYTHON_VERSION}-slim AS builder
 
 # Set build arguments for this stage
 ARG BUILD_DATE
