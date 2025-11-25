@@ -1,5 +1,3 @@
-version: '3.8'
-
 # Development docker-compose.yml
 # For production, use docker-compose.prod.yml with proper environment variables
 
