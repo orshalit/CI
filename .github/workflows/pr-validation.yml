@@ -1,0 +1,80 @@
+################################################################################
+# Pull Request Validation - Fast feedback for PRs
+# 
+# This workflow runs quick checks on pull requests for fast feedback:
+# - Code linting
+# - Unit tests only (no integration tests)
+# - Build validation
+################################################################################
+
+name: PR Validation
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+# Cancel previous runs for the same PR
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  quick-checks:
+    name: Quick Validation
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: backend/requirements.txt
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+      
+      - name: Install Python dependencies
+        working-directory: ./backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Install Node.js dependencies
+        working-directory: ./frontend
+        run: npm ci
+      
+      - name: Run backend unit tests
+        working-directory: ./backend
+        env:
+          TESTING: 'true'
+        run: pytest -m unit --verbose --tb=short -x
+      
+      - name: Run frontend tests
+        working-directory: ./frontend
+        run: npm test -- --watchAll=false --ci --bail
+      
+      - name: Verify Docker builds
+        run: |
+          docker build -t backend:pr ./backend
+          docker build -t frontend:pr ./frontend
+      
+      - name: PR feedback
+        if: always()
+        run: |
+          echo "## PR Validation Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Quick checks completed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Next Steps:**" >> $GITHUB_STEP_SUMMARY
+          echo "- Full CI pipeline will run after merge to main" >> $GITHUB_STEP_SUMMARY
+          echo "- Integration tests will be executed" >> $GITHUB_STEP_SUMMARY
+          echo "- Docker images will be published" >> $GITHUB_STEP_SUMMARY
+

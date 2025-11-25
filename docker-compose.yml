@@ -1,13 +1,16 @@
 version: '3.8'
 
+# Development docker-compose.yml
+# For production, use docker-compose.prod.yml with proper environment variables
+
 services:
   database:
     image: postgres:15-alpine
     container_name: database
     environment:
-      POSTGRES_USER: appuser
-      POSTGRES_PASSWORD: apppassword
-      POSTGRES_DB: appdb
+      POSTGRES_USER: ${POSTGRES_USER:-appuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-apppassword}
+      POSTGRES_DB: ${POSTGRES_DB:-appdb}
     ports:
       - "5432:5432"
     volumes:
@@ -26,11 +29,21 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      args:
+        BUILD_DATE: ${BUILD_DATE:-2024-01-01T00:00:00Z}
+        BUILD_VERSION: ${BUILD_VERSION:-dev}
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+        GIT_BRANCH: ${GIT_BRANCH:-main}
+    image: ci-backend:${BUILD_VERSION:-dev}
     container_name: backend
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: postgresql://appuser:apppassword@database:5432/appdb
+      DATABASE_URL: postgresql://${POSTGRES_USER:-appuser}:${POSTGRES_PASSWORD:-apppassword}@database:5432/${POSTGRES_DB:-appdb}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      SECRET_KEY: ${SECRET_KEY:-dev-secret-key-change-in-production}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-false}
     depends_on:
       database:
         condition: service_healthy
@@ -48,6 +61,12 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        BUILD_DATE: ${BUILD_DATE:-2024-01-01T00:00:00Z}
+        BUILD_VERSION: ${BUILD_VERSION:-dev}
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+        GIT_BRANCH: ${GIT_BRANCH:-main}
+    image: ci-frontend:${BUILD_VERSION:-dev}
     container_name: frontend
     ports:
       - "3000:3000"

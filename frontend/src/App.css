@@ -96,3 +96,31 @@ input:focus {
   font-size: 1.1em;
 }
 
+.result.success {
+  border-left-color: #28a745;
+  background-color: #d4edda;
+  color: #155724;
+}
+
+.result.error {
+  border-left-color: #dc3545;
+  background-color: #f8d7da;
+  color: #721c24;
+}
+
+.error-message {
+  color: #dc3545;
+  font-size: 0.875em;
+  margin-top: 5px;
+  margin-bottom: 0;
+}
+
+input[aria-invalid="true"] {
+  border-color: #dc3545;
+}
+
+input[aria-invalid="true"]:focus {
+  border-color: #dc3545;
+  box-shadow: 0 0 0 0.2rem rgba(220, 53, 69, 0.25);
+}
+

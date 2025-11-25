@@ -3,7 +3,20 @@ uvicorn[standard]==0.24.0
 sqlalchemy==2.0.23
 psycopg2-binary==2.9.9
 alembic==1.12.1
+pydantic==2.5.0
+pydantic-settings==2.1.0
+slowapi==0.1.9
 pytest==7.4.3
 httpx==0.25.2
 pytest-asyncio==0.21.1
+pytest-cov==4.1.0
+pytest-mock==3.12.0
+pytest-timeout==2.2.0
+faker==22.0.0
+
+# Code Quality & Linting
+ruff==0.1.15          # Modern fast linter (replaces flake8, pylint, isort)
+black==23.12.1        # Code formatter
+bandit==1.7.6         # Security scanner (runs nightly in CI)
+safety==3.0.1         # Dependency security (runs nightly in CI)
 

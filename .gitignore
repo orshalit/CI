@@ -13,7 +13,11 @@ dist/
 build/
 .pytest_cache/
 .coverage
+.coverage.*
 htmlcov/
+*.db
+*.sqlite
+*.sqlite3
 
 # Node
 node_modules/
@@ -25,6 +29,7 @@ dist/
 build/
 coverage/
 .nyc_output/
+.jest-cache/
 
 # IDE
 .vscode/
@@ -44,4 +49,13 @@ Thumbs.db
 
 # Docker
 *.log
+
+# Linters and Code Quality
+.mypy_cache/
+.pylint.d/
+.ruff_cache/
+bandit-report.json
+safety-report.json
+npm-audit-report.json
+.eslintcache
 

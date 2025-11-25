@@ -1,52 +1,80 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import './App.css'
+import { apiService } from './services/api.service'
+import { validationService } from './services/validation.service'
+import { useApi, useHealthCheck } from './hooks/useApi.hook'
+import { logger } from './services/logger.service'
 
 function App() {
-  const [healthStatus, setHealthStatus] = useState('checking...')
-  const [helloMessage, setHelloMessage] = useState('')
-  const [greeting, setGreeting] = useState('')
+  // Health check hook
+  const { healthStatus, checkHealth } = useHealthCheck()
+  
+  // API hooks for hello and greet endpoints
+  // Bind methods to ensure proper 'this' context
+  const [callHelloApi, helloState] = useApi(apiService.callHello.bind(apiService))
+  const [callGreetApi, greetState] = useApi(apiService.callGreet.bind(apiService))
+  
+  // Local state
   const [userName, setUserName] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [userNameError, setUserNameError] = useState('')
 
-  const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'
-
+  // Check health on mount
   useEffect(() => {
-    // Check health on mount
-    fetch(`${backendUrl}/health`)
-      .then(res => res.json())
-      .then(data => setHealthStatus(data.status))
-      .catch(() => setHealthStatus('unhealthy'))
-  }, [backendUrl])
+    checkHealth()
+  }, [checkHealth])
 
-  const handleHello = async () => {
-    setLoading(true)
+  // Handle hello button click
+  const handleHello = useCallback(async () => {
     try {
-      const response = await fetch(`${backendUrl}/api/hello`)
-      const data = await response.json()
-      setHelloMessage(data.message)
+      await callHelloApi()
     } catch (error) {
-      setHelloMessage('Error: Could not connect to backend')
-    } finally {
-      setLoading(false)
+      // Error is handled by useApi hook
+      logger.error('Hello button click failed', error)
     }
-  }
+  }, [callHelloApi])
 
-  const handleGreet = async () => {
-    if (!userName.trim()) {
-      setGreeting('Please enter a name')
+  // Handle greet button click
+  const handleGreet = useCallback(async () => {
+    // Clear previous errors
+    setUserNameError('')
+    
+    // Validate input
+    const validation = validationService.validateUserName(userName)
+    
+    if (!validation.valid) {
+      setUserNameError(validation.error)
       return
     }
-    setLoading(true)
+
     try {
-      const response = await fetch(`${backendUrl}/api/greet/${encodeURIComponent(userName)}`)
-      const data = await response.json()
-      setGreeting(data.message)
+      await callGreetApi(userName)
+      // Clear input on success
+      setUserName('')
     } catch (error) {
-      setGreeting('Error: Could not connect to backend')
-    } finally {
-      setLoading(false)
+      // Error is handled by useApi hook
+      logger.error('Greet button click failed', error)
     }
-  }
+  }, [userName, callGreetApi])
+
+  // Handle input change
+  const handleUserNameChange = useCallback((e) => {
+    const value = e.target.value
+    setUserName(value)
+    // Clear error when user starts typing
+    if (userNameError) {
+      setUserNameError('')
+    }
+  }, [userNameError])
+
+  // Handle Enter key press
+  const handleKeyPress = useCallback((e) => {
+    if (e.key === 'Enter' && !greetState.loading && userName.trim()) {
+      handleGreet()
+    }
+  }, [handleGreet, greetState.loading, userName])
+
+  // Determine if any operation is loading
+  const isLoading = helloState.loading || greetState.loading
 
   return (
     <div className="app">
@@ -60,10 +88,17 @@ function App() {
 
         <div className="card">
           <h2>Hello Endpoint</h2>
-          <button onClick={handleHello} disabled={loading}>
-            {loading ? 'Loading...' : 'Call /api/hello'}
+          <button onClick={handleHello} disabled={isLoading}>
+            {helloState.loading ? 'Loading...' : 'Call /api/hello'}
           </button>
-          {helloMessage && <p className="result">{helloMessage}</p>}
+          {helloState.data?.message && (
+            <p className="result success">{helloState.data.message}</p>
+          )}
+          {helloState.error && (
+            <p className="result error" role="alert">
+              Error: {helloState.error}
+            </p>
+          )}
         </div>
 
         <div className="card">
@@ -73,14 +108,30 @@ function App() {
               type="text"
               placeholder="Enter your name"
               value={userName}
-              onChange={(e) => setUserName(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && handleGreet()}
+              onChange={handleUserNameChange}
+              onKeyPress={handleKeyPress}
+              maxLength={100}
+              disabled={isLoading}
+              aria-invalid={!!userNameError}
+              aria-describedby={userNameError ? 'user-name-error' : undefined}
             />
-            <button onClick={handleGreet} disabled={loading}>
-              {loading ? 'Loading...' : 'Greet'}
+            <button onClick={handleGreet} disabled={isLoading || !userName.trim()}>
+              {greetState.loading ? 'Loading...' : 'Greet'}
             </button>
           </div>
-          {greeting && <p className="result">{greeting}</p>}
+          {userNameError && (
+            <p id="user-name-error" className="error-message" role="alert">
+              {userNameError}
+            </p>
+          )}
+          {greetState.data?.message && (
+            <p className="result success">{greetState.data.message}</p>
+          )}
+          {greetState.error && (
+            <p className="result error" role="alert">
+              Error: {greetState.error}
+            </p>
+          )}
         </div>
       </div>
     </div>
