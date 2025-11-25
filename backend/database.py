@@ -15,11 +15,7 @@ if settings.TESTING:
     DATABASE_URL = "sqlite:///:memory:"
     connect_args = {"check_same_thread": False}
     # SQLite-specific engine configuration (no pooling)
-    engine = create_engine(
-        DATABASE_URL,
-        echo=False,
-        connect_args=connect_args
-    )
+    engine = create_engine(DATABASE_URL, echo=False, connect_args=connect_args)
 else:
     DATABASE_URL = settings.DATABASE_URL
     connect_args = {}
@@ -33,7 +29,7 @@ else:
         pool_recycle=settings.DATABASE_POOL_RECYCLE,
         pool_pre_ping=True,  # Verify connections before using
         echo=False,  # Set to True for SQL query logging in development
-        connect_args=connect_args
+        connect_args=connect_args,
     )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -86,4 +82,3 @@ def get_db():
         yield db
     finally:
         db.close()
-

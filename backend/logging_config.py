@@ -1,4 +1,5 @@
 """Logging configuration for production"""
+
 import json
 import logging
 import sys
@@ -55,9 +56,7 @@ def setup_logging(log_level: str = "INFO", log_format: str = "json"):
     if log_format.lower() == "json":
         formatter = JSONFormatter()
     else:
-        formatter = logging.Formatter(
-            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-        )
+        formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
     handler.setFormatter(formatter)
     logger.addHandler(handler)
@@ -66,4 +65,3 @@ def setup_logging(log_level: str = "INFO", log_format: str = "json"):
     logging.getLogger("uvicorn").setLevel(logging.WARNING)
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
     logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
-

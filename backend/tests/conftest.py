@@ -92,6 +92,7 @@ def client(db_session) -> Generator[TestClient, None, None]:
     Yields:
         TestClient: A configured test client
     """
+
     def override_get_db():
         """Override the get_db dependency to use test database."""
         try:
@@ -121,10 +122,7 @@ def sample_greeting(db_session) -> Greeting:
     Returns:
         Greeting: A persisted greeting object
     """
-    greeting = Greeting(
-        user_name="SampleUser",
-        message="Hello, SampleUser!"
-    )
+    greeting = Greeting(user_name="SampleUser", message="Hello, SampleUser!")
     db_session.add(greeting)
     db_session.commit()
     db_session.refresh(greeting)
@@ -146,19 +144,13 @@ def multiple_greetings(db_session) -> list[Greeting]:
     greetings = []
 
     for user in users:
-        greeting = Greeting(
-            user_name=user,
-            message=f"Hello, {user}!"
-        )
+        greeting = Greeting(user_name=user, message=f"Hello, {user}!")
         db_session.add(greeting)
         greetings.append(greeting)
 
     # Create multiple greetings for the same user (for filtering tests)
     for _ in range(3):
-        greeting = Greeting(
-            user_name="Alice",
-            message="Hello, Alice!"
-        )
+        greeting = Greeting(user_name="Alice", message="Hello, Alice!")
         db_session.add(greeting)
         greetings.append(greeting)
 
@@ -177,10 +169,5 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "slow: marks tests as slow (deselect with '-m \"not slow\"')"
     )
-    config.addinivalue_line(
-        "markers", "integration: marks tests as integration tests"
-    )
-    config.addinivalue_line(
-        "markers", "unit: marks tests as unit tests"
-    )
-
+    config.addinivalue_line("markers", "integration: marks tests as integration tests")
+    config.addinivalue_line("markers", "unit: marks tests as unit tests")

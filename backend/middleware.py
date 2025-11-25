@@ -1,4 +1,5 @@
 """Custom middleware for security, logging, and error handling"""
+
 import logging
 import time
 from collections.abc import Callable
@@ -43,7 +44,7 @@ class LoggingMiddleware(BaseHTTPMiddleware):
                 "method": request.method,
                 "path": request.url.path,
                 "client_ip": request.client.host if request.client else None,
-            }
+            },
         )
 
         try:
@@ -58,7 +59,7 @@ class LoggingMiddleware(BaseHTTPMiddleware):
                     "path": request.url.path,
                     "status_code": response.status_code,
                     "process_time": process_time,
-                }
+                },
             )
 
             # Add process time header
@@ -75,7 +76,7 @@ class LoggingMiddleware(BaseHTTPMiddleware):
                     "error": str(e),
                     "process_time": process_time,
                 },
-                exc_info=True
+                exc_info=True,
             )
             raise
 
@@ -89,28 +90,16 @@ class ErrorHandlingMiddleware(BaseHTTPMiddleware):
             return response
         except StarletteHTTPException as e:
             return JSONResponse(
-                status_code=e.status_code,
-                content={
-                    "error": e.detail,
-                    "status_code": e.status_code
-                }
+                status_code=e.status_code, content={"error": e.detail, "status_code": e.status_code}
             )
         except RequestValidationError as e:
             return JSONResponse(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                content={
-                    "error": "Validation error",
-                    "detail": e.errors(),
-                    "status_code": 422
-                }
+                content={"error": "Validation error", "detail": e.errors(), "status_code": 422},
             )
         except Exception as e:
             logger.exception(f"Unhandled exception: {str(e)}")
             return JSONResponse(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                content={
-                    "error": "Internal server error",
-                    "status_code": 500
-                }
+                content={"error": "Internal server error", "status_code": 500},
             )
-

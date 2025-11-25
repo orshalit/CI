@@ -22,6 +22,7 @@ from fastapi.testclient import TestClient
 # Health Check Endpoint Tests
 # ============================================================================
 
+
 @pytest.mark.unit
 class TestHealthEndpoint:
     """Test suite for the /health endpoint."""
@@ -54,6 +55,7 @@ class TestHealthEndpoint:
 # Hello Endpoint Tests
 # ============================================================================
 
+
 @pytest.mark.unit
 class TestHelloEndpoint:
     """Test suite for the /api/hello endpoint."""
@@ -80,23 +82,22 @@ class TestHelloEndpoint:
 # Greet Endpoint Tests
 # ============================================================================
 
+
 @pytest.mark.unit
 class TestGreetEndpoint:
     """Test suite for the /api/greet/{user} endpoint."""
 
-    @pytest.mark.parametrize(("user_name", "expected_message"), [
-        ("Alice", "Hello, Alice!"),
-        ("Bob", "Hello, Bob!"),
-        ("Charlie", "Hello, Charlie!"),
-        ("User123", "Hello, User123!"),
-        ("user_with_underscore", "Hello, user_with_underscore!"),
-    ])
-    def test_greet_valid_users(
-        self,
-        client: TestClient,
-        user_name: str,
-        expected_message: str
-    ):
+    @pytest.mark.parametrize(
+        ("user_name", "expected_message"),
+        [
+            ("Alice", "Hello, Alice!"),
+            ("Bob", "Hello, Bob!"),
+            ("Charlie", "Hello, Charlie!"),
+            ("User123", "Hello, User123!"),
+            ("user_with_underscore", "Hello, user_with_underscore!"),
+        ],
+    )
+    def test_greet_valid_users(self, client: TestClient, user_name: str, expected_message: str):
         """Test greeting with various valid user names."""
         response = client.get(f"/api/greet/{user_name}")
 
@@ -122,9 +123,7 @@ class TestGreetEndpoint:
         assert final_count == initial_count + 1
 
         # Verify the content
-        greeting = db_session.query(Greeting).filter(
-            Greeting.user_name == "TestUser"
-        ).first()
+        greeting = db_session.query(Greeting).filter(Greeting.user_name == "TestUser").first()
         assert greeting is not None
         assert greeting.message == "Hello, TestUser!"
 
@@ -137,16 +136,15 @@ class TestGreetEndpoint:
         created_at = datetime.fromisoformat(data["created_at"].replace("Z", "+00:00"))
         assert isinstance(created_at, datetime)
 
-    @pytest.mark.parametrize("invalid_user", [
-        "",  # Empty string
-        " ",  # Whitespace only
-        "  ",  # Multiple whitespaces
-    ])
-    def test_greet_with_invalid_input(
-        self,
-        client: TestClient,
-        invalid_user: str
-    ):
+    @pytest.mark.parametrize(
+        "invalid_user",
+        [
+            "",  # Empty string
+            " ",  # Whitespace only
+            "  ",  # Multiple whitespaces
+        ],
+    )
+    def test_greet_with_invalid_input(self, client: TestClient, invalid_user: str):
         """Test that invalid user names are rejected."""
         response = client.get(f"/api/greet/{invalid_user}")
 
@@ -195,6 +193,7 @@ class TestGreetEndpoint:
 # Get All Greetings Endpoint Tests
 # ============================================================================
 
+
 @pytest.mark.unit
 class TestGetGreetingsEndpoint:
     """Test suite for the /api/greetings endpoint."""
@@ -220,18 +219,17 @@ class TestGetGreetingsEndpoint:
         assert len(data["greetings"]) > 0
         assert len(data["greetings"]) <= data["total"]
 
-    @pytest.mark.parametrize(("skip", "limit"), [
-        (0, 5),
-        (0, 10),
-        (5, 3),
-        (0, 100),
-    ])
+    @pytest.mark.parametrize(
+        ("skip", "limit"),
+        [
+            (0, 5),
+            (0, 10),
+            (5, 3),
+            (0, 100),
+        ],
+    )
     def test_get_greetings_pagination(
-        self,
-        client: TestClient,
-        multiple_greetings,
-        skip: int,
-        limit: int
+        self, client: TestClient, multiple_greetings, skip: int, limit: int
     ):
         """Test pagination with various skip and limit values."""
         response = client.get(f"/api/greetings?skip={skip}&limit={limit}")
@@ -243,22 +241,14 @@ class TestGetGreetingsEndpoint:
         assert len(data["greetings"]) <= limit
 
     @pytest.mark.parametrize("invalid_skip", [-1, -10])
-    def test_get_greetings_invalid_skip(
-        self,
-        client: TestClient,
-        invalid_skip: int
-    ):
+    def test_get_greetings_invalid_skip(self, client: TestClient, invalid_skip: int):
         """Test that negative skip values are rejected."""
         response = client.get(f"/api/greetings?skip={invalid_skip}")
 
         assert response.status_code == 422  # Validation error
 
     @pytest.mark.parametrize("invalid_limit", [0, -1, 101, 200])
-    def test_get_greetings_invalid_limit(
-        self,
-        client: TestClient,
-        invalid_limit: int
-    ):
+    def test_get_greetings_invalid_limit(self, client: TestClient, invalid_limit: int):
         """Test that invalid limit values are rejected."""
         response = client.get(f"/api/greetings?limit={invalid_limit}")
 
@@ -280,11 +270,7 @@ class TestGetGreetingsEndpoint:
         # Most recent should be first
         assert "Third" in greetings[0]["message"]
 
-    def test_get_greetings_response_structure(
-        self,
-        client: TestClient,
-        sample_greeting
-    ):
+    def test_get_greetings_response_structure(self, client: TestClient, sample_greeting):
         """Test that response has correct structure."""
         response = client.get("/api/greetings")
         data = response.json()
@@ -308,6 +294,7 @@ class TestGetGreetingsEndpoint:
 # Get User Greetings Endpoint Tests
 # ============================================================================
 
+
 @pytest.mark.unit
 class TestGetUserGreetingsEndpoint:
     """Test suite for the /api/greetings/{user} endpoint."""
@@ -322,11 +309,7 @@ class TestGetUserGreetingsEndpoint:
         assert data["count"] == 0
         assert data["greetings"] == []
 
-    def test_get_user_greetings_existing_user(
-        self,
-        client: TestClient,
-        multiple_greetings
-    ):
+    def test_get_user_greetings_existing_user(self, client: TestClient, multiple_greetings):
         """Test getting greetings for a user with existing greetings."""
         response = client.get("/api/greetings/Alice")
 
@@ -357,16 +340,15 @@ class TestGetUserGreetingsEndpoint:
         timestamps = [g["created_at"] for g in data["greetings"]]
         assert timestamps == sorted(timestamps, reverse=True)
 
-    @pytest.mark.parametrize("invalid_user", [
-        "",
-        " ",
-        "  ",
-    ])
-    def test_get_user_greetings_invalid_user(
-        self,
-        client: TestClient,
-        invalid_user: str
-    ):
+    @pytest.mark.parametrize(
+        "invalid_user",
+        [
+            "",
+            " ",
+            "  ",
+        ],
+    )
+    def test_get_user_greetings_invalid_user(self, client: TestClient, invalid_user: str):
         """Test that invalid user names are rejected."""
         response = client.get(f"/api/greetings/{invalid_user}")
 
@@ -385,11 +367,7 @@ class TestGetUserGreetingsEndpoint:
             data = response.json()
             assert "detail" in data
 
-    def test_get_user_greetings_response_structure(
-        self,
-        client: TestClient,
-        sample_greeting
-    ):
+    def test_get_user_greetings_response_structure(self, client: TestClient, sample_greeting):
         """Test that response has correct structure."""
         response = client.get(f"/api/greetings/{sample_greeting.user_name}")
         data = response.json()
@@ -411,6 +389,7 @@ class TestGetUserGreetingsEndpoint:
 # ============================================================================
 # Error Handling Tests
 # ============================================================================
+
 
 @pytest.mark.unit
 class TestErrorHandling:
@@ -439,6 +418,7 @@ class TestErrorHandling:
 # ============================================================================
 # Performance and Edge Case Tests
 # ============================================================================
+
 
 @pytest.mark.unit
 class TestPerformanceAndEdgeCases:

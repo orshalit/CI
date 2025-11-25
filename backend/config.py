@@ -1,15 +1,12 @@
 """Configuration management with environment variable validation"""
+
 import os
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        case_sensitive=False,
-        extra="ignore"
-    )
+    model_config = SettingsConfigDict(env_file=".env", case_sensitive=False, extra="ignore")
     """Application settings with validation"""
 
     # API Configuration
@@ -25,8 +22,7 @@ class Settings(BaseSettings):
 
     # Database Configuration
     DATABASE_URL: str = os.getenv(
-        "DATABASE_URL",
-        "postgresql://appuser:apppassword@localhost:5432/appdb"
+        "DATABASE_URL", "postgresql://appuser:apppassword@localhost:5432/appdb"
     )
     DATABASE_POOL_SIZE: int = int(os.getenv("DATABASE_POOL_SIZE", "5"))
     DATABASE_MAX_OVERFLOW: int = int(os.getenv("DATABASE_MAX_OVERFLOW", "10"))
@@ -56,4 +52,3 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
-

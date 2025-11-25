@@ -32,6 +32,7 @@ REQUEST_TIMEOUT = 5.0
 # Fixtures
 # ============================================================================
 
+
 @pytest.fixture(scope="module")
 def backend_url() -> str:
     """Provide the backend URL for integration tests."""
@@ -56,10 +57,7 @@ def _wait_for_backend(backend_url: str):
     """
     for attempt in range(MAX_WAIT_ATTEMPTS):
         try:
-            response = httpx.get(
-                f"{backend_url}/health",
-                timeout=REQUEST_TIMEOUT
-            )
+            response = httpx.get(f"{backend_url}/health", timeout=REQUEST_TIMEOUT)
 
             if response.status_code == 200:
                 data = response.json()
@@ -91,10 +89,7 @@ async def async_client(backend_url: str) -> AsyncGenerator[httpx.AsyncClient, No
     Yields:
         httpx.AsyncClient: An async HTTP client
     """
-    async with httpx.AsyncClient(
-        base_url=backend_url,
-        timeout=REQUEST_TIMEOUT
-    ) as client:
+    async with httpx.AsyncClient(base_url=backend_url, timeout=REQUEST_TIMEOUT) as client:
         yield client
 
 
@@ -102,16 +97,14 @@ async def async_client(backend_url: str) -> AsyncGenerator[httpx.AsyncClient, No
 # Health Check Integration Tests
 # ============================================================================
 
+
 @pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("_wait_for_backend")
 class TestHealthIntegration:
     """Integration tests for health check endpoint."""
 
-    async def test_health_endpoint_available(
-        self,
-        async_client: httpx.AsyncClient
-    ):
+    async def test_health_endpoint_available(self, async_client: httpx.AsyncClient):
         """Test that health endpoint is accessible."""
         response = await async_client.get("/health")
 
@@ -119,10 +112,7 @@ class TestHealthIntegration:
         data = response.json()
         assert data["status"] == "healthy"
 
-    async def test_health_database_connection(
-        self,
-        async_client: httpx.AsyncClient
-    ):
+    async def test_health_database_connection(self, async_client: httpx.AsyncClient):
         """Test that health check verifies database connection."""
         response = await async_client.get("/health")
 
@@ -130,10 +120,7 @@ class TestHealthIntegration:
         data = response.json()
         assert data["database"] == "connected"
 
-    async def test_health_endpoint_performance(
-        self,
-        async_client: httpx.AsyncClient
-    ):
+    async def test_health_endpoint_performance(self, async_client: httpx.AsyncClient):
         """Test that health endpoint responds quickly."""
         import time
 
@@ -150,16 +137,14 @@ class TestHealthIntegration:
 # API Endpoint Integration Tests
 # ============================================================================
 
+
 @pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("_wait_for_backend")
 class TestAPIIntegration:
     """Integration tests for API endpoints."""
 
-    async def test_hello_endpoint(
-        self,
-        async_client: httpx.AsyncClient
-    ):
+    async def test_hello_endpoint(self, async_client: httpx.AsyncClient):
         """Test hello endpoint integration."""
         response = await async_client.get("/api/hello")
 
@@ -192,17 +177,16 @@ class TestAPIIntegration:
         greeting_ids = [g["id"] for g in data["greetings"]]
         assert greeting_id in greeting_ids
 
-    @pytest.mark.parametrize("user_name", [
-        "Alice",
-        "Bob",
-        "User123",
-        "test_user",
-    ])
-    async def test_greet_multiple_users(
-        self,
-        async_client: httpx.AsyncClient,
-        user_name: str
-    ):
+    @pytest.mark.parametrize(
+        "user_name",
+        [
+            "Alice",
+            "Bob",
+            "User123",
+            "test_user",
+        ],
+    )
+    async def test_greet_multiple_users(self, async_client: httpx.AsyncClient, user_name: str):
         """Test greeting multiple different users."""
         response = await async_client.get(f"/api/greet/{user_name}")
 
@@ -259,6 +243,7 @@ class TestAPIIntegration:
 # ============================================================================
 # End-to-End Workflow Tests
 # ============================================================================
+
 
 @pytest.mark.integration
 @pytest.mark.asyncio
@@ -329,6 +314,7 @@ class TestEndToEndWorkflows:
 # Performance and Load Tests
 # ============================================================================
 
+
 @pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.slow
@@ -398,6 +384,7 @@ class TestPerformance:
 # ============================================================================
 # Error Handling Integration Tests
 # ============================================================================
+
 
 @pytest.mark.integration
 @pytest.mark.asyncio

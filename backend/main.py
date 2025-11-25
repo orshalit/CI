@@ -85,7 +85,7 @@ app.add_middleware(
     response_model=HealthResponse,
     tags=["health"],
     summary="Health check endpoint",
-    description="Check the health status of the API and database connectivity"
+    description="Check the health status of the API and database connectivity",
 )
 async def health_check(db: Session = Depends(get_db)):  # noqa: B008
     """Health check endpoint with database connectivity check"""
@@ -95,18 +95,10 @@ async def health_check(db: Session = Depends(get_db)):  # noqa: B008
         return HealthResponse(status="healthy", database="connected")
     except SQLAlchemyError as e:
         logger.error(f"Database health check failed: {e}", exc_info=True)
-        return HealthResponse(
-            status="unhealthy",
-            database="disconnected",
-            error=str(e)
-        )
+        return HealthResponse(status="unhealthy", database="disconnected", error=str(e))
     except Exception as e:
         logger.error(f"Unexpected error in health check: {e}", exc_info=True)
-        return HealthResponse(
-            status="unhealthy",
-            database="unknown",
-            error="Internal error"
-        )
+        return HealthResponse(status="unhealthy", database="unknown", error="Internal error")
 
 
 @app.get(
@@ -114,7 +106,7 @@ async def health_check(db: Session = Depends(get_db)):  # noqa: B008
     response_model=VersionResponse,
     tags=["info"],
     summary="Version information",
-    description="Get application version and build information"
+    description="Get application version and build information",
 )
 async def get_version():
     """
@@ -140,7 +132,7 @@ async def get_version():
                 commit=version_data.get("commit", os.getenv("GIT_COMMIT", "unknown")),
                 build_date=version_data.get("build_date", os.getenv("BUILD_DATE", "unknown")),
                 python_version=version_data.get("python_version", "3.11"),
-                environment=os.getenv("ENVIRONMENT", "development")
+                environment=os.getenv("ENVIRONMENT", "development"),
             )
         except (json.JSONDecodeError, OSError) as e:
             logger.warning(f"Failed to read version.json: {e}")
@@ -151,7 +143,7 @@ async def get_version():
         commit=os.getenv("GIT_COMMIT", "unknown"),
         build_date=os.getenv("BUILD_DATE", "unknown"),
         python_version="3.11",
-        environment=os.getenv("ENVIRONMENT", "development")
+        environment=os.getenv("ENVIRONMENT", "development"),
     )
 
 
@@ -159,9 +151,11 @@ def rate_limit():
     """Conditional rate limiting decorator"""
     if settings.RATE_LIMIT_ENABLED:
         return limiter.limit(f"{settings.RATE_LIMIT_PER_MINUTE}/minute")
+
     # Return a no-op decorator if rate limiting is disabled
     def noop_decorator(func):
         return func
+
     return noop_decorator
 
 
@@ -170,7 +164,7 @@ def rate_limit():
     response_model=HelloResponse,
     tags=["greetings"],
     summary="Hello endpoint",
-    description="Simple hello endpoint for testing"
+    description="Simple hello endpoint for testing",
 )
 @rate_limit()
 async def hello(request: Request):
@@ -183,13 +177,13 @@ async def hello(request: Request):
     response_model=GreetingResponse,
     tags=["greetings"],
     summary="Greet a user",
-    description="Create a personalized greeting for a user and store it in the database"
+    description="Create a personalized greeting for a user and store it in the database",
 )
 @rate_limit()
 async def greet_user(
     request: Request,
     user: str = Path(..., min_length=1, max_length=100, description="User name"),
-    db: Session = Depends(get_db)  # noqa: B008
+    db: Session = Depends(get_db),  # noqa: B008
 ):
     """Personalized greeting endpoint that stores greetings in database"""
     try:
@@ -232,21 +226,17 @@ async def greet_user(
             db.rollback()
             logger.error(f"Database integrity error: {e}")
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to save greeting"
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to save greeting"
             ) from e
         except SQLAlchemyError as e:
             db.rollback()
             logger.error(f"Database error: {e}", exc_info=True)
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Database error occurred"
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error occurred"
             ) from e
 
         return GreetingResponse(
-            message=greeting_message,
-            id=greeting.id,
-            created_at=greeting.created_at
+            message=greeting_message, id=greeting.id, created_at=greeting.created_at
         )
     except (HTTPException, RequestValidationError):
         # Re-raise HTTPException and RequestValidationError to let FastAPI handle them
@@ -254,8 +244,7 @@ async def greet_user(
     except Exception as e:
         logger.error(f"Unexpected error in greet_user: {e}", exc_info=True)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Internal server error"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error"
         ) from e
 
 
@@ -264,53 +253,48 @@ async def greet_user(
     response_model=GreetingsListResponse,
     tags=["greetings"],
     summary="Get all greetings",
-    description="Retrieve all greetings with pagination"
+    description="Retrieve all greetings with pagination",
 )
 @rate_limit()
 async def get_greetings(
     request: Request,
     skip: int = Query(0, ge=0, description="Number of records to skip"),
     limit: int = Query(10, ge=1, le=100, description="Maximum number of records to return"),
-    db: Session = Depends(get_db)  # noqa: B008
+    db: Session = Depends(get_db),  # noqa: B008
 ):
     """Get all greetings from database with pagination"""
     try:
         # Validate pagination parameters
         if skip < 0:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Skip must be >= 0"
-            )
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Skip must be >= 0")
         if limit < 1 or limit > 100:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Limit must be between 1 and 100"
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Limit must be between 1 and 100"
             )
 
         # Query with error handling
         try:
             total = db.query(Greeting).count()
-            greetings = db.query(Greeting).order_by(Greeting.created_at.desc()).offset(skip).limit(limit).all()
+            greetings = (
+                db.query(Greeting)
+                .order_by(Greeting.created_at.desc())
+                .offset(skip)
+                .limit(limit)
+                .all()
+            )
         except SQLAlchemyError as e:
             logger.error(f"Database error in get_greetings: {e}", exc_info=True)
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Database error occurred"
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error occurred"
             ) from e
 
-        return GreetingsListResponse(
-            total=total,
-            greetings=greetings,
-            skip=skip,
-            limit=limit
-        )
+        return GreetingsListResponse(total=total, greetings=greetings, skip=skip, limit=limit)
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Unexpected error in get_greetings: {e}", exc_info=True)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Internal server error"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error"
         ) from e
 
 
@@ -319,13 +303,13 @@ async def get_greetings(
     response_model=UserGreetingsResponse,
     tags=["greetings"],
     summary="Get user greetings",
-    description="Retrieve all greetings for a specific user"
+    description="Retrieve all greetings for a specific user",
 )
 @rate_limit()
 async def get_user_greetings(
     request: Request,
     user: str = Path(..., min_length=1, max_length=100, description="User name"),
-    db: Session = Depends(get_db)  # noqa: B008
+    db: Session = Depends(get_db),  # noqa: B008
 ):
     """Get all greetings for a specific user"""
     try:
@@ -333,33 +317,28 @@ async def get_user_greetings(
         user_clean = user.strip()
         if not user_clean:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="User name cannot be empty"
+                status_code=status.HTTP_400_BAD_REQUEST, detail="User name cannot be empty"
             )
 
         # Query with error handling
         try:
-            greetings = db.query(Greeting).filter(
-                Greeting.user_name == user_clean
-            ).order_by(Greeting.created_at.desc()).all()
+            greetings = (
+                db.query(Greeting)
+                .filter(Greeting.user_name == user_clean)
+                .order_by(Greeting.created_at.desc())
+                .all()
+            )
         except SQLAlchemyError as e:
             logger.error(f"Database error in get_user_greetings: {e}", exc_info=True)
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Database error occurred"
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error occurred"
             ) from e
 
-        return UserGreetingsResponse(
-            user=user_clean,
-            count=len(greetings),
-            greetings=greetings
-        )
+        return UserGreetingsResponse(user=user_clean, count=len(greetings), greetings=greetings)
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Unexpected error in get_user_greetings: {e}", exc_info=True)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Internal server error"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error"
         ) from e
-
