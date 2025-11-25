@@ -13,15 +13,7 @@ const FAST_WAIT_FOR_OPTIONS = { timeout: 1000 }
  * @param {number} status - HTTP status code
  * @returns {Promise<object>} - Promise resolving to data or rejecting with error
  */
-const createMockResponse = (data, ok = true, status = 200) => {
-  if (ok) {
-    return Promise.resolve(data)
-  } else {
-    const error = new Error(data.detail || 'Server error')
-    error.response = { status, json: async () => data }
-    return Promise.reject(error)
-  }
-}
+// Removed unused createMockResponse - using httpClientSpy.mockResolvedValueOnce directly
 
 // Mock console methods once for all tests (prevents noise in test output)
 beforeAll(() => {

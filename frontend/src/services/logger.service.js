@@ -40,18 +40,21 @@ class LoggerService {
 
   debug(message, metadata) {
     if (this.logLevel <= LOG_LEVELS.DEBUG) {
+      // eslint-disable-next-line no-console
       console.debug(this.formatMessage('DEBUG', message, metadata));
     }
   }
 
   info(message, metadata) {
     if (this.logLevel <= LOG_LEVELS.INFO) {
+      // eslint-disable-next-line no-console
       console.info(this.formatMessage('INFO', message, metadata));
     }
   }
 
   warn(message, metadata) {
     if (this.logLevel <= LOG_LEVELS.WARN) {
+      // eslint-disable-next-line no-console
       console.warn(this.formatMessage('WARN', message, metadata));
     }
   }
@@ -66,6 +69,7 @@ class LoggerService {
           name: error?.name,
         },
       };
+      // eslint-disable-next-line no-console
       console.error(this.formatMessage('ERROR', message, errorMetadata));
     }
   }
