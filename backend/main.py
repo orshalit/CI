@@ -15,7 +15,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from config import settings
-from database import get_db, Greeting, init_db
+from database import Greeting, get_db, init_db
 from logging_config import setup_logging
 from middleware import ErrorHandlingMiddleware, LoggingMiddleware, SecurityHeadersMiddleware
 from schemas import (
@@ -26,6 +26,7 @@ from schemas import (
     UserGreetingsResponse,
     VersionResponse,
 )
+
 
 # Setup logging
 setup_logging(log_level=settings.LOG_LEVEL, log_format=settings.LOG_FORMAT)
