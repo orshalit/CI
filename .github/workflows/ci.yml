@@ -560,6 +560,31 @@ jobs:
           sarif_file: 'trivy-results-${{ matrix.service }}.sarif'
       
       # Docker Scout - Advanced vulnerability analysis and recommendations
+      - name: Debug Docker authentication
+        run: |
+          echo "=== Docker Authentication Debug ==="
+          echo "Checking Docker login status..."
+          docker info 2>&1 | grep -i "username\|registry" || echo "No username info in docker info"
+          
+          echo -e "\n=== Checking Docker config ==="
+          if [ -f ~/.docker/config.json ]; then
+            echo "Docker config file exists:"
+            cat ~/.docker/config.json | jq '.auths // "No auths configured"' || cat ~/.docker/config.json
+          else
+            echo "No Docker config file found at ~/.docker/config.json"
+          fi
+          
+          echo -e "\n=== Docker Scout availability ==="
+          docker scout --version 2>&1 || echo "Docker Scout not available in PATH"
+          
+          echo -e "\n=== Image to scan ==="
+          echo "Image: ghcr.io/${{ github.repository_owner }}/ci-${{ matrix.service }}:latest"
+          echo "Repository owner: ${{ github.repository_owner }}"
+          echo "Service: ${{ matrix.service }}"
+          
+          echo -e "\n=== Checking if image exists ==="
+          docker manifest inspect ghcr.io/${{ github.repository_owner }}/ci-${{ matrix.service }}:latest 2>&1 | head -20 || echo "Cannot inspect image manifest"
+      
       - name: Docker Scout CVE Analysis
         uses: docker/scout-action@v1
         continue-on-error: true  # Don't fail build, just report
