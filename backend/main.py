@@ -15,7 +15,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from config import settings
-from database import get_db, Greeting, init_db
+from database import Greeting, get_db, init_db
 from logging_config import setup_logging
 from middleware import ErrorHandlingMiddleware, LoggingMiddleware, SecurityHeadersMiddleware
 from schemas import (
@@ -188,7 +188,7 @@ async def hello(request: Request):
 async def greet_user(
     request: Request,
     user: str = Path(..., min_length=1, max_length=100, description="User name"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db)  # noqa: B008
 ):
     """Personalized greeting endpoint that stores greetings in database"""
     try:
@@ -206,7 +206,7 @@ async def greet_user(
                     }
                 ]
             )
-        
+
         if len(user_clean) > 100:
             raise RequestValidationError(
                 errors=[
@@ -218,9 +218,9 @@ async def greet_user(
                     }
                 ]
             )
-        
+
         greeting_message = f"Hello, {user_clean}!"
-        
+
         # Store greeting in database with proper error handling
         try:
             greeting = Greeting(user_name=user_clean, message=greeting_message)
@@ -233,15 +233,15 @@ async def greet_user(
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to save greeting"
-            )
+            ) from e
         except SQLAlchemyError as e:
             db.rollback()
             logger.error(f"Database error: {e}", exc_info=True)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Database error occurred"
-            )
-        
+            ) from e
+
         return GreetingResponse(
             message=greeting_message,
             id=greeting.id,
@@ -255,7 +255,7 @@ async def greet_user(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error"
-        )
+        ) from e
 
 
 @app.get(
