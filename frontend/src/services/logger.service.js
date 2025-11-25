@@ -54,7 +54,6 @@ class LoggerService {
 
   warn(message, metadata) {
     if (this.logLevel <= LOG_LEVELS.WARN) {
-      // eslint-disable-next-line no-console
       console.warn(this.formatMessage('WARN', message, metadata));
     }
   }
@@ -69,7 +68,6 @@ class LoggerService {
           name: error?.name,
         },
       };
-      // eslint-disable-next-line no-console
       console.error(this.formatMessage('ERROR', message, errorMetadata));
     }
   }
