@@ -26,7 +26,8 @@ select = [
 ignore = [
     "E501",   # Line too long (handled by Black)
     "E203",   # Whitespace before ':' (Black compatibility)
-    "W503",   # Line break before binary operator
+    # Note: W503 is a flake8 rule, not a ruff rule. Ruff follows PEP 8 which prefers
+    # line breaks before binary operators, so this doesn't need to be ignored.
 ]
 
 # Exclude directories

@@ -81,28 +81,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy installed Python packages from builder
-COPY --from=builder /root/.local /root/.local
+# Create non-root user for security (before copying files)
+RUN useradd -m -u 1000 appuser
+
+# Copy installed Python packages from builder to user's home
+COPY --from=builder /root/.local /home/appuser/.local
 
 # Copy application code and configuration
 COPY main.py database.py config.py schemas.py middleware.py logging_config.py ./
 COPY --from=builder /app/version.json ./version.json
 
-# Make sure scripts in .local are usable
-ENV PATH=/root/.local/bin:$PATH
-
-# Set environment variables for version info
-ENV APP_VERSION="${BUILD_VERSION}" \
-    GIT_COMMIT="${GIT_COMMIT}" \
-    BUILD_DATE="${BUILD_DATE}"
-
-# Create non-root user for security
-RUN useradd -m -u 1000 appuser && \
-    chown -R appuser:appuser /app && \
+# Make sure scripts in .local are usable and set ownership
+RUN chown -R appuser:appuser /app /home/appuser/.local && \
     chmod -R 755 /app
 
-# Switch to non-root user
-USER appuser
+# Set environment variables for version info and PATH
+ENV APP_VERSION="${BUILD_VERSION}" \
+    GIT_COMMIT="${GIT_COMMIT}" \
+    BUILD_DATE="${BUILD_DATE}" \
+    PATH=/home/appuser/.local/bin:$PATH
 
 # Expose application port
 EXPOSE 8000
@@ -111,9 +108,8 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Add version check command
-RUN echo "Backend Version: ${BUILD_VERSION} (${GIT_COMMIT})" && \
-    cat /app/version.json
+# Switch to non-root user (do this last before CMD)
+USER appuser
 
 # Run the application
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
