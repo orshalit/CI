@@ -119,8 +119,7 @@ jobs:
           path: ./
           base: ${{ github.event.pull_request.base.sha || github.event.before || 'HEAD~1' }}
           head: ${{ github.event.pull_request.head.sha || github.sha }}
-          only_verified: true
-          fail: true
+          extra_args: --only-verified --fail
         continue-on-error: ${{ github.event.before == github.sha }}
 
   # ===========================================================================
