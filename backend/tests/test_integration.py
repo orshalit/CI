@@ -104,13 +104,13 @@ async def async_client(backend_url: str) -> AsyncGenerator[httpx.AsyncClient, No
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("_wait_for_backend")
 class TestHealthIntegration:
     """Integration tests for health check endpoint."""
 
     async def test_health_endpoint_available(
         self,
-        async_client: httpx.AsyncClient,
-        wait_for_backend
+        async_client: httpx.AsyncClient
     ):
         """Test that health endpoint is accessible."""
         response = await async_client.get("/health")
@@ -121,8 +121,7 @@ class TestHealthIntegration:
 
     async def test_health_database_connection(
         self,
-        async_client: httpx.AsyncClient,
-        wait_for_backend
+        async_client: httpx.AsyncClient
     ):
         """Test that health check verifies database connection."""
         response = await async_client.get("/health")
@@ -133,8 +132,7 @@ class TestHealthIntegration:
 
     async def test_health_endpoint_performance(
         self,
-        async_client: httpx.AsyncClient,
-        wait_for_backend
+        async_client: httpx.AsyncClient
     ):
         """Test that health endpoint responds quickly."""
         import time
@@ -154,13 +152,13 @@ class TestHealthIntegration:
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("_wait_for_backend")
 class TestAPIIntegration:
     """Integration tests for API endpoints."""
 
     async def test_hello_endpoint(
         self,
-        async_client: httpx.AsyncClient,
-        wait_for_backend
+        async_client: httpx.AsyncClient
     ):
         """Test hello endpoint integration."""
         response = await async_client.get("/api/hello")
@@ -172,7 +170,6 @@ class TestAPIIntegration:
     async def test_greet_endpoint_persists_data(
         self,
         async_client: httpx.AsyncClient,
-        wait_for_backend
     ):
         """Test that greet endpoint persists data to database."""
         user_name = f"IntegrationUser_{int(time.time())}"
@@ -204,7 +201,6 @@ class TestAPIIntegration:
     async def test_greet_multiple_users(
         self,
         async_client: httpx.AsyncClient,
-        wait_for_backend,
         user_name: str
     ):
         """Test greeting multiple different users."""
@@ -219,7 +215,6 @@ class TestAPIIntegration:
     async def test_get_all_greetings(
         self,
         async_client: httpx.AsyncClient,
-        wait_for_backend
     ):
         """Test getting all greetings from database."""
         # Create some greetings
@@ -239,7 +234,6 @@ class TestAPIIntegration:
     async def test_pagination_works(
         self,
         async_client: httpx.AsyncClient,
-        wait_for_backend
     ):
         """Test that pagination works correctly."""
         # Create multiple greetings
@@ -274,7 +268,6 @@ class TestEndToEndWorkflows:
     async def test_complete_greeting_workflow(
         self,
         async_client: httpx.AsyncClient,
-        wait_for_backend
     ):
         """Test complete workflow: create greeting and retrieve it."""
         user_name = f"WorkflowUser_{int(time.time())}"
@@ -308,7 +301,6 @@ class TestEndToEndWorkflows:
     async def test_multi_user_workflow(
         self,
         async_client: httpx.AsyncClient,
-        wait_for_backend
     ):
         """Test workflow with multiple users creating greetings."""
         timestamp = int(time.time())
@@ -340,13 +332,13 @@ class TestEndToEndWorkflows:
 @pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.slow
+@pytest.mark.usefixtures("_wait_for_backend")
 class TestPerformance:
     """Integration tests for performance and load."""
 
     async def test_concurrent_requests(
         self,
         backend_url: str,
-        wait_for_backend
     ):
         """Test handling concurrent requests."""
         import asyncio
@@ -367,7 +359,6 @@ class TestPerformance:
     async def test_sequential_load(
         self,
         async_client: httpx.AsyncClient,
-        wait_for_backend
     ):
         """Test handling sequential load."""
         timestamp = int(time.time())
@@ -381,7 +372,6 @@ class TestPerformance:
     async def test_response_time_under_load(
         self,
         async_client: httpx.AsyncClient,
-        wait_for_backend
     ):
         """Test that response times remain acceptable under load."""
         import time
@@ -417,7 +407,6 @@ class TestErrorHandlingIntegration:
     async def test_invalid_endpoint(
         self,
         async_client: httpx.AsyncClient,
-        wait_for_backend
     ):
         """Test that invalid endpoints return 404."""
         response = await async_client.get("/api/nonexistent")
@@ -426,7 +415,6 @@ class TestErrorHandlingIntegration:
     async def test_validation_errors(
         self,
         async_client: httpx.AsyncClient,
-        wait_for_backend
     ):
         """Test that validation errors are handled properly."""
         # Empty user name (whitespace only)
@@ -441,7 +429,6 @@ class TestErrorHandlingIntegration:
     async def test_invalid_pagination(
         self,
         async_client: httpx.AsyncClient,
-        wait_for_backend
     ):
         """Test that invalid pagination parameters are rejected."""
         # Negative skip
