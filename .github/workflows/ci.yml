@@ -61,15 +61,13 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
-          cache-dependency-path: backend/requirements.txt
+          cache-dependency-path: backend/requirements-dev.txt
       
       - name: Install Python dependencies
         working-directory: ./backend
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          # Optional: Add linters
-          # pip install flake8 black pylint bandit safety
+          pip install -r requirements-dev.txt
       
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -85,9 +83,7 @@ jobs:
       # Python code quality - FAST (Ruff + Black)
       - name: Run Ruff linter ⚡ (replaces Flake8, Pylint, isort)
         working-directory: ./backend
-        run: |
-          pip install -r requirements.txt
-          ruff check . --output-format=github
+        run: ruff check . --output-format=github
       
       - name: Check Python code formatting (Black)
         working-directory: ./backend
