@@ -1,7 +1,7 @@
 """Pydantic schemas for request/response validation"""
-from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
-from typing import Optional, List
+
+from pydantic import BaseModel, Field, field_validator
 
 
 class VersionResponse(BaseModel):
@@ -31,7 +31,7 @@ class HealthResponse(BaseModel):
     """Health check response schema"""
     status: str
     database: str
-    error: Optional[str] = None
+    error: str | None = None
 
 
 class HelloResponse(BaseModel):
@@ -78,7 +78,7 @@ class GreetingItem(BaseModel):
 class GreetingsListResponse(BaseModel):
     """Greetings list response schema"""
     total: int
-    greetings: List[GreetingItem]
+    greetings: list[GreetingItem]
     skip: int
     limit: int
 
@@ -87,12 +87,12 @@ class UserGreetingsResponse(BaseModel):
     """User-specific greetings response schema"""
     user: str
     count: int
-    greetings: List[GreetingItem]
+    greetings: list[GreetingItem]
 
 
 class ErrorResponse(BaseModel):
     """Error response schema"""
     error: str
-    detail: Optional[str] = None
+    detail: str | None = None
     status_code: int
 

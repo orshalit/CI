@@ -62,7 +62,7 @@ class LoggingMiddleware(BaseHTTPMiddleware):
 
             # Add process time header
             response.headers["X-Process-Time"] = str(process_time)
-            
+
             return response
         except Exception as e:
             process_time = time.time() - start_time
