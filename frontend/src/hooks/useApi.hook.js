@@ -22,16 +22,19 @@ export function useApi(apiFunction) {
       setError(null);
       setData(null);
 
+      // Get function name with fallback for bound/anonymous functions
+      const functionName = apiFunction.name || apiFunction.displayName || 'anonymous';
+
       try {
-        logger.debug('Executing API call', { function: apiFunction.name, args });
+        logger.debug('Executing API call', { function: functionName, args });
         const result = await apiFunction(...args);
         setData(result);
-        logger.debug('API call successful', { function: apiFunction.name });
+        logger.debug('API call successful', { function: functionName });
         return result;
       } catch (err) {
         const errorMessage = err.message || 'An error occurred';
         setError(errorMessage);
-        logger.error('API call failed', err, { function: apiFunction.name });
+        logger.error('API call failed', err, { function: functionName });
         throw err;
       } finally {
         setLoading(false);

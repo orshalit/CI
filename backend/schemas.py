@@ -44,7 +44,12 @@ class HelloResponse(BaseModel):
 
 
 class GreetingCreate(BaseModel):
-    """Greeting creation schema"""
+    """
+    Greeting creation schema for request body validation.
+
+    Note: Currently unused as the greet endpoint takes user_name as a path parameter.
+    Kept for future use if POST /api/greetings endpoint is added.
+    """
 
     user_name: str = Field(..., min_length=1, max_length=100, description="User name")
 

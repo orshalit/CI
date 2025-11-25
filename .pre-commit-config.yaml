@@ -20,6 +20,15 @@ repos:
         language_version: python3.11
         files: ^backend/.*\.py$
 
+  # Python security scanning
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.7.6
+    hooks:
+      - id: bandit
+        args: ['-ll', '-q']  # Only high severity, quiet mode
+        files: ^backend/.*\.py$
+        exclude: ^backend/tests/
+
   # JavaScript linting
   - repo: https://github.com/pre-commit/mirrors-eslint
     rev: v8.56.0
@@ -45,4 +54,13 @@ repos:
       - id: check-json
       - id: check-added-large-files
         args: ['--maxkb=1000']
+      - id: check-merge-conflict
+      - id: detect-private-key
 
+  # Secret detection
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.4.0
+    hooks:
+      - id: detect-secrets
+        args: ['--baseline', '.secrets.baseline']
+        exclude: package-lock\.json

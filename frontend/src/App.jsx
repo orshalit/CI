@@ -69,8 +69,8 @@ function App() {
     [userNameError]
   );
 
-  // Handle Enter key press
-  const handleKeyPress = useCallback(
+  // Handle Enter key press (using onKeyDown instead of deprecated onKeyPress)
+  const handleKeyDown = useCallback(
     (e) => {
       if (e.key === 'Enter' && !greetState.loading && userName.trim()) {
         handleGreet();
@@ -118,7 +118,7 @@ function App() {
               placeholder="Enter your name"
               value={userName}
               onChange={handleUserNameChange}
-              onKeyPress={handleKeyPress}
+              onKeyDown={handleKeyDown}
               maxLength={100}
               disabled={isLoading}
               aria-invalid={!!userNameError}

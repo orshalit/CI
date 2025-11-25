@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import sys
 from contextlib import asynccontextmanager
 from pathlib import Path as PathLib
 
@@ -17,7 +18,12 @@ from sqlalchemy.orm import Session
 from config import settings
 from database import Greeting, get_db, init_db
 from logging_config import setup_logging
-from middleware import ErrorHandlingMiddleware, LoggingMiddleware, SecurityHeadersMiddleware
+from middleware import (
+    ErrorHandlingMiddleware,
+    LoggingMiddleware,
+    RequestIdMiddleware,
+    SecurityHeadersMiddleware,
+)
 from schemas import (
     GreetingResponse,
     GreetingsListResponse,
@@ -66,9 +72,11 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Add middleware (order matters - last added is first executed)
+# RequestIdMiddleware should be first so request_id is available for all other middleware
 app.add_middleware(ErrorHandlingMiddleware)
 app.add_middleware(LoggingMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(RequestIdMiddleware)
 
 # Enable CORS with environment-based configuration
 app.add_middleware(
@@ -131,7 +139,9 @@ async def get_version():
                 version=version_data.get("version", os.getenv("APP_VERSION", "unknown")),
                 commit=version_data.get("commit", os.getenv("GIT_COMMIT", "unknown")),
                 build_date=version_data.get("build_date", os.getenv("BUILD_DATE", "unknown")),
-                python_version=version_data.get("python_version", "3.11"),
+                python_version=version_data.get(
+                    "python_version", f"{sys.version_info.major}.{sys.version_info.minor}"
+                ),
                 environment=os.getenv("ENVIRONMENT", "development"),
             )
         except (json.JSONDecodeError, OSError) as e:
@@ -142,7 +152,7 @@ async def get_version():
         version=os.getenv("APP_VERSION", settings.API_VERSION),
         commit=os.getenv("GIT_COMMIT", "unknown"),
         build_date=os.getenv("BUILD_DATE", "unknown"),
-        python_version="3.11",
+        python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
         environment=os.getenv("ENVIRONMENT", "development"),
     )
 

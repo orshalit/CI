@@ -47,14 +47,14 @@ venv:
 		echo "To activate it, run: source venv/bin/activate"; \
 	fi
 
-# Install dependencies
+# Install dependencies (development)
 install:
 	@if [ -z "$$VIRTUAL_ENV" ]; then \
 		echo "Warning: No virtual environment detected!"; \
 		echo "It's recommended to activate venv first: source venv/bin/activate"; \
 		echo ""; \
 	fi
-	pip install -r requirements.txt
+	pip install -r requirements-dev.txt
 
 # Run all tests
 test:

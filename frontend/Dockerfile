@@ -24,16 +24,20 @@ ARG NODE_VERSION
 
 WORKDIR /app
 
-# Copy package files for dependency installation
+# Set Node environment for optimized production build
+ENV NODE_ENV=production
+
+# Copy package files first (for better layer caching)
 COPY package.json package-lock.json* ./
 
-# Install dependencies with clean install for reproducibility
-RUN npm ci --only=production=false
+# Install ALL dependencies (including devDependencies for build)
+# Using --ignore-scripts for security, run build separately
+RUN npm ci --include=dev --ignore-scripts
 
-# Copy source code and configuration
+# Copy source code (after dependencies for better caching)
 COPY . .
 
-# Create version info file (ensure public directory exists)
+# Create version info file
 RUN mkdir -p /app/public && \
     echo "{\
   \"version\": \"${BUILD_VERSION}\",\
@@ -43,7 +47,7 @@ RUN mkdir -p /app/public && \
 }" > /app/public/version.json
 
 # Build the production application
-# This creates the /app/dist directory
+# NODE_ENV=production enables React optimizations
 RUN npm run build
 
 # Verify build output
@@ -66,7 +70,6 @@ ARG NODE_VERSION
 ARG NGINX_VERSION
 
 # OCI Labels - Standard container metadata
-# https://github.com/opencontainers/image-spec/blob/main/annotations.md
 LABEL org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.authors="DevOps Team" \
       org.opencontainers.image.url="https://github.com/orshalit/CI" \
@@ -101,14 +104,10 @@ RUN mkdir -p /var/cache/nginx /var/log/nginx /var/run /usr/share/nginx/html && \
 COPY nginx.conf /etc/nginx/nginx.conf
 
 # Copy built application from builder stage
-COPY --from=builder /app/dist /usr/share/nginx/html
-COPY --from=builder /app/public/version.json /usr/share/nginx/html/version.json
+COPY --from=builder --chown=appuser:appuser /app/dist /usr/share/nginx/html
+COPY --from=builder --chown=appuser:appuser /app/public/version.json /usr/share/nginx/html/version.json
 
-# Ensure proper ownership
-RUN chown -R appuser:appuser /usr/share/nginx/html && \
-    chmod -R 755 /usr/share/nginx/html
-
-# Create version info file in root for easy access
+# Create build info file (as root, before switching user)
 RUN echo "Frontend Version: ${BUILD_VERSION}" > /usr/share/nginx/html/build-info.txt && \
     echo "Commit: ${GIT_COMMIT}" >> /usr/share/nginx/html/build-info.txt && \
     echo "Build Date: ${BUILD_DATE}" >> /usr/share/nginx/html/build-info.txt && \
@@ -119,9 +118,6 @@ ENV APP_VERSION="${BUILD_VERSION}" \
     GIT_COMMIT="${GIT_COMMIT}" \
     BUILD_DATE="${BUILD_DATE}"
 
-# Switch to non-root user
-USER appuser
-
 # Expose application port
 EXPOSE 3000
 
@@ -129,9 +125,8 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD wget --no-verbose --tries=1 --spider http://localhost:3000/ || exit 1
 
-# Display version information
-RUN cat /usr/share/nginx/html/version.json && \
-    echo "Frontend container ready"
+# Switch to non-root user
+USER appuser
 
 # Start nginx in foreground
 CMD ["nginx", "-g", "daemon off;"]

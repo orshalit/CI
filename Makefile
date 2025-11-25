@@ -1,4 +1,4 @@
-.PHONY: help install install-backend install-frontend lint lint-backend lint-frontend format format-backend format-frontend test test-backend test-frontend ci-local check-versions
+.PHONY: help install install-backend install-frontend lint lint-backend lint-frontend format format-backend format-frontend test test-backend test-frontend ci-local check-versions audit audit-backend audit-frontend clean
 
 help: ## Show this help message
 	@echo "Available targets:"
@@ -6,10 +6,10 @@ help: ## Show this help message
 
 install: install-backend install-frontend ## Install all dependencies
 
-install-backend: ## Install Python dependencies
+install-backend: ## Install Python dependencies (dev)
 	@echo "Installing backend dependencies..."
 	cd backend && python3 -m venv venv || true
-	cd backend && source venv/bin/activate && pip install --upgrade pip && pip install -r requirements.txt
+	cd backend && source venv/bin/activate && pip install --upgrade pip && pip install -r requirements-dev.txt
 
 install-frontend: ## Install Node.js dependencies
 	@echo "Installing frontend dependencies..."
@@ -46,6 +46,16 @@ test-frontend: ## Run JavaScript tests
 	@echo "Running frontend tests..."
 	cd frontend && npm test
 
+audit: audit-backend audit-frontend ## Run security audit on all dependencies
+
+audit-backend: ## Audit Python dependencies for vulnerabilities
+	@echo "Auditing Python dependencies..."
+	cd backend && source venv/bin/activate && pip-audit -r requirements.txt --desc on || echo "⚠️  Vulnerabilities found"
+
+audit-frontend: ## Audit Node.js dependencies for vulnerabilities
+	@echo "Auditing Node.js dependencies..."
+	cd frontend && npm audit --audit-level=high || echo "⚠️  Vulnerabilities found"
+
 check-versions: ## Verify tool versions match CI requirements
 	@echo "Checking tool versions..."
 	@python3 --version | grep -q "3.11" || (echo "ERROR: Python 3.11 required" && exit 1)
@@ -57,3 +67,11 @@ ci-local: check-versions lint format test ## Run all CI checks locally
 	@echo ""
 	@echo "✓ All CI checks passed locally!"
 
+clean: ## Clean up generated files and caches
+	@echo "Cleaning up..."
+	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+	find . -type d -name .pytest_cache -exec rm -rf {} + 2>/dev/null || true
+	find . -type d -name .ruff_cache -exec rm -rf {} + 2>/dev/null || true
+	find . -type f -name "*.pyc" -delete 2>/dev/null || true
+	cd frontend && rm -rf node_modules/.cache 2>/dev/null || true
+	@echo "Done!"

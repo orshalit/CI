@@ -19,19 +19,23 @@ FROM python:${PYTHON_VERSION}-slim AS builder
 ARG BUILD_DATE
 ARG BUILD_VERSION
 ARG GIT_COMMIT
+ARG PYTHON_VERSION
 
 WORKDIR /app
 
-# Install build dependencies
+# Install only build dependencies needed for pip compilation
+# Note: gcc needed for some Python packages with C extensions
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
-    postgresql-client \
-    git \
+    libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install dependencies
+# Clean up __pycache__ and .pyc files to reduce image size
 COPY requirements.txt .
-RUN pip install --no-cache-dir --user -r requirements.txt
+RUN pip install --no-cache-dir --user -r requirements.txt && \
+    find /root/.local -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true && \
+    find /root/.local -type f -name "*.pyc" -delete 2>/dev/null || true
 
 # Create version info file
 RUN echo "{\
@@ -75,31 +79,42 @@ LABEL org.opencontainers.image.created="${BUILD_DATE}" \
 
 WORKDIR /app
 
-# Install runtime dependencies only
+# Install only runtime dependencies (no build tools)
+# - libpq5: PostgreSQL client library (runtime only, not dev headers)
+# - curl: For health checks
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    postgresql-client \
+    libpq5 \
     curl \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
 # Create non-root user for security (before copying files)
-RUN useradd -m -u 1000 appuser
+RUN useradd -m -u 1000 -s /bin/bash appuser
 
 # Copy installed Python packages from builder to user's home
 COPY --from=builder /root/.local /home/appuser/.local
 
-# Copy application code and configuration
+# Copy application code
 COPY main.py database.py config.py schemas.py middleware.py logging_config.py ./
 COPY --from=builder /app/version.json ./version.json
 
-# Make sure scripts in .local are usable and set ownership
+# Set ownership (single layer for efficiency)
 RUN chown -R appuser:appuser /app /home/appuser/.local && \
     chmod -R 755 /app
 
-# Set environment variables for version info and PATH
+# Set environment variables for version info, PATH, and Python optimization
 ENV APP_VERSION="${BUILD_VERSION}" \
     GIT_COMMIT="${GIT_COMMIT}" \
     BUILD_DATE="${BUILD_DATE}" \
-    PATH=/home/appuser/.local/bin:$PATH
+    PATH=/home/appuser/.local/bin:$PATH \
+    # Prevent Python from writing .pyc files (smaller image, faster startup)
+    PYTHONDONTWRITEBYTECODE=1 \
+    # Force Python stdout/stderr to be unbuffered (better for Docker logs)
+    PYTHONUNBUFFERED=1 \
+    # Set Python to use UTF-8 encoding
+    PYTHONIOENCODING=utf-8 \
+    # Disable pip version check for faster startup
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
 # Expose application port
 EXPOSE 8000
@@ -111,5 +126,5 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
 # Switch to non-root user (do this last before CMD)
 USER appuser
 
-# Run the application
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+# Run the application with production settings
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--no-access-log"]
