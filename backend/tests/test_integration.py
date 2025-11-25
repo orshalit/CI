@@ -39,7 +39,7 @@ def backend_url() -> str:
 
 
 @pytest.fixture(scope="module")
-def wait_for_backend(backend_url: str):
+def _wait_for_backend(backend_url: str):
     """
     Wait for backend to be ready before running integration tests.
 
@@ -80,7 +80,7 @@ def wait_for_backend(backend_url: str):
     pytest.fail(f"Backend at {backend_url} did not become healthy")
 
 
-@pytest.fixture
+@pytest.fixture()
 async def async_client(backend_url: str) -> AsyncGenerator[httpx.AsyncClient, None]:
     """
     Provide an async HTTP client for integration tests.
@@ -102,8 +102,8 @@ async def async_client(backend_url: str) -> AsyncGenerator[httpx.AsyncClient, No
 # Health Check Integration Tests
 # ============================================================================
 
-@pytest.mark.integration
-@pytest.mark.asyncio
+@pytest.mark.integration()
+@pytest.mark.asyncio()
 @pytest.mark.usefixtures("_wait_for_backend")
 class TestHealthIntegration:
     """Integration tests for health check endpoint."""
@@ -150,8 +150,8 @@ class TestHealthIntegration:
 # API Endpoint Integration Tests
 # ============================================================================
 
-@pytest.mark.integration
-@pytest.mark.asyncio
+@pytest.mark.integration()
+@pytest.mark.asyncio()
 @pytest.mark.usefixtures("_wait_for_backend")
 class TestAPIIntegration:
     """Integration tests for API endpoints."""
@@ -260,8 +260,8 @@ class TestAPIIntegration:
 # End-to-End Workflow Tests
 # ============================================================================
 
-@pytest.mark.integration
-@pytest.mark.asyncio
+@pytest.mark.integration()
+@pytest.mark.asyncio()
 class TestEndToEndWorkflows:
     """Integration tests for complete user workflows."""
 
@@ -329,9 +329,9 @@ class TestEndToEndWorkflows:
 # Performance and Load Tests
 # ============================================================================
 
-@pytest.mark.integration
-@pytest.mark.asyncio
-@pytest.mark.slow
+@pytest.mark.integration()
+@pytest.mark.asyncio()
+@pytest.mark.slow()
 @pytest.mark.usefixtures("_wait_for_backend")
 class TestPerformance:
     """Integration tests for performance and load."""
@@ -399,8 +399,8 @@ class TestPerformance:
 # Error Handling Integration Tests
 # ============================================================================
 
-@pytest.mark.integration
-@pytest.mark.asyncio
+@pytest.mark.integration()
+@pytest.mark.asyncio()
 class TestErrorHandlingIntegration:
     """Integration tests for error handling."""
 
