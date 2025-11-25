@@ -11,7 +11,7 @@ class VersionResponse(BaseModel):
     build_date: str = Field(..., description="Build timestamp")
     python_version: str = Field(..., description="Python version")
     environment: str = Field(..., description="Deployment environment")
-    
+
     model_config = {
         "json_schema_extra": {
             "examples": [
@@ -42,7 +42,7 @@ class HelloResponse(BaseModel):
 class GreetingCreate(BaseModel):
     """Greeting creation schema"""
     user_name: str = Field(..., min_length=1, max_length=100, description="User name")
-    
+
     @field_validator('user_name')
     @classmethod
     def validate_user_name(cls, v: str) -> str:
@@ -61,7 +61,7 @@ class GreetingResponse(BaseModel):
     message: str
     id: int
     created_at: datetime
-    
+
     model_config = {"from_attributes": True}
 
 
@@ -71,7 +71,7 @@ class GreetingItem(BaseModel):
     user_name: str
     message: str
     created_at: datetime
-    
+
     model_config = {"from_attributes": True}
 
 

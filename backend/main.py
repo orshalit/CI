@@ -347,7 +347,7 @@ async def get_user_greetings(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Database error occurred"
             ) from e
-        
+
         return UserGreetingsResponse(
             user=user_clean,
             count=len(greetings),

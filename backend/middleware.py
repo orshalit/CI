@@ -1,23 +1,23 @@
 """Custom middleware for security, logging, and error handling"""
-from fastapi import Request, status
-from fastapi.responses import JSONResponse
-from fastapi.exceptions import RequestValidationError
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.exceptions import HTTPException as StarletteHTTPException
 import logging
 import time
-from typing import Callable
-import json
+from collections.abc import Callable
+
+from fastapi import Request, status
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.middleware.base import BaseHTTPMiddleware
 
 logger = logging.getLogger(__name__)
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """Add security headers to all responses"""
-    
+
     async def dispatch(self, request: Request, call_next: Callable):
         response = await call_next(request)
-        
+
         # Security headers
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
@@ -25,16 +25,16 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
-        
+
         return response
 
 
 class LoggingMiddleware(BaseHTTPMiddleware):
     """Log all requests and responses"""
-    
+
     async def dispatch(self, request: Request, call_next: Callable):
         start_time = time.time()
-        
+
         # Log request
         logger.info(
             f"Request: {request.method} {request.url.path}",
@@ -44,11 +44,11 @@ class LoggingMiddleware(BaseHTTPMiddleware):
                 "client_ip": request.client.host if request.client else None,
             }
         )
-        
+
         try:
             response = await call_next(request)
             process_time = time.time() - start_time
-            
+
             # Log response
             logger.info(
                 f"Response: {request.method} {request.url.path} - {response.status_code}",
@@ -59,7 +59,7 @@ class LoggingMiddleware(BaseHTTPMiddleware):
                     "process_time": process_time,
                 }
             )
-            
+
             # Add process time header
             response.headers["X-Process-Time"] = str(process_time)
             
@@ -81,7 +81,7 @@ class LoggingMiddleware(BaseHTTPMiddleware):
 
 class ErrorHandlingMiddleware(BaseHTTPMiddleware):
     """Global error handling middleware"""
-    
+
     async def dispatch(self, request: Request, call_next: Callable):
         try:
             response = await call_next(request)
