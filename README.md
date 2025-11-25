@@ -189,6 +189,32 @@ make test-cov
 
 **Coverage:** Target 90%+
 
+### Quick Reference
+
+```bash
+# Install everything
+make install
+
+# Run CI checks locally (recommended before pushing)
+make ci-local
+
+# Individual commands
+make lint          # Run all linters
+make format        # Format all code  
+make test          # Run all tests
+make check-versions # Verify tool versions
+
+# Backend only
+make lint-backend
+make format-backend
+make test-backend
+
+# Frontend only
+make lint-frontend
+make format-frontend
+make test-frontend
+```
+
 ### Frontend Tests
 
 ```bash
