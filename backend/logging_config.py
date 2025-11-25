@@ -1,14 +1,13 @@
 """Logging configuration for production"""
+import json
 import logging
 import sys
-from typing import Any
-import json
 from datetime import datetime
 
 
 class JSONFormatter(logging.Formatter):
     """JSON formatter for structured logging"""
-    
+
     def format(self, record: logging.LogRecord) -> str:
         log_data = {
             "timestamp": datetime.utcnow().isoformat(),
@@ -30,21 +29,21 @@ class JSONFormatter(logging.Formatter):
             log_data["process_time"] = record.process_time
         if hasattr(record, "error"):
             log_data["error"] = record.error
-        
+
         # Add exception info if present
         if record.exc_info:
             log_data["exception"] = self.formatException(record.exc_info)
-        
+
         return json.dumps(log_data)
 
 
 def setup_logging(log_level: str = "INFO", log_format: str = "json"):
     """Setup logging configuration"""
-    
+
     # Get root logger
     logger = logging.getLogger()
     logger.setLevel(getattr(logging, log_level.upper()))
-    
+
     # Remove existing handlers
     logger.handlers.clear()
     

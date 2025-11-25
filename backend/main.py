@@ -197,15 +197,28 @@ async def greet_user(
         # Validate and sanitize input
         user_clean = user.strip()
         if not user_clean:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="User name cannot be empty"
+            # Raise RequestValidationError to return 422 (FastAPI's standard for validation errors)
+            raise RequestValidationError(
+                errors=[
+                    {
+                        "type": "value_error",
+                        "loc": ("path", "user"),
+                        "msg": "User name cannot be empty or whitespace only",
+                        "input": user,
+                    }
+                ]
             )
         
         if len(user_clean) > 100:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="User name too long (max 100 characters)"
+            raise RequestValidationError(
+                errors=[
+                    {
+                        "type": "value_error.string_too_long",
+                        "loc": ("path", "user"),
+                        "msg": "User name too long (max 100 characters)",
+                        "input": user,
+                    }
+                ]
             )
         
         greeting_message = f"Hello, {user_clean}!"

@@ -1,9 +1,11 @@
+import logging
+from datetime import datetime
+
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, event
 from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.pool import QueuePool
-from datetime import datetime
+
 from config import settings
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +68,7 @@ class Greeting(Base):
     user_name = Column(String(100), index=True, nullable=False)
     message = Column(String(500), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
-    
+
     def __repr__(self):
         return f"<Greeting(id={self.id}, user_name='{self.user_name}', created_at='{self.created_at}')>"
 
