@@ -1,7 +1,7 @@
 import logging
 from datetime import datetime
 
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, event
+from sqlalchemy import Column, DateTime, Integer, String, create_engine, event
 from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.pool import QueuePool
 

@@ -46,11 +46,11 @@ def setup_logging(log_level: str = "INFO", log_format: str = "json"):
 
     # Remove existing handlers
     logger.handlers.clear()
-    
+
     # Create console handler
     handler = logging.StreamHandler(sys.stdout)
     handler.setLevel(getattr(logging, log_level.upper()))
-    
+
     # Set formatter
     if log_format.lower() == "json":
         formatter = JSONFormatter()
@@ -58,10 +58,10 @@ def setup_logging(log_level: str = "INFO", log_format: str = "json"):
         formatter = logging.Formatter(
             "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
         )
-    
+
     handler.setFormatter(formatter)
     logger.addHandler(handler)
-    
+
     # Set levels for third-party loggers
     logging.getLogger("uvicorn").setLevel(logging.WARNING)
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)

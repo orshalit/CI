@@ -1,33 +1,31 @@
-from fastapi import FastAPI, Depends, HTTPException, status, Query, Path, Request
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from fastapi.exceptions import RequestValidationError
-from sqlalchemy.orm import Session
-from sqlalchemy import text
-from sqlalchemy.exc import SQLAlchemyError, IntegrityError
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
-from slowapi.errors import RateLimitExceeded
-from contextlib import asynccontextmanager
+import json
 import logging
 import os
-import json
+from contextlib import asynccontextmanager
 from pathlib import Path as PathLib
 
-from database import init_db, get_db, Greeting
+from fastapi import Depends, FastAPI, HTTPException, Path, Query, Request, status
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
+from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.orm import Session
+
 from config import settings
+from database import Greeting, get_db, init_db
+from logging_config import setup_logging
+from middleware import ErrorHandlingMiddleware, LoggingMiddleware, SecurityHeadersMiddleware
 from schemas import (
-    VersionResponse,
-    HealthResponse,
-    HelloResponse,
     GreetingResponse,
     GreetingsListResponse,
+    HealthResponse,
+    HelloResponse,
     UserGreetingsResponse,
-    ErrorResponse,
-    GreetingCreate,
+    VersionResponse,
 )
-from middleware import SecurityHeadersMiddleware, LoggingMiddleware, ErrorHandlingMiddleware
-from logging_config import setup_logging
 
 # Setup logging
 setup_logging(log_level=settings.LOG_LEVEL, log_format=settings.LOG_FORMAT)
