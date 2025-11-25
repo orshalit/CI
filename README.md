@@ -75,8 +75,57 @@ The application consists of three containers:
 ### Prerequisites
 
 - Docker and Docker Compose
-- Python 3.11+ (for local backend development)
-- Node.js 20+ (for local frontend development)
+- Python 3.11 (exact version required for consistency)
+- Node.js 20 (exact version required for consistency)
+- Make (optional, for convenience commands)
+
+### Quick Setup
+
+```bash
+# Install all dependencies
+make install
+
+# Or manually:
+# Backend
+cd backend && python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt
+# Frontend  
+cd frontend && npm ci
+```
+
+### Ensuring CI Consistency
+
+To avoid "works locally but fails in CI" issues:
+
+1. **Install pre-commit hooks** (recommended):
+   ```bash
+   pip install pre-commit
+   pre-commit install
+   ```
+   This automatically runs linters before each commit.
+
+2. **Run local CI checks before pushing**:
+   ```bash
+   make ci-local
+   ```
+   Or use the script:
+   ```bash
+   bash scripts/test-local.sh
+   ```
+
+3. **Use Makefile commands** for consistency:
+   ```bash
+   make lint      # Run all linters
+   make format    # Format all code
+   make test      # Run all tests
+   make ci-local  # Run full CI simulation
+   ```
+
+4. **Verify versions match CI**:
+   ```bash
+   make check-versions
+   ```
+
+**Important:** Always run `make ci-local` before pushing to ensure your code passes CI checks!
 
 ### Running with Docker Compose
 

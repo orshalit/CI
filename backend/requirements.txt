@@ -15,7 +15,7 @@ pytest-timeout==2.2.0
 faker==22.0.0
 
 # Code Quality & Linting
-ruff>=0.14.0          # Modern fast linter (replaces flake8, pylint, isort) - matches CI
+ruff==0.14.6          # Modern fast linter (replaces flake8, pylint, isort) - exact version for consistency
 black==23.12.1        # Code formatter
 # Note: bandit and safety moved to separate requirements-security.txt for nightly scans
 
