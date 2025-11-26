@@ -39,118 +39,113 @@ runs:
         echo "Timeout: ${TIMEOUT}s"
         echo ""
         
+        # Create temporary script file and use jq to construct JSON properly
+        SCRIPT_FILE=$(mktemp)
+        cat > "$SCRIPT_FILE" <<'SCRIPT_END'
+set -e
+echo "=== Detecting OS ==="
+if [ -f /etc/os-release ]; then
+  . /etc/os-release
+  OS=$ID
+  VERSION=$VERSION_ID
+  echo "OS: $OS $VERSION"
+else
+  echo "ERROR: Cannot detect OS"
+  exit 1
+fi
+echo "=== Checking Docker ==="
+if command -v docker &> /dev/null; then
+  DOCKER_VERSION=$(docker --version)
+  echo "Docker already installed: $DOCKER_VERSION"
+  DOCKER_INSTALLED=true
+else
+  echo "Docker not found, installing..."
+  DOCKER_INSTALLED=false
+fi
+echo "=== Checking Docker Compose ==="
+if command -v docker-compose &> /dev/null || docker compose version &> /dev/null 2>&1; then
+  if docker compose version &> /dev/null 2>&1; then
+    COMPOSE_VERSION=$(docker compose version)
+    echo "Docker Compose (plugin) already installed: $COMPOSE_VERSION"
+  else
+    COMPOSE_VERSION=$(docker-compose --version)
+    echo "Docker Compose (standalone) already installed: $COMPOSE_VERSION"
+  fi
+  COMPOSE_INSTALLED=true
+else
+  echo "Docker Compose not found, installing..."
+  COMPOSE_INSTALLED=false
+fi
+if [ "$DOCKER_INSTALLED" = "false" ]; then
+  echo "=== Installing Docker ==="
+  if [ "$OS" = "ubuntu" ] || [ "$OS" = "debian" ]; then
+    sudo apt-get update -y
+    sudo apt-get install -y ca-certificates curl gnupg lsb-release
+    sudo install -m 0755 -d /etc/apt/keyrings
+    curl -fsSL https://download.docker.com/linux/$OS/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+    sudo chmod a+r /etc/apt/keyrings/docker.gpg
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/$OS $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+    sudo apt-get update -y
+    sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  elif [ "$OS" = "amzn" ] || [ "$OS" = "amazon" ]; then
+    sudo yum update -y
+    sudo yum install -y docker
+    sudo systemctl start docker
+    sudo systemctl enable docker
+  elif [ "$OS" = "rhel" ] || [ "$OS" = "centos" ]; then
+    sudo yum install -y yum-utils
+    sudo yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+    sudo yum install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    sudo systemctl start docker
+    sudo systemctl enable docker
+  else
+    echo "ERROR: Unsupported OS: $OS"
+    exit 1
+  fi
+  sudo usermod -aG docker $USER || true
+  sudo docker --version || (echo "ERROR: Docker installation failed" && exit 1)
+  echo "Docker installed successfully"
+  echo "NOTE: User added to docker group. Docker commands will work in new sessions."
+fi
+if [ "$COMPOSE_INSTALLED" = "false" ]; then
+  echo "=== Installing Docker Compose ==="
+  if docker compose version &> /dev/null 2>&1; then
+    echo "Docker Compose plugin is available"
+  else
+    COMPOSE_VERSION="v2.24.0"
+    sudo curl -L "https://github.com/docker/compose/releases/download/$COMPOSE_VERSION/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+    sudo chmod +x /usr/local/bin/docker-compose
+    docker-compose --version || (echo "ERROR: Docker Compose installation failed" && exit 1)
+    echo "Docker Compose installed successfully"
+  fi
+fi
+echo "=== Final Verification ==="
+sudo docker --version
+if sudo docker compose version &> /dev/null 2>&1; then
+  sudo docker compose version
+  echo "Using Docker Compose plugin"
+elif command -v docker-compose &> /dev/null && sudo docker-compose --version &> /dev/null 2>&1; then
+  sudo docker-compose --version
+  echo "Using standalone Docker Compose"
+else
+  echo "ERROR: Docker Compose not available"
+  exit 1
+fi
+echo "=== Installation Complete ==="
+echo "Docker and Docker Compose are ready"
+SCRIPT_END
+        
+        # Use jq to construct properly escaped JSON for SSM
+        COMMANDS_JSON=$(jq -n --rawfile script "$SCRIPT_FILE" '{"commands": [$script]}')
+        rm -f "$SCRIPT_FILE"
+        
         # Send installation command via SSM
         COMMAND_ID=$(aws ssm send-command \
           --region "${INSTANCE_REGION}" \
           --instance-ids "${INSTANCE_ID}" \
           --document-name "AWS-RunShellScript" \
           --comment "Install Docker and Docker Compose on EC2 instance" \
-          --parameters "commands=[
-            \"set -e\",
-            \"echo '=== Detecting OS ==='\",
-            \"if [ -f /etc/os-release ]; then\",
-            \"  . /etc/os-release\",
-            \"  OS=\\$ID\",
-            \"  VERSION=\\$VERSION_ID\",
-            \"  echo 'OS: \\$OS \\$VERSION'\",
-            \"else\",
-            \"  echo 'ERROR: Cannot detect OS'\",
-            \"  exit 1\",
-            \"fi\",
-            \"\",
-            \"echo '=== Checking Docker ==='\",
-            \"if command -v docker &> /dev/null; then\",
-            \"  DOCKER_VERSION=\\$(docker --version)\",
-            \"  echo 'Docker already installed: \\$DOCKER_VERSION'\",
-            \"  DOCKER_INSTALLED=true\",
-            \"else\",
-            \"  echo 'Docker not found, installing...'\",
-            \"  DOCKER_INSTALLED=false\",
-            \"fi\",
-            \"\",
-            \"echo '=== Checking Docker Compose ==='\",
-            \"if command -v docker-compose &> /dev/null || docker compose version &> /dev/null 2>&1; then\",
-            \"  if docker compose version &> /dev/null 2>&1; then\",
-            \"    COMPOSE_VERSION=\\$(docker compose version)\",
-            \"    echo 'Docker Compose (plugin) already installed: \\$COMPOSE_VERSION'\",
-            \"  else\",
-            \"    COMPOSE_VERSION=\\$(docker-compose --version)\",
-            \"    echo 'Docker Compose (standalone) already installed: \\$COMPOSE_VERSION'\",
-            \"  fi\",
-            \"  COMPOSE_INSTALLED=true\",
-            \"else\",
-            \"  echo 'Docker Compose not found, installing...'\",
-            \"  COMPOSE_INSTALLED=false\",
-            \"fi\",
-            \"\",
-            \"# Install Docker if needed\",
-            \"if [ \\\"\\$DOCKER_INSTALLED\\\" = \\\"false\\\" ]; then\",
-            \"  echo '=== Installing Docker ==='\",
-            \"  if [ \\\"\\$OS\\\" = \\\"ubuntu\\\" ] || [ \\\"\\$OS\\\" = \\\"debian\\\" ]; then\",
-            \"    sudo apt-get update -y\",
-            \"    sudo apt-get install -y ca-certificates curl gnupg lsb-release\",
-            \"    sudo install -m 0755 -d /etc/apt/keyrings\",
-            \"    curl -fsSL https://download.docker.com/linux/\\$OS/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg\",
-            \"    sudo chmod a+r /etc/apt/keyrings/docker.gpg\",
-            \"    echo \\\"deb [arch=\\$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/\\$OS \\$(lsb_release -cs) stable\\\" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null\",
-            \"    sudo apt-get update -y\",
-            \"    sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin\",
-            \"  elif [ \\\"\\$OS\\\" = \\\"amzn\\\" ] || [ \\\"\\$OS\\\" = \\\"amazon\\\" ]; then\",
-            \"    sudo yum update -y\",
-            \"    sudo yum install -y docker\",
-            \"    sudo systemctl start docker\",
-            \"    sudo systemctl enable docker\",
-            \"  elif [ \\\"\\$OS\\\" = \\\"rhel\\\" ] || [ \\\"\\$OS\\\" = \\\"centos\\\" ]; then\",
-            \"    sudo yum install -y yum-utils\",
-            \"    sudo yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo\",
-            \"    sudo yum install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin\",
-            \"    sudo systemctl start docker\",
-            \"    sudo systemctl enable docker\",
-            \"  else\",
-            \"    echo 'ERROR: Unsupported OS: \\$OS'\",
-            \"    exit 1\",
-            \"  fi\",
-            \"  \",
-            \"  # Add current user to docker group\",
-            \"  sudo usermod -aG docker \\$USER || true\",
-            \"  \",
-            \"  # Verify Docker installation\",
-            \"  sudo docker --version || (echo 'ERROR: Docker installation failed' && exit 1)\",
-            \"  echo 'Docker installed successfully'\",
-            \"  echo 'NOTE: User added to docker group. Docker commands will work in new sessions.'\",
-            \"fi\",
-            \"\",
-            \"# Install Docker Compose if needed\",
-            \"if [ \\\"\\$COMPOSE_INSTALLED\\\" = \\\"false\\\" ]; then\",
-            \"  echo '=== Installing Docker Compose ==='\",
-            \"  if docker compose version &> /dev/null 2>&1; then\",
-            \"    echo 'Docker Compose plugin is available'\",
-            \"  else\",
-            \"    # Install standalone Docker Compose\",
-            \"    COMPOSE_VERSION=\\\"v2.24.0\\\"\",
-            \"    sudo curl -L \\\"https://github.com/docker/compose/releases/download/\\$COMPOSE_VERSION/docker-compose-\\$(uname -s)-\\$(uname -m)\\\" -o /usr/local/bin/docker-compose\",
-            \"    sudo chmod +x /usr/local/bin/docker-compose\",
-            \"    docker-compose --version || (echo 'ERROR: Docker Compose installation failed' && exit 1)\",
-            \"    echo 'Docker Compose installed successfully'\",
-            \"  fi\",
-            \"fi\",
-            \"\",
-            \"echo '=== Final Verification ==='\",
-            \"sudo docker --version\",
-            \"if sudo docker compose version &> /dev/null 2>&1; then\",
-            \"  sudo docker compose version\",
-            \"  echo 'Using Docker Compose plugin'\",
-            \"elif command -v docker-compose &> /dev/null && sudo docker-compose --version &> /dev/null 2>&1; then\",
-            \"  sudo docker-compose --version\",
-            \"  echo 'Using standalone Docker Compose'\",
-            \"else\",
-            \"  echo 'ERROR: Docker Compose not available'\",
-            \"  exit 1\",
-            \"fi\",
-            \"\",
-            \"echo '=== Installation Complete ==='\",
-            \"echo 'Docker and Docker Compose are ready'\"
-          ]" \
+          --parameters "${COMMANDS_JSON}" \
           --timeout-seconds ${TIMEOUT} \
           --query 'Command.CommandId' \
           --output text)
