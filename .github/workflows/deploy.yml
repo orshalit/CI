@@ -60,6 +60,9 @@ jobs:
   deploy:
     name: Deploy to EC2
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write  # Required for OIDC authentication
+      contents: read   # Required to checkout code
     # Only deploy if CI was successful (for workflow_run) or if manually triggered
     if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
 
