@@ -1,0 +1,179 @@
+name: 'Copy Files to EC2 via SSM'
+description: 'Copies files to EC2 instance using AWS SSM with base64 encoding'
+author: 'DevOps Team'
+
+inputs:
+  instance-id:
+    description: 'EC2 instance ID'
+    required: true
+  region:
+    description: 'AWS region'
+    required: true
+  source-files:
+    description: 'Space-separated list of source files to copy'
+    required: true
+  destination-dir:
+    description: 'Destination directory on EC2 instance'
+    required: true
+  timeout:
+    description: 'Timeout in seconds for file copy'
+    required: false
+    default: '60'
+
+outputs:
+  command-id:
+    description: 'SSM command ID for the file copy operation'
+    value: ${{ steps.copy.outputs.command-id }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Copy files to EC2
+      id: copy
+      shell: bash
+      run: |
+        INSTANCE_ID="${{ inputs.instance-id }}"
+        INSTANCE_REGION="${{ inputs.region }}"
+        SOURCE_FILES="${{ inputs.source-files }}"
+        DEST_DIR="${{ inputs.destination-dir }}"
+        TIMEOUT="${{ inputs.timeout }}"
+        
+        echo "=== Copying files to EC2 ==="
+        echo "Instance: ${INSTANCE_ID}"
+        echo "Region: ${INSTANCE_REGION}"
+        echo "Destination: ${DEST_DIR}"
+        echo ""
+        
+        # Verify all source files exist
+        for FILE in ${SOURCE_FILES}; do
+          if [ ! -f "${FILE}" ]; then
+            echo "::error::Source file not found: ${FILE}"
+            exit 1
+          fi
+          echo "Found: ${FILE} ($(wc -c < ${FILE}) bytes)"
+        done
+        
+        # Base64 encode all files and build SSM command
+        echo "Encoding files for transfer..."
+        SSM_COMMANDS='["set -e","echo \"=== Creating destination directory ===\"","sudo mkdir -p '${DEST_DIR}'","sudo chown \$USER:\$USER '${DEST_DIR}'","sudo chmod 755 '${DEST_DIR}'"'
+        
+        for FILE in ${SOURCE_FILES}; do
+          FILENAME=$(basename "${FILE}")
+          FILE_B64=$(base64 -w 0 "${FILE}")
+          
+          if [ -z "$FILE_B64" ]; then
+            echo "::error::Failed to encode file: ${FILE}"
+            exit 1
+          fi
+          
+          # Determine file permissions (executable or regular)
+          if [[ "${FILENAME}" == *.sh ]]; then
+            PERMS="755"
+            PERMS_DESC="executable"
+          else
+            PERMS="644"
+            PERMS_DESC="regular"
+          fi
+          
+          SSM_COMMANDS="${SSM_COMMANDS},\"echo '=== Copying ${FILENAME} ===\""
+          SSM_COMMANDS="${SSM_COMMANDS},\"echo '${FILE_B64}' | base64 -d > ${DEST_DIR}/${FILENAME}\""
+          SSM_COMMANDS="${SSM_COMMANDS},\"chmod ${PERMS} ${DEST_DIR}/${FILENAME}\""
+          SSM_COMMANDS="${SSM_COMMANDS},\"echo '${FILENAME}: OK (${PERMS_DESC})'\""
+        done
+        
+        # Add verification commands
+        SSM_COMMANDS="${SSM_COMMANDS},\"echo '=== Verifying files ===\""
+        SSM_COMMANDS="${SSM_COMMANDS},\"ls -lh ${DEST_DIR}/\""
+        
+        for FILE in ${SOURCE_FILES}; do
+          FILENAME=$(basename "${FILE}")
+          SSM_COMMANDS="${SSM_COMMANDS},\"test -f ${DEST_DIR}/${FILENAME} && echo '${FILENAME}: EXISTS' || echo '${FILENAME}: MISSING'\""
+        done
+        
+        SSM_COMMANDS="${SSM_COMMANDS},\"echo 'Files copied successfully'\"]"
+        
+        # Send SSM command
+        echo "Sending files to EC2 via SSM..."
+        COMMAND_ID=$(aws ssm send-command \
+          --region "${INSTANCE_REGION}" \
+          --instance-ids "${INSTANCE_ID}" \
+          --document-name "AWS-RunShellScript" \
+          --comment "Copy files to ${DEST_DIR}" \
+          --parameters "commands=${SSM_COMMANDS}" \
+          --timeout-seconds ${TIMEOUT} \
+          --query 'Command.CommandId' \
+          --output text)
+        
+        if [ -z "$COMMAND_ID" ]; then
+          echo "::error::Failed to send SSM command for file copy"
+          exit 1
+        fi
+        
+        echo "command-id=${COMMAND_ID}" >> $GITHUB_OUTPUT
+        echo "::notice::File copy command sent: ${COMMAND_ID}"
+        
+        # Wait for file copy to complete
+        echo "Waiting for files to be copied..."
+        sleep 5
+        
+        MAX_WAIT=${TIMEOUT}
+        ELAPSED=0
+        while [ ${ELAPSED} -lt ${MAX_WAIT} ]; do
+          STATUS=$(aws ssm get-command-invocation \
+            --region "${INSTANCE_REGION}" \
+            --command-id "${COMMAND_ID}" \
+            --instance-id "${INSTANCE_ID}" \
+            --query 'Status' \
+            --output text 2>/dev/null || echo "Pending")
+          
+          if [ "$STATUS" = "Success" ]; then
+            echo "::notice::Files copied successfully"
+            break
+          elif [ "$STATUS" = "Failed" ] || [ "$STATUS" = "Cancelled" ] || [ "$STATUS" = "TimedOut" ]; then
+            echo "::error::File copy failed with status: ${STATUS}"
+            ERROR_OUTPUT=$(aws ssm get-command-invocation \
+              --region "${INSTANCE_REGION}" \
+              --command-id "${COMMAND_ID}" \
+              --instance-id "${INSTANCE_ID}" \
+              --query 'StandardErrorContent' \
+              --output text 2>/dev/null || echo "No error details")
+            echo "Error details: ${ERROR_OUTPUT}"
+            exit 1
+          fi
+          
+          sleep 2
+          ELAPSED=$((ELAPSED + 2))
+        done
+        
+        if [ "$STATUS" != "Success" ]; then
+          echo "::error::File copy timed out or failed"
+          exit 1
+        fi
+        
+        # Verify files were copied correctly
+        VERIFY_OUTPUT=$(aws ssm get-command-invocation \
+          --region "${INSTANCE_REGION}" \
+          --command-id "${COMMAND_ID}" \
+          --instance-id "${INSTANCE_ID}" \
+          --query 'StandardOutputContent' \
+          --output text)
+        
+        echo "=== File Copy Verification ==="
+        echo "$VERIFY_OUTPUT"
+        
+        # Check for success indicators
+        if ! echo "$VERIFY_OUTPUT" | grep -q "Files copied successfully"; then
+          echo "::error::File copy verification failed"
+          exit 1
+        fi
+        
+        for FILE in ${SOURCE_FILES}; do
+          FILENAME=$(basename "${FILE}")
+          if ! echo "$VERIFY_OUTPUT" | grep -q "${FILENAME}: EXISTS"; then
+            echo "::error::${FILENAME} was not copied correctly"
+            exit 1
+          fi
+        done
+        
+        echo "::notice::All files copied and verified successfully"
+

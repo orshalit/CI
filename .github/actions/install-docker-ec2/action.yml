@@ -1,0 +1,222 @@
+name: 'Install Docker on EC2'
+description: 'Installs Docker and Docker Compose on EC2 instance via AWS SSM if not already present'
+author: 'DevOps Team'
+
+inputs:
+  instance-id:
+    description: 'EC2 instance ID'
+    required: true
+  region:
+    description: 'AWS region'
+    required: true
+  timeout:
+    description: 'Timeout in seconds for installation'
+    required: false
+    default: '300'
+
+outputs:
+  command-id:
+    description: 'SSM command ID for the installation'
+    value: ${{ steps.install.outputs.command-id }}
+  already-installed:
+    description: 'Whether Docker was already installed'
+    value: ${{ steps.install.outputs.already-installed }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install Docker and Docker Compose
+      id: install
+      shell: bash
+      run: |
+        INSTANCE_ID="${{ inputs.instance-id }}"
+        INSTANCE_REGION="${{ inputs.region }}"
+        TIMEOUT="${{ inputs.timeout }}"
+        
+        echo "=== Installing Docker and Docker Compose ==="
+        echo "Instance: ${INSTANCE_ID}"
+        echo "Region: ${INSTANCE_REGION}"
+        echo "Timeout: ${TIMEOUT}s"
+        echo ""
+        
+        # Send installation command via SSM
+        COMMAND_ID=$(aws ssm send-command \
+          --region "${INSTANCE_REGION}" \
+          --instance-ids "${INSTANCE_ID}" \
+          --document-name "AWS-RunShellScript" \
+          --comment "Install Docker and Docker Compose on EC2 instance" \
+          --parameters "commands=[
+            \"set -e\",
+            \"echo '=== Detecting OS ==='\",
+            \"if [ -f /etc/os-release ]; then\",
+            \"  . /etc/os-release\",
+            \"  OS=\\$ID\",
+            \"  VERSION=\\$VERSION_ID\",
+            \"  echo 'OS: \\$OS \\$VERSION'\",
+            \"else\",
+            \"  echo 'ERROR: Cannot detect OS'\",
+            \"  exit 1\",
+            \"fi\",
+            \"\",
+            \"echo '=== Checking Docker ==='\",
+            \"if command -v docker &> /dev/null; then\",
+            \"  DOCKER_VERSION=\\$(docker --version)\",
+            \"  echo 'Docker already installed: \\$DOCKER_VERSION'\",
+            \"  DOCKER_INSTALLED=true\",
+            \"else\",
+            \"  echo 'Docker not found, installing...'\",
+            \"  DOCKER_INSTALLED=false\",
+            \"fi\",
+            \"\",
+            \"echo '=== Checking Docker Compose ==='\",
+            \"if command -v docker-compose &> /dev/null || docker compose version &> /dev/null 2>&1; then\",
+            \"  if docker compose version &> /dev/null 2>&1; then\",
+            \"    COMPOSE_VERSION=\\$(docker compose version)\",
+            \"    echo 'Docker Compose (plugin) already installed: \\$COMPOSE_VERSION'\",
+            \"  else\",
+            \"    COMPOSE_VERSION=\\$(docker-compose --version)\",
+            \"    echo 'Docker Compose (standalone) already installed: \\$COMPOSE_VERSION'\",
+            \"  fi\",
+            \"  COMPOSE_INSTALLED=true\",
+            \"else\",
+            \"  echo 'Docker Compose not found, installing...'\",
+            \"  COMPOSE_INSTALLED=false\",
+            \"fi\",
+            \"\",
+            \"# Install Docker if needed\",
+            \"if [ \\\"\\$DOCKER_INSTALLED\\\" = \\\"false\\\" ]; then\",
+            \"  echo '=== Installing Docker ==='\",
+            \"  if [ \\\"\\$OS\\\" = \\\"ubuntu\\\" ] || [ \\\"\\$OS\\\" = \\\"debian\\\" ]; then\",
+            \"    sudo apt-get update -y\",
+            \"    sudo apt-get install -y ca-certificates curl gnupg lsb-release\",
+            \"    sudo install -m 0755 -d /etc/apt/keyrings\",
+            \"    curl -fsSL https://download.docker.com/linux/\\$OS/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg\",
+            \"    sudo chmod a+r /etc/apt/keyrings/docker.gpg\",
+            \"    echo \\\"deb [arch=\\$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/\\$OS \\$(lsb_release -cs) stable\\\" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null\",
+            \"    sudo apt-get update -y\",
+            \"    sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin\",
+            \"  elif [ \\\"\\$OS\\\" = \\\"amzn\\\" ] || [ \\\"\\$OS\\\" = \\\"amazon\\\" ]; then\",
+            \"    sudo yum update -y\",
+            \"    sudo yum install -y docker\",
+            \"    sudo systemctl start docker\",
+            \"    sudo systemctl enable docker\",
+            \"  elif [ \\\"\\$OS\\\" = \\\"rhel\\\" ] || [ \\\"\\$OS\\\" = \\\"centos\\\" ]; then\",
+            \"    sudo yum install -y yum-utils\",
+            \"    sudo yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo\",
+            \"    sudo yum install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin\",
+            \"    sudo systemctl start docker\",
+            \"    sudo systemctl enable docker\",
+            \"  else\",
+            \"    echo 'ERROR: Unsupported OS: \\$OS'\",
+            \"    exit 1\",
+            \"  fi\",
+            \"  \",
+            \"  # Add current user to docker group\",
+            \"  sudo usermod -aG docker \\$USER || true\",
+            \"  \",
+            \"  # Verify Docker installation\",
+            \"  sudo docker --version || (echo 'ERROR: Docker installation failed' && exit 1)\",
+            \"  echo 'Docker installed successfully'\",
+            \"  echo 'NOTE: User added to docker group. Docker commands will work in new sessions.'\",
+            \"fi\",
+            \"\",
+            \"# Install Docker Compose if needed\",
+            \"if [ \\\"\\$COMPOSE_INSTALLED\\\" = \\\"false\\\" ]; then\",
+            \"  echo '=== Installing Docker Compose ==='\",
+            \"  if docker compose version &> /dev/null 2>&1; then\",
+            \"    echo 'Docker Compose plugin is available'\",
+            \"  else\",
+            \"    # Install standalone Docker Compose\",
+            \"    COMPOSE_VERSION=\\\"v2.24.0\\\"\",
+            \"    sudo curl -L \\\"https://github.com/docker/compose/releases/download/\\$COMPOSE_VERSION/docker-compose-\\$(uname -s)-\\$(uname -m)\\\" -o /usr/local/bin/docker-compose\",
+            \"    sudo chmod +x /usr/local/bin/docker-compose\",
+            \"    docker-compose --version || (echo 'ERROR: Docker Compose installation failed' && exit 1)\",
+            \"    echo 'Docker Compose installed successfully'\",
+            \"  fi\",
+            \"fi\",
+            \"\",
+            \"echo '=== Final Verification ==='\",
+            \"sudo docker --version\",
+            \"if sudo docker compose version &> /dev/null 2>&1; then\",
+            \"  sudo docker compose version\",
+            \"  echo 'Using Docker Compose plugin'\",
+            \"elif command -v docker-compose &> /dev/null && sudo docker-compose --version &> /dev/null 2>&1; then\",
+            \"  sudo docker-compose --version\",
+            \"  echo 'Using standalone Docker Compose'\",
+            \"else\",
+            \"  echo 'ERROR: Docker Compose not available'\",
+            \"  exit 1\",
+            \"fi\",
+            \"\",
+            \"echo '=== Installation Complete ==='\",
+            \"echo 'Docker and Docker Compose are ready'\"
+          ]" \
+          --timeout-seconds ${TIMEOUT} \
+          --query 'Command.CommandId' \
+          --output text)
+        
+        if [ -z "$COMMAND_ID" ]; then
+          echo "::error::Failed to send SSM command for Docker installation"
+          exit 1
+        fi
+        
+        echo "command-id=${COMMAND_ID}" >> $GITHUB_OUTPUT
+        echo "::notice::Docker installation command sent: ${COMMAND_ID}"
+        
+        # Wait for installation to complete
+        echo "Waiting for Docker installation..."
+        MAX_WAIT=${TIMEOUT}
+        ELAPSED=0
+        while [ ${ELAPSED} -lt ${MAX_WAIT} ]; do
+          STATUS=$(aws ssm get-command-invocation \
+            --region "${INSTANCE_REGION}" \
+            --command-id "${COMMAND_ID}" \
+            --instance-id "${INSTANCE_ID}" \
+            --query 'Status' \
+            --output text 2>/dev/null || echo "Pending")
+          
+          if [ "$STATUS" = "Success" ]; then
+            echo "::notice::Docker installation completed successfully"
+            break
+          elif [ "$STATUS" = "Failed" ] || [ "$STATUS" = "Cancelled" ] || [ "$STATUS" = "TimedOut" ]; then
+            echo "::error::Docker installation failed with status: ${STATUS}"
+            ERROR_OUTPUT=$(aws ssm get-command-invocation \
+              --region "${INSTANCE_REGION}" \
+              --command-id "${COMMAND_ID}" \
+              --instance-id "${INSTANCE_ID}" \
+              --query 'StandardErrorContent' \
+              --output text 2>/dev/null || echo "No error details")
+            echo "Error details: ${ERROR_OUTPUT}"
+            exit 1
+          fi
+          
+          sleep 5
+          ELAPSED=$((ELAPSED + 5))
+          if [ $((ELAPSED % 30)) -eq 0 ]; then
+            echo "Still installing... (${ELAPSED}s / ${MAX_WAIT}s)"
+          fi
+        done
+        
+        if [ "$STATUS" != "Success" ]; then
+          echo "::error::Docker installation timed out or failed"
+          exit 1
+        fi
+        
+        # Show installation output
+        INSTALL_OUTPUT=$(aws ssm get-command-invocation \
+          --region "${INSTANCE_REGION}" \
+          --command-id "${COMMAND_ID}" \
+          --instance-id "${INSTANCE_ID}" \
+          --query 'StandardOutputContent' \
+          --output text)
+        
+        echo "=== Docker Installation Output ==="
+        echo "$INSTALL_OUTPUT"
+        
+        # Check if Docker was already installed
+        if echo "$INSTALL_OUTPUT" | grep -q "Docker already installed"; then
+          echo "already-installed=true" >> $GITHUB_OUTPUT
+        else
+          echo "already-installed=false" >> $GITHUB_OUTPUT
+        fi
+

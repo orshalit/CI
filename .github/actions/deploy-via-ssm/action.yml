@@ -1,0 +1,207 @@
+name: 'Deploy Application via SSM'
+description: 'Deploys application on EC2 instance by executing deployment script via AWS SSM'
+author: 'DevOps Team'
+
+inputs:
+  instance-id:
+    description: 'EC2 instance ID'
+    required: true
+  region:
+    description: 'AWS region'
+    required: true
+  deploy-script-path:
+    description: 'Path to deployment script on EC2 instance'
+    required: true
+  deploy-version:
+    description: 'Version/tag to deploy'
+    required: true
+  deploy-commit:
+    description: 'Git commit SHA'
+    required: true
+  github-owner:
+    description: 'GitHub organization/user'
+    required: true
+  github-repo:
+    description: 'GitHub repository name'
+    required: true
+  github-token:
+    description: 'GitHub token for GHCR authentication'
+    required: true
+  timeout:
+    description: 'Timeout in seconds for deployment'
+    required: false
+    default: '600'
+
+outputs:
+  command-id:
+    description: 'SSM command ID for the deployment'
+    value: ${{ steps.deploy.outputs.command-id }}
+  status:
+    description: 'Final deployment status'
+    value: ${{ steps.wait.outputs.status }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Execute deployment script
+      id: deploy
+      shell: bash
+      run: |
+        INSTANCE_ID="${{ inputs.instance-id }}"
+        INSTANCE_REGION="${{ inputs.region }}"
+        DEPLOY_SCRIPT_PATH="${{ inputs.deploy-script-path }}"
+        VERSION="${{ inputs.deploy-version }}"
+        COMMIT="${{ inputs.deploy-commit }}"
+        GITHUB_OWNER="${{ inputs.github-owner }}"
+        GITHUB_REPO="${{ inputs.github-repo }}"
+        TIMEOUT="${{ inputs.timeout }}"
+        
+        echo "=== Executing deployment on EC2 ==="
+        echo "Instance: ${INSTANCE_ID}"
+        echo "Region: ${INSTANCE_REGION}"
+        echo "Version: ${VERSION}"
+        echo "Commit: ${COMMIT}"
+        echo "Script: ${DEPLOY_SCRIPT_PATH}"
+        echo ""
+        
+        # Send SSM command to execute the deployment script
+        COMMAND_ID=$(aws ssm send-command \
+          --region "${INSTANCE_REGION}" \
+          --instance-ids "${INSTANCE_ID}" \
+          --document-name "AWS-RunShellScript" \
+          --comment "Deploy ${GITHUB_REPO} ${VERSION} via GitHub Actions" \
+          --parameters "commands=[
+            \"set -e\",
+            \"export DEPLOY_VERSION='${VERSION}'\",
+            \"export DEPLOY_COMMIT='${COMMIT}'\",
+            \"export GITHUB_OWNER='${GITHUB_OWNER}'\",
+            \"export GITHUB_REPO='${GITHUB_REPO}'\",
+            \"export GITHUB_TOKEN='${{ inputs.github-token }}'\",
+            \"if [ ! -f ${DEPLOY_SCRIPT_PATH} ]; then echo 'ERROR: Deployment script not found at ${DEPLOY_SCRIPT_PATH}'; exit 1; fi\",
+            \"if [ ! -x ${DEPLOY_SCRIPT_PATH} ]; then echo 'ERROR: Deployment script is not executable'; exit 1; fi\",
+            \"cd $(dirname ${DEPLOY_SCRIPT_PATH})\",
+            \"# Use 'sg docker' to run with docker group permissions\",
+            \"if groups | grep -q docker; then\",
+            \"  sg docker -c 'bash ${DEPLOY_SCRIPT_PATH}' || bash ${DEPLOY_SCRIPT_PATH}\",
+            \"else\",
+            \"  bash ${DEPLOY_SCRIPT_PATH}\",
+            \"fi\"
+          ]" \
+          --timeout-seconds ${TIMEOUT} \
+          --query 'Command.CommandId' \
+          --output text)
+        
+        if [ -z "$COMMAND_ID" ]; then
+          echo "::error::Failed to send SSM command"
+          exit 1
+        fi
+        
+        echo "command-id=${COMMAND_ID}" >> $GITHUB_OUTPUT
+        echo "::notice::Deployment command sent: ${COMMAND_ID}"
+        echo ""
+        echo "Command ID: ${COMMAND_ID}"
+        echo "Track in AWS Console: https://${INSTANCE_REGION}.console.aws.amazon.com/systems-manager/run-command/${COMMAND_ID}"
+    
+    - name: Wait for deployment completion
+      id: wait
+      shell: bash
+      run: |
+        INSTANCE_ID="${{ inputs.instance-id }}"
+        INSTANCE_REGION="${{ inputs.region }}"
+        COMMAND_ID="${{ steps.deploy.outputs.command-id }}"
+        TIMEOUT="${{ inputs.timeout }}"
+        
+        echo "=== Monitoring deployment progress ==="
+        echo "Command ID: ${COMMAND_ID}"
+        echo ""
+        
+        MAX_WAIT=${TIMEOUT}
+        ELAPSED=0
+        LAST_STATUS=""
+        
+        while [ ${ELAPSED} -lt ${MAX_WAIT} ]; do
+          STATUS=$(aws ssm get-command-invocation \
+            --region "${INSTANCE_REGION}" \
+            --command-id "${COMMAND_ID}" \
+            --instance-id "${INSTANCE_ID}" \
+            --query 'Status' \
+            --output text 2>/dev/null || echo "Pending")
+          
+          # Show status changes
+          if [ "$STATUS" != "$LAST_STATUS" ]; then
+            echo "Status: ${STATUS}"
+            LAST_STATUS="$STATUS"
+          fi
+          
+          if [ "$STATUS" = "Success" ]; then
+            echo "::notice::Deployment completed successfully"
+            echo "status=success" >> $GITHUB_OUTPUT
+            break
+          elif [ "$STATUS" = "Failed" ]; then
+            echo "::error::Deployment failed"
+            echo "status=failed" >> $GITHUB_OUTPUT
+            break
+          elif [ "$STATUS" = "Cancelled" ]; then
+            echo "::error::Deployment was cancelled"
+            echo "status=cancelled" >> $GITHUB_OUTPUT
+            exit 1
+          elif [ "$STATUS" = "TimedOut" ]; then
+            echo "::error::Deployment timed out"
+            echo "status=timeout" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
+          # Progress indicator
+          sleep 10
+          ELAPSED=$((ELAPSED + 10))
+          if [ $((ELAPSED % 60)) -eq 0 ]; then
+            echo "Still deploying... (${ELAPSED}s / ${MAX_WAIT}s)"
+          fi
+        done
+        
+        if [ "$STATUS" != "Success" ] && [ "$STATUS" != "Failed" ]; then
+          echo "::error::Deployment monitoring timed out"
+          echo "status=timeout" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+    
+    - name: Retrieve deployment logs
+      if: always()
+      shell: bash
+      run: |
+        INSTANCE_ID="${{ inputs.instance-id }}"
+        INSTANCE_REGION="${{ inputs.region }}"
+        COMMAND_ID="${{ steps.deploy.outputs.command-id }}"
+        
+        echo "=== Deployment Logs ==="
+        
+        # Get standard output
+        STDOUT=$(aws ssm get-command-invocation \
+          --region "${INSTANCE_REGION}" \
+          --command-id "${COMMAND_ID}" \
+          --instance-id "${INSTANCE_ID}" \
+          --query 'StandardOutputContent' \
+          --output text 2>/dev/null || echo "No output available")
+        
+        echo "$STDOUT"
+        
+        # Get standard error if deployment failed
+        if [ "${{ steps.wait.outputs.status }}" != "success" ]; then
+          echo ""
+          echo "=== Error Output ==="
+          STDERR=$(aws ssm get-command-invocation \
+            --region "${INSTANCE_REGION}" \
+            --command-id "${COMMAND_ID}" \
+            --instance-id "${INSTANCE_ID}" \
+            --query 'StandardErrorContent' \
+            --output text 2>/dev/null || echo "No error output")
+          echo "$STDERR"
+        fi
+    
+    - name: Check deployment status
+      if: steps.wait.outputs.status != 'success'
+      shell: bash
+      run: |
+        echo "::error::Deployment failed with status: ${{ steps.wait.outputs.status }}"
+        exit 1
+

@@ -20,7 +20,57 @@
 - ✅ **Security Scanning** - Nightly scans with Bandit, Safety, Trivy, TruffleHog, CodeQL
 - ✅ **Automated Versioning** with Git metadata and build timestamps
 - ✅ **CI/CD Pipeline** with GitHub Actions and automated releases
+- ✅ **Secure Deployment** - OIDC-based AWS deployment (no access keys)
 - ✅ **Production-ready** configuration with all best practices
+
+## 🚀 Deployment
+
+This project includes a secure, automated deployment pipeline to AWS EC2 using GitHub Actions with OIDC authentication (no AWS access keys required).
+
+### Deployment Features
+
+- ✅ **OIDC Authentication**: Secure authentication to AWS without long-lived credentials
+- ✅ **Automated Deployments**: Automatically deploys on successful CI for main branch
+- ✅ **SSM-Based**: Uses AWS Systems Manager for secure command execution
+- ✅ **Zero-Downtime**: Graceful container shutdown and health check verification
+- ✅ **Automatic Rollback**: Rolls back to previous version on deployment failure
+- ✅ **Branch Protection**: Enforces PR requirements and CI checks before deployment
+
+### Quick Deployment Setup
+
+1. **Apply Terraform Infrastructure** (creates OIDC provider and IAM role):
+   ```bash
+   cd ../DEVOPS/live/dev/03-github-oidc
+   cp terraform.tfvars.example terraform.tfvars
+   # Edit terraform.tfvars with your GitHub org/repo
+   terraform init && terraform apply
+   ```
+
+2. **Configure GitHub Secrets**:
+   - `AWS_ROLE_ARN`: From Terraform output `github_actions_role_arn`
+   - `AWS_REGION`: Your AWS region (e.g., `us-east-1`)
+
+3. **EC2 Instance**:
+   - Only requires SSM agent (already configured in Terraform)
+   - Docker, Docker Compose, and deployment files are automatically installed/copied during deployment
+   - No manual setup required!
+
+4. **Deploy**:
+   - Merge a PR to `main` → Automatic deployment after CI passes
+   - Or manually trigger: Actions → Deploy to AWS → Run workflow
+
+### Deployment Flow
+
+```
+PR Merged to main → CI Tests Pass → OIDC Auth → Find EC2 by Tags → 
+SSM Run Command → Pull GHCR Images → Docker Compose Up → Health Checks → 
+✅ Success (or Rollback on Failure)
+```
+
+### Documentation
+
+- **[DEPLOYMENT.md](DEPLOYMENT.md)** - Complete deployment guide with setup instructions
+- **[DEVOPS/live/dev/03-github-oidc/](../DEVOPS/live/dev/03-github-oidc/)** - Terraform configuration for OIDC infrastructure
 
 ## Project Structure
 
@@ -389,13 +439,18 @@ The project uses GitHub Actions for automated CI/CD:
 
 ## 📚 Documentation
 
+### CI/CD & Deployment
+- **[DEPLOYMENT.md](DEPLOYMENT.md)** - Secure AWS deployment guide (OIDC, SSM, Docker Compose)
 - **[CI-CD-GUIDE.md](CI-CD-GUIDE.md)** - Comprehensive CI/CD pipeline guide
-- **[LINTING-GUIDE.md](LINTING-GUIDE.md)** - Code quality and linting setup
-- **[LINTING-MODERNIZATION.md](LINTING-MODERNIZATION.md)** - Modern linting with Ruff (NEW! ⚡)
-- **[VERSIONING.md](VERSIONING.md)** - Docker versioning and build system
-- **[DOCKER-IMPROVEMENTS.md](DOCKER-IMPROVEMENTS.md)** - Docker enhancements summary
-- **[PRODUCTION-IMPROVEMENTS.md](PRODUCTION-IMPROVEMENTS.md)** - All production-grade improvements
 - **[QUICK-START.md](QUICK-START.md)** - Quick reference for common commands
+
+### Code Quality & Standards
+- **[LINTING-GUIDE.md](LINTING-GUIDE.md)** - Code quality and linting setup
+- **[VERSIONING.md](VERSIONING.md)** - Docker versioning and build system
+
+### Infrastructure
+- **[DEVOPS/live/dev/03-github-oidc/](../DEVOPS/live/dev/03-github-oidc/)** - Terraform OIDC infrastructure
+- **[DEVOPS/modules/backend/github-oidc/](../DEVOPS/modules/backend/github-oidc/)** - OIDC Terraform module
 
 ### Running Backend Locally
 

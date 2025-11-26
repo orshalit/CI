@@ -1,0 +1,322 @@
+################################################################################
+# Deployment Pipeline - AWS EC2 via SSM
+#
+# This workflow deploys the application to AWS EC2 instances using:
+# - OIDC authentication (no access keys)
+# - AWS Systems Manager (SSM) for secure command execution
+# - Docker Compose for orchestration
+#
+# Triggers:
+# - Automatically after successful CI workflow on main branch
+# - Manually via workflow_dispatch for testing
+#
+# Prerequisites:
+# - Terraform infrastructure applied (DEVOPS/live/dev/03-github-oidc)
+# - GitHub secret configured: AWS_ROLE_ARN
+# - EC2 instance running with SSM agent installed
+# - AWS region is auto-discovered from EC2 instance (default: us-east-1)
+# - Docker and Docker Compose are automatically installed if not present
+# - Deployment files (deploy.sh, docker-compose.prod.yml) are automatically
+#   copied to EC2 via SSM during deployment (no manual setup required)
+################################################################################
+
+name: Deploy to AWS
+
+on:
+  # Automatic deployment after successful CI on main branch
+  workflow_run:
+    workflows: ["CI/CD Pipeline"]
+    branches: [main]
+    types:
+      - completed
+
+  # Manual deployment trigger for testing
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - production
+      image_tag:
+        description: 'Docker image tag to deploy (leave empty for latest from main)'
+        required: false
+        type: string
+
+# Cancel in-progress deployments of the same workflow
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false  # Don't cancel deployments in progress
+
+env:
+  AWS_REGION: us-east-1  # Default region, will be auto-discovered from EC2 instance
+  DEPLOYMENT_TIMEOUT: 600  # 10 minutes
+
+jobs:
+  deploy:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+    # Only deploy if CI was successful (for workflow_run) or if manually triggered
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+
+    steps:
+      # =====================================================================
+      # Setup and Authentication
+      # =====================================================================
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for version metadata
+
+      - name: Determine deployment version
+        id: version
+        run: |
+          # Use input tag if provided (manual dispatch), otherwise determine from git
+          if [ -n "${{ github.event.inputs.image_tag }}" ]; then
+            VERSION="${{ github.event.inputs.image_tag }}"
+          elif [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VERSION="${{ github.ref_name }}"
+          else
+            VERSION="main-$(git rev-parse --short HEAD)"
+          fi
+          
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "commit=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          echo "::notice::Deploying version: ${VERSION}"
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-Deploy-${{ github.run_id }}
+
+      - name: Verify AWS authentication
+        run: |
+          echo "=== AWS Identity ==="
+          aws sts get-caller-identity
+          echo ""
+          echo "=== Initial AWS Region (will be updated after instance discovery) ==="
+          echo "${{ env.AWS_REGION }}"
+
+      # =====================================================================
+      # Discover Target EC2 Instance
+      # =====================================================================
+
+      - name: Find target EC2 instance and discover region
+        id: find-instance
+        run: |
+          ENVIRONMENT="${{ github.event.inputs.environment || 'dev' }}"
+          
+          echo "=== Searching for EC2 instance ==="
+          echo "Environment: ${ENVIRONMENT}"
+          echo "Filters: Environment=${ENVIRONMENT}, ManagedBy=Terraform, SubnetType=app (or none)"
+          
+          # Try to find instances in the default region first
+          INSTANCE_JSON=$(aws ec2 describe-instances \
+            --filters \
+              "Name=tag:Environment,Values=${ENVIRONMENT}" \
+              "Name=tag:ManagedBy,Values=Terraform" \
+              "Name=instance-state-name,Values=running" \
+            --query 'Reservations[].Instances[]' \
+            --output json 2>/dev/null || echo "[]")
+          
+          # If no instances found in default region, try all regions
+          if [ "$(echo "$INSTANCE_JSON" | jq 'length')" -eq 0 ]; then
+            echo "No instances found in default region, searching all regions..."
+            for region in $(aws ec2 describe-regions --query 'Regions[].RegionName' --output text); do
+              echo "Checking region: ${region}"
+              INSTANCE_JSON=$(aws ec2 describe-instances \
+                --region "${region}" \
+                --filters \
+                  "Name=tag:Environment,Values=${ENVIRONMENT}" \
+                  "Name=tag:ManagedBy,Values=Terraform" \
+                  "Name=instance-state-name,Values=running" \
+                --query 'Reservations[].Instances[]' \
+                --output json 2>/dev/null || echo "[]")
+              
+              if [ "$(echo "$INSTANCE_JSON" | jq 'length')" -gt 0 ]; then
+                echo "Found instance in region: ${region}"
+                DISCOVERED_REGION="${region}"
+                break
+              fi
+            done
+          else
+            # Get region from instance's availability zone
+            DISCOVERED_REGION=$(echo "$INSTANCE_JSON" | jq -r '.[0].Placement.AvailabilityZone' | sed 's/.$//' || echo "${{ env.AWS_REGION }}")
+          fi
+          
+          # Filter for app tier instances (if SubnetType tag exists, it should be 'app')
+          # If SubnetType tag doesn't exist, include it (backward compatibility)
+          INSTANCE_ID=$(echo "$INSTANCE_JSON" | jq -r '
+            .[] | 
+            select(
+              (.Tags | any(.Key == "SubnetType" and .Value == "app")) or
+              (.Tags | any(.Key == "SubnetType") | not)
+            ) | 
+            .InstanceId' | head -1)
+          
+          if [ -z "$INSTANCE_ID" ] || [ "$INSTANCE_ID" == "null" ]; then
+            echo "::error::No running EC2 instance found with tags Environment=${ENVIRONMENT}, ManagedBy=Terraform"
+            exit 1
+          fi
+          
+          # Get instance details
+          PRIVATE_IP=$(echo "$INSTANCE_JSON" | jq -r ".[] | select(.InstanceId == \"$INSTANCE_ID\") | .PrivateIpAddress")
+          INSTANCE_NAME=$(echo "$INSTANCE_JSON" | jq -r ".[] | select(.InstanceId == \"$INSTANCE_ID\") | .Tags[] | select(.Key == \"Name\") | .Value")
+          INSTANCE_REGION=$(echo "$INSTANCE_JSON" | jq -r ".[] | select(.InstanceId == \"$INSTANCE_ID\") | .Placement.AvailabilityZone" | sed 's/.$//' || echo "$DISCOVERED_REGION")
+          
+          # Update AWS region if discovered
+          if [ -n "$INSTANCE_REGION" ] && [ "$INSTANCE_REGION" != "${{ env.AWS_REGION }}" ]; then
+            echo "Discovered region: ${INSTANCE_REGION} (different from default ${{ env.AWS_REGION }})"
+            echo "region=${INSTANCE_REGION}" >> $GITHUB_ENV
+            echo "aws_region=${INSTANCE_REGION}" >> $GITHUB_OUTPUT
+          else
+            echo "Using default region: ${{ env.AWS_REGION }}"
+            echo "aws_region=${{ env.AWS_REGION }}" >> $GITHUB_OUTPUT
+          fi
+          
+          echo "instance_id=${INSTANCE_ID}" >> $GITHUB_OUTPUT
+          echo "private_ip=${PRIVATE_IP}" >> $GITHUB_OUTPUT
+          echo "instance_name=${INSTANCE_NAME}" >> $GITHUB_OUTPUT
+          
+          echo "::notice::Found instance: ${INSTANCE_NAME} (${INSTANCE_ID}) in region: ${INSTANCE_REGION:-${{ env.AWS_REGION }}}"
+          echo ""
+          echo "=== Target Instance ==="
+          echo "Instance ID: ${INSTANCE_ID}"
+          echo "Instance Name: ${INSTANCE_NAME}"
+          echo "Private IP: ${PRIVATE_IP}"
+          echo "Region: ${INSTANCE_REGION:-${{ env.AWS_REGION }}}"
+
+      - name: Verify SSM connectivity
+        run: |
+          echo "=== Checking SSM agent status ==="
+          
+          INSTANCE_ID="${{ steps.find-instance.outputs.instance_id }}"
+          INSTANCE_REGION="${AWS_REGION:-${{ steps.find-instance.outputs.aws_region }}}"
+          
+          echo "Using region: ${INSTANCE_REGION}"
+          
+          # Check if instance is registered with SSM
+          SSM_STATUS=$(aws ssm describe-instance-information \
+            --region "${INSTANCE_REGION}" \
+            --filters "Key=InstanceIds,Values=${INSTANCE_ID}" \
+            --query 'InstanceInformationList[0].PingStatus' \
+            --output text 2>/dev/null || echo "NotFound")
+          
+          if [ "$SSM_STATUS" != "Online" ]; then
+            echo "::error::Instance ${INSTANCE_ID} is not online in SSM (Status: ${SSM_STATUS})"
+            echo "Ensure the SSM agent is installed and running on the EC2 instance"
+            exit 1
+          fi
+          
+          echo "::notice::SSM agent is online and ready"
+
+      # =====================================================================
+      # Install Docker and Docker Compose (if needed)
+      # =====================================================================
+
+      - name: Install Docker and Docker Compose
+        uses: ./.github/actions/install-docker-ec2
+        with:
+          instance-id: ${{ steps.find-instance.outputs.instance_id }}
+          region: ${{ env.AWS_REGION }}
+          timeout: '300'
+
+      # =====================================================================
+      # Copy Deployment Files to EC2 via SSM
+      # =====================================================================
+
+      - name: Copy deployment files to EC2
+        uses: ./.github/actions/copy-files-ssm
+        with:
+          instance-id: ${{ steps.find-instance.outputs.instance_id }}
+          region: ${{ env.AWS_REGION }}
+          source-files: 'scripts/deploy.sh docker-compose.prod.yml'
+          destination-dir: '/opt/ci-app'
+          timeout: '60'
+
+      # =====================================================================
+      # Execute Deployment via SSM
+      # =====================================================================
+
+      - name: Deploy application
+        id: deploy
+        uses: ./.github/actions/deploy-via-ssm
+        with:
+          instance-id: ${{ steps.find-instance.outputs.instance_id }}
+          region: ${{ env.AWS_REGION }}
+          deploy-script-path: '/opt/ci-app/deploy.sh'
+          deploy-version: ${{ steps.version.outputs.version }}
+          deploy-commit: ${{ steps.version.outputs.commit }}
+          github-owner: ${{ github.repository_owner }}
+          github-repo: ${{ github.event.repository.name }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          timeout: ${{ env.DEPLOYMENT_TIMEOUT }}
+
+      # =====================================================================
+      # Verify Deployment
+      # =====================================================================
+
+      - name: Verify deployment health
+        if: steps.deploy.outputs.status == 'success'
+        run: |
+          PRIVATE_IP="${{ steps.find-instance.outputs.private_ip }}"
+          VERSION="${{ steps.version.outputs.version }}"
+          
+          echo "=== Deployment Health Summary ==="
+          echo "Health verification is performed by the deployment script on the EC2 instance"
+          echo ""
+          echo "Services should be accessible at (from within VPC):"
+          echo "- Backend API: http://${PRIVATE_IP}:8000/health"
+          echo "- Frontend: http://${PRIVATE_IP}:3000/"
+          echo "- Version: ${VERSION}"
+          echo ""
+          echo "::notice::Deployment completed successfully"
+
+      # =====================================================================
+      # Summary
+      # =====================================================================
+
+      - name: Deployment summary
+        if: always()
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY <<EOF
+          ## 🚀 Deployment Summary
+          
+          **Status:** ${{ steps.deploy.outputs.status == 'success' && '✅ Success' || '❌ Failed' }}
+          
+          **Target Instance:**
+          - Instance ID: \`${{ steps.find-instance.outputs.instance_id }}\`
+          - Instance Name: \`${{ steps.find-instance.outputs.instance_name }}\`
+          - Private IP: \`${{ steps.find-instance.outputs.private_ip }}\`
+          - Region: \`${{ env.AWS_REGION }}\`
+          
+          **Deployment Details:**
+          - Version: \`${{ steps.version.outputs.version }}\`
+          - Commit: \`${{ steps.version.outputs.commit }}\`
+          - Environment: \`${{ github.event.inputs.environment || 'dev' }}\`
+          - SSM Command ID: \`${{ steps.deploy.outputs.command-id }}\`
+          
+          **Docker Images:**
+          - Backend: \`ghcr.io/${{ github.repository_owner }}/ci-backend:${{ steps.version.outputs.version }}\`
+          - Frontend: \`ghcr.io/${{ github.repository_owner }}/ci-frontend:${{ steps.version.outputs.version }}\`
+          
+          **Triggered By:** ${{ github.actor }}
+          **Workflow:** ${{ github.workflow }} #${{ github.run_number }}
+          
+          ---
+          
+          ### Architecture
+          This deployment uses:
+          - 🔐 OIDC authentication (no access keys)
+          - 📦 Composite actions for maintainability
+          - 🚀 AWS SSM for secure execution
+          - 🐳 Docker Compose orchestration
+          EOF
+
