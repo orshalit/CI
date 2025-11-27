@@ -78,21 +78,23 @@ runs:
           fi
           
           SSM_COMMANDS="${SSM_COMMANDS},\"echo === Copying ${FILENAME} ===\"" 
-          SSM_COMMANDS="${SSM_COMMANDS},\"echo '${FILE_B64}' | base64 -d > ${DEST_DIR}/${FILENAME}\""
+          # Escape single quotes in base64: replace ' with '\'' (end quote, escaped quote, start quote)
+          FILE_B64_ESCAPED=$(echo "${FILE_B64}" | sed "s/'/'\\\\''/g")
+          SSM_COMMANDS="${SSM_COMMANDS},\"echo '${FILE_B64_ESCAPED}' | base64 -d > ${DEST_DIR}/${FILENAME}\""
           SSM_COMMANDS="${SSM_COMMANDS},\"chmod ${PERMS} ${DEST_DIR}/${FILENAME}\""
           SSM_COMMANDS="${SSM_COMMANDS},\"echo ${FILENAME}: OK - ${PERMS_DESC}\""
         done
         
         # Add verification commands
-        SSM_COMMANDS="${SSM_COMMANDS},\"echo '=== Verifying files ===\""
+        SSM_COMMANDS="${SSM_COMMANDS},\"echo === Verifying files ===\""
         SSM_COMMANDS="${SSM_COMMANDS},\"ls -lh ${DEST_DIR}/\""
         
         for FILE in ${SOURCE_FILES}; do
           FILENAME=$(basename "${FILE}")
-          SSM_COMMANDS="${SSM_COMMANDS},\"test -f ${DEST_DIR}/${FILENAME} && echo '${FILENAME}: EXISTS' || echo '${FILENAME}: MISSING'\""
+          SSM_COMMANDS="${SSM_COMMANDS},\"test -f ${DEST_DIR}/${FILENAME} && echo ${FILENAME}: EXISTS || echo ${FILENAME}: MISSING\""
         done
         
-        SSM_COMMANDS="${SSM_COMMANDS},\"echo 'Files copied successfully'\"]"
+        SSM_COMMANDS="${SSM_COMMANDS},\"echo Files copied successfully\"]"
         
         # Send SSM command
         echo "Sending files to EC2 via SSM..."
