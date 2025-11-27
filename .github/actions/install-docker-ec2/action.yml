@@ -58,14 +58,22 @@ runs:
           'fi' \
           'echo ""' \
           'echo "=== Checking Docker ==="' \
-          'if command -v docker &> /dev/null; then' \
-          '  DOCKER_VERSION=$(docker --version)' \
-          '  echo "Docker already installed: $DOCKER_VERSION"' \
-          '  DOCKER_INSTALLED=true' \
+          'set +e  # Temporarily disable exit on error for Docker check' \
+          'if command -v docker &> /dev/null 2>&1; then' \
+          '  DOCKER_VERSION=$(docker --version 2>&1)' \
+          '  DOCKER_CHECK_EXIT=$?' \
+          '  if [ $DOCKER_CHECK_EXIT -eq 0 ] && [ -n "$DOCKER_VERSION" ]; then' \
+          '    echo "Docker already installed: $DOCKER_VERSION"' \
+          '    DOCKER_INSTALLED=true' \
+          '  else' \
+          '    echo "Docker command found but not working, will reinstall..."' \
+          '    DOCKER_INSTALLED=false' \
+          '  fi' \
           'else' \
           '  echo "Docker not found, installing..."' \
           '  DOCKER_INSTALLED=false' \
           'fi' \
+          'set -e  # Re-enable exit on error' \
           'if [ "$DOCKER_INSTALLED" = "false" ]; then' \
           '  echo ""' \
           '  echo "=== Installing Docker ==="' \
@@ -117,7 +125,14 @@ runs:
           'fi' \
           'echo ""' \
           'echo "=== Docker Verification ==="' \
+          'set +e  # Temporarily disable exit on error for verification' \
           'sudo docker --version' \
+          'DOCKER_VERIFY_EXIT=$?' \
+          'set -e  # Re-enable exit on error' \
+          'if [ $DOCKER_VERIFY_EXIT -ne 0 ]; then' \
+          '  echo "ERROR: Docker verification failed - docker command not available"' \
+          '  exit 1' \
+          'fi' \
           'echo "Docker is ready"' \
           > "$SCRIPT_FILE"
         
@@ -373,19 +388,32 @@ runs:
         printf '%s\n' \
           'set -e' \
           'echo "=== Checking Docker Compose ==="' \
-          'if command -v docker-compose &> /dev/null || docker compose version &> /dev/null 2>&1; then' \
-          '  if docker compose version &> /dev/null 2>&1; then' \
-          '    COMPOSE_VERSION=$(docker compose version)' \
-          '    echo "Docker Compose (plugin) already installed: $COMPOSE_VERSION"' \
-          '  else' \
-          '    COMPOSE_VERSION=$(docker-compose --version)' \
+          'set +e  # Temporarily disable exit on error for Docker Compose check' \
+          'if command -v docker-compose &> /dev/null 2>&1; then' \
+          '  COMPOSE_VERSION=$(docker-compose --version 2>&1)' \
+          '  COMPOSE_CHECK_EXIT=$?' \
+          '  if [ $COMPOSE_CHECK_EXIT -eq 0 ] && [ -n "$COMPOSE_VERSION" ]; then' \
           '    echo "Docker Compose (standalone) already installed: $COMPOSE_VERSION"' \
+          '    COMPOSE_INSTALLED=true' \
+          '  else' \
+          '    echo "Docker Compose command found but not working, will reinstall..."' \
+          '    COMPOSE_INSTALLED=false' \
           '  fi' \
-          '  COMPOSE_INSTALLED=true' \
+          'elif docker compose version &> /dev/null 2>&1; then' \
+          '  COMPOSE_VERSION=$(docker compose version 2>&1)' \
+          '  COMPOSE_CHECK_EXIT=$?' \
+          '  if [ $COMPOSE_CHECK_EXIT -eq 0 ] && [ -n "$COMPOSE_VERSION" ]; then' \
+          '    echo "Docker Compose (plugin) already installed: $COMPOSE_VERSION"' \
+          '    COMPOSE_INSTALLED=true' \
+          '  else' \
+          '    echo "Docker Compose plugin found but not working, will reinstall..."' \
+          '    COMPOSE_INSTALLED=false' \
+          '  fi' \
           'else' \
           '  echo "Docker Compose not found, installing..."' \
           '  COMPOSE_INSTALLED=false' \
           'fi' \
+          'set -e  # Re-enable exit on error' \
           'if [ "$COMPOSE_INSTALLED" = "false" ]; then' \
           '  echo ""' \
           '  echo "=== Installing Docker Compose ==="' \
