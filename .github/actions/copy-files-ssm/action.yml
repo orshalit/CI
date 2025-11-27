@@ -57,7 +57,7 @@ runs:
         echo "Encoding files for transfer..."
         # Create directory with proper permissions
         # Note: chown is optional - directory will be owned by root which is fine for deployment
-        SSM_COMMANDS='["set -e","echo \"=== Creating destination directory ===\"","sudo mkdir -p '${DEST_DIR}'","sudo chmod 755 '${DEST_DIR}'"'
+        SSM_COMMANDS="[\"set -e\",\"echo \\\"=== Creating destination directory ===\\\"\",\"sudo mkdir -p ${DEST_DIR}\",\"sudo chmod 755 ${DEST_DIR}\""
         
         for FILE in ${SOURCE_FILES}; do
           FILENAME=$(basename "${FILE}")
@@ -77,10 +77,10 @@ runs:
             PERMS_DESC="regular"
           fi
           
-          SSM_COMMANDS="${SSM_COMMANDS},\"echo '=== Copying ${FILENAME} ===\""
+          SSM_COMMANDS="${SSM_COMMANDS},\"echo === Copying ${FILENAME} ===\"" 
           SSM_COMMANDS="${SSM_COMMANDS},\"echo '${FILE_B64}' | base64 -d > ${DEST_DIR}/${FILENAME}\""
           SSM_COMMANDS="${SSM_COMMANDS},\"chmod ${PERMS} ${DEST_DIR}/${FILENAME}\""
-          SSM_COMMANDS="${SSM_COMMANDS},\"echo '${FILENAME}: OK (${PERMS_DESC})'\""
+          SSM_COMMANDS="${SSM_COMMANDS},\"echo ${FILENAME}: OK - ${PERMS_DESC}\""
         done
         
         # Add verification commands
