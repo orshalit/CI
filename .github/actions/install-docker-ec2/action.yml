@@ -145,24 +145,44 @@ runs:
         echo "command-id=${COMMAND_ID}" >> $GITHUB_OUTPUT
         echo "::notice::Docker installation command sent: ${COMMAND_ID}"
         
+        # Wait a few seconds for the command to be registered in SSM before polling
+        echo "Waiting 5 seconds for command to be registered in SSM..."
+        sleep 5
+        
         # Wait for Docker installation to complete
         echo "Waiting for Docker installation..."
         echo "Checking SSM command status every 5 seconds..."
         MAX_WAIT=${TIMEOUT}
-        ELAPSED=0
+        ELAPSED=5  # Start at 5 since we already waited
         LAST_OUTPUT_CHECK=0
         LAST_STATUS=""
+        RETRY_COUNT=0
         while [ ${ELAPSED} -lt ${MAX_WAIT} ]; do
-          # Get full command invocation details
+          # Get full command invocation details with error capture
           COMMAND_INFO=$(aws ssm get-command-invocation \
             --region "${INSTANCE_REGION}" \
             --command-id "${COMMAND_ID}" \
             --instance-id "${INSTANCE_ID}" \
-            2>/dev/null || echo "")
+            2>&1)
+          AWS_EXIT_CODE=$?
           
-          if [ -z "$COMMAND_INFO" ]; then
+          if [ $AWS_EXIT_CODE -ne 0 ] || [ -z "$COMMAND_INFO" ] || echo "$COMMAND_INFO" | grep -q "An error occurred"; then
             STATUS="ErrorRetrievingStatus"
-            echo "::warning::Failed to retrieve SSM command status at ${ELAPSED}s"
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            
+            # Show the actual AWS error on first failure and every 30 seconds
+            if [ $RETRY_COUNT -eq 1 ] || [ $((ELAPSED % 30)) -eq 0 ]; then
+              echo "::warning::Failed to retrieve SSM command status at ${ELAPSED}s"
+              if [ $AWS_EXIT_CODE -ne 0 ]; then
+                echo "AWS CLI exit code: ${AWS_EXIT_CODE}"
+                echo "Error output: ${COMMAND_INFO}"
+                if echo "$COMMAND_INFO" | grep -q "AccessDenied\|UnauthorizedOperation"; then
+                  echo "::error::IAM Permission Issue: The GitHub Actions role may not have 'ssm:GetCommandInvocation' permission"
+                  echo "::error::Required resource ARN: arn:aws:ssm:${INSTANCE_REGION}:*:command/*"
+                  echo "::error::Please apply the Terraform fix in DEVOPS/modules/backend/github-oidc/main.tf"
+                fi
+              fi
+            fi
           else
             STATUS=$(echo "$COMMAND_INFO" | jq -r '.Status // "Unknown"' 2>/dev/null || echo "Unknown")
             RESPONSE_CODE=$(echo "$COMMAND_INFO" | jq -r '.ResponseCode // "N/A"' 2>/dev/null || echo "N/A")
@@ -383,28 +403,49 @@ runs:
         echo "command-id=${COMMAND_ID}" >> $GITHUB_OUTPUT
         echo "::notice::Docker Compose installation command sent: ${COMMAND_ID}"
         
+        # Wait a few seconds for the command to be registered in SSM before polling
+        echo "Waiting 5 seconds for command to be registered in SSM..."
+        sleep 5
+        
         # Wait for Docker Compose installation to complete
         echo "Waiting for Docker Compose installation..."
         echo "Checking SSM command status every 5 seconds..."
         MAX_WAIT=${TIMEOUT}
-        ELAPSED=0
+        ELAPSED=5  # Start at 5 since we already waited
         LAST_OUTPUT_CHECK=0
         LAST_STATUS=""
+        RETRY_COUNT=0
         while [ ${ELAPSED} -lt ${MAX_WAIT} ]; do
-          # Get full command invocation details
+          # Get full command invocation details with error capture
           COMMAND_INFO=$(aws ssm get-command-invocation \
             --region "${INSTANCE_REGION}" \
             --command-id "${COMMAND_ID}" \
             --instance-id "${INSTANCE_ID}" \
-            2>/dev/null || echo "")
+            2>&1)
+          AWS_EXIT_CODE=$?
           
-          if [ -z "$COMMAND_INFO" ]; then
+          if [ $AWS_EXIT_CODE -ne 0 ] || [ -z "$COMMAND_INFO" ] || echo "$COMMAND_INFO" | grep -q "An error occurred"; then
             STATUS="ErrorRetrievingStatus"
-            echo "::warning::Failed to retrieve SSM command status at ${ELAPSED}s"
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            
+            # Show the actual AWS error on first failure and every 30 seconds
+            if [ $RETRY_COUNT -eq 1 ] || [ $((ELAPSED % 30)) -eq 0 ]; then
+              echo "::warning::Failed to retrieve SSM command status at ${ELAPSED}s"
+              if [ $AWS_EXIT_CODE -ne 0 ]; then
+                echo "AWS CLI exit code: ${AWS_EXIT_CODE}"
+                echo "Error output: ${COMMAND_INFO}"
+                if echo "$COMMAND_INFO" | grep -q "AccessDenied\|UnauthorizedOperation"; then
+                  echo "::error::IAM Permission Issue: The GitHub Actions role may not have 'ssm:GetCommandInvocation' permission"
+                  echo "::error::Required resource ARN: arn:aws:ssm:${INSTANCE_REGION}:*:command/*"
+                  echo "::error::Please apply the Terraform fix in DEVOPS/modules/backend/github-oidc/main.tf"
+                fi
+              fi
+            fi
           else
             STATUS=$(echo "$COMMAND_INFO" | jq -r '.Status // "Unknown"' 2>/dev/null || echo "Unknown")
             RESPONSE_CODE=$(echo "$COMMAND_INFO" | jq -r '.ResponseCode // "N/A"' 2>/dev/null || echo "N/A")
             EXECUTION_ELAPSED=$(echo "$COMMAND_INFO" | jq -r '.ExecutionElapsedTime // "N/A"' 2>/dev/null || echo "N/A")
+            RETRY_COUNT=0  # Reset retry count on successful retrieval
           fi
           
           # Show status change or progress update
