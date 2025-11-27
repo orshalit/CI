@@ -229,7 +229,7 @@ jobs:
         with:
           instance-id: ${{ steps.find-instance.outputs.instance_id }}
           region: ${{ env.AWS_REGION }}
-          timeout: '300'
+          timeout: '600'
 
       # =====================================================================
       # Copy Deployment Files to EC2 via SSM
