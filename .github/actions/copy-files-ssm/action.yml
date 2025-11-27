@@ -56,8 +56,9 @@ runs:
         # Base64 encode all files and build SSM command
         echo "Encoding files for transfer..."
         # Get the current user dynamically in the SSM command (SSM typically runs as ssm-user or ubuntu)
-        # Use whoami/id to get the actual user, with fallback handling
-        SSM_COMMANDS='["set -e","echo \"=== Creating destination directory ===\"","CURRENT_USER=$(whoami 2>/dev/null || id -un 2>/dev/null || echo ssm-user)","echo \"Current user: ${CURRENT_USER}\"","sudo mkdir -p '${DEST_DIR}'","sudo chown ${CURRENT_USER}:${CURRENT_USER} '${DEST_DIR}' 2>/dev/null || sudo chown $(id -un):$(id -gn) '${DEST_DIR}' 2>/dev/null || echo \"Warning: Could not change ownership, continuing...\"","sudo chmod 755 '${DEST_DIR}'"'
+        # Use id -un to get the actual user (standard on all Linux systems)
+        # Simplified to avoid JSON escaping issues with nested command substitution
+        SSM_COMMANDS='["set -e","echo \"=== Creating destination directory ===\"","CURRENT_USER=`id -un`","echo \"Current user: ${CURRENT_USER}\"","sudo mkdir -p '${DEST_DIR}'","sudo chown ${CURRENT_USER}:${CURRENT_USER} '${DEST_DIR}' || true","sudo chmod 755 '${DEST_DIR}'"'
         
         for FILE in ${SOURCE_FILES}; do
           FILENAME=$(basename "${FILE}")
