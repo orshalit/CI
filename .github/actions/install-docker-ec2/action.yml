@@ -147,16 +147,36 @@ runs:
         
         # Wait for Docker installation to complete
         echo "Waiting for Docker installation..."
+        echo "Checking SSM command status every 5 seconds..."
         MAX_WAIT=${TIMEOUT}
         ELAPSED=0
         LAST_OUTPUT_CHECK=0
+        LAST_STATUS=""
         while [ ${ELAPSED} -lt ${MAX_WAIT} ]; do
-          STATUS=$(aws ssm get-command-invocation \
+          # Get full command invocation details
+          COMMAND_INFO=$(aws ssm get-command-invocation \
             --region "${INSTANCE_REGION}" \
             --command-id "${COMMAND_ID}" \
             --instance-id "${INSTANCE_ID}" \
-            --query 'Status' \
-            --output text 2>/dev/null || echo "Pending")
+            2>/dev/null || echo "")
+          
+          if [ -z "$COMMAND_INFO" ]; then
+            STATUS="ErrorRetrievingStatus"
+            echo "::warning::Failed to retrieve SSM command status at ${ELAPSED}s"
+          else
+            STATUS=$(echo "$COMMAND_INFO" | jq -r '.Status // "Unknown"' 2>/dev/null || echo "Unknown")
+            RESPONSE_CODE=$(echo "$COMMAND_INFO" | jq -r '.ResponseCode // "N/A"' 2>/dev/null || echo "N/A")
+            EXECUTION_ELAPSED=$(echo "$COMMAND_INFO" | jq -r '.ExecutionElapsedTime // "N/A"' 2>/dev/null || echo "N/A")
+          fi
+          
+          # Show status change or progress update
+          if [ "$STATUS" != "$LAST_STATUS" ] || [ $((ELAPSED % 15)) -eq 0 ]; then
+            if [ "$STATUS" != "$LAST_STATUS" ]; then
+              echo "::notice::SSM Command Status changed: ${LAST_STATUS:-Initial} -> ${STATUS}"
+            fi
+            echo "[${ELAPSED}s] Status: ${STATUS} | ResponseCode: ${RESPONSE_CODE} | SSM Execution Time: ${EXECUTION_ELAPSED}s"
+            LAST_STATUS="$STATUS"
+          fi
           
           if [ "$STATUS" = "Success" ]; then
             echo "::notice::Docker installation completed successfully"
@@ -165,79 +185,87 @@ runs:
             echo "::error::Docker installation failed with status: ${STATUS}"
             echo ""
             echo "=== Error Details ==="
-            ERROR_OUTPUT=$(aws ssm get-command-invocation \
-              --region "${INSTANCE_REGION}" \
-              --command-id "${COMMAND_ID}" \
-              --instance-id "${INSTANCE_ID}" \
-              --query 'StandardErrorContent' \
-              --output text 2>/dev/null || echo "No error details available")
+            ERROR_OUTPUT=$(echo "$COMMAND_INFO" | jq -r '.StandardErrorContent // "No error details available"' 2>/dev/null || echo "No error details available")
             echo "Error output: ${ERROR_OUTPUT}"
             echo ""
-            STDOUT=$(aws ssm get-command-invocation \
-              --region "${INSTANCE_REGION}" \
-              --command-id "${COMMAND_ID}" \
-              --instance-id "${INSTANCE_ID}" \
-              --query 'StandardOutputContent' \
-              --output text 2>/dev/null || echo "No output available")
+            STDOUT=$(echo "$COMMAND_INFO" | jq -r '.StandardOutputContent // "No output available"' 2>/dev/null || echo "No output available")
             echo "Standard output: ${STDOUT}"
+            echo ""
+            echo "Response Code: ${RESPONSE_CODE}"
+            echo "Execution Elapsed Time: ${EXECUTION_ELAPSED}s"
             echo ""
             echo "::error::Troubleshooting: Check instance resources, network connectivity, and package repository access"
             exit 1
           fi
           
-          # Retrieve and display output every 60 seconds
-          if [ $((ELAPSED - LAST_OUTPUT_CHECK)) -ge 60 ]; then
-            PARTIAL_OUTPUT=$(aws ssm get-command-invocation \
-              --region "${INSTANCE_REGION}" \
-              --command-id "${COMMAND_ID}" \
-              --instance-id "${INSTANCE_ID}" \
-              --query 'StandardOutputContent' \
-              --output text 2>/dev/null || echo "")
-            if [ -n "$PARTIAL_OUTPUT" ]; then
-              echo "=== Current Installation Progress ==="
-              echo "$PARTIAL_OUTPUT"
-              echo ""
+          # Retrieve and display output every 30 seconds (more frequent)
+          if [ $((ELAPSED - LAST_OUTPUT_CHECK)) -ge 30 ]; then
+            if [ -n "$COMMAND_INFO" ]; then
+              PARTIAL_OUTPUT=$(echo "$COMMAND_INFO" | jq -r '.StandardOutputContent // ""' 2>/dev/null || echo "")
+              if [ -n "$PARTIAL_OUTPUT" ] && [ "$PARTIAL_OUTPUT" != "null" ]; then
+                echo ""
+                echo "=== Current Installation Progress (at ${ELAPSED}s) ==="
+                echo "$PARTIAL_OUTPUT"
+                echo ""
+              else
+                echo "[${ELAPSED}s] No output available yet (command may still be starting)"
+              fi
+            else
+              echo "[${ELAPSED}s] Unable to retrieve command information"
             fi
             LAST_OUTPUT_CHECK=${ELAPSED}
           fi
           
           sleep 5
           ELAPSED=$((ELAPSED + 5))
-          # Progress update every 15 seconds
-          if [ $((ELAPSED % 15)) -eq 0 ]; then
-            echo "Still installing Docker... (${ELAPSED}s / ${MAX_WAIT}s)"
-          fi
         done
         
         if [ "$STATUS" != "Success" ]; then
           echo "::error::Docker installation timed out or failed after ${ELAPSED}s"
           echo ""
-          echo "=== Final Command Status ==="
-          FINAL_STATUS=$(aws ssm get-command-invocation \
+          echo "=== Final Command Status Check ==="
+          FINAL_COMMAND_INFO=$(aws ssm get-command-invocation \
             --region "${INSTANCE_REGION}" \
             --command-id "${COMMAND_ID}" \
             --instance-id "${INSTANCE_ID}" \
-            --query 'Status' \
-            --output text 2>/dev/null || echo "Unknown")
-          echo "Status: ${FINAL_STATUS}"
-          echo ""
-          FINAL_OUTPUT=$(aws ssm get-command-invocation \
-            --region "${INSTANCE_REGION}" \
-            --command-id "${COMMAND_ID}" \
-            --instance-id "${INSTANCE_ID}" \
-            --query 'StandardOutputContent' \
-            --output text 2>/dev/null || echo "No output available")
-          echo "=== Final Output ==="
-          echo "${FINAL_OUTPUT}"
-          echo ""
-          FINAL_ERROR=$(aws ssm get-command-invocation \
-            --region "${INSTANCE_REGION}" \
-            --command-id "${COMMAND_ID}" \
-            --instance-id "${INSTANCE_ID}" \
-            --query 'StandardErrorContent' \
-            --output text 2>/dev/null || echo "No error output available")
-          echo "=== Final Error Output ==="
-          echo "${FINAL_ERROR}"
+            2>/dev/null || echo "")
+          
+          if [ -z "$FINAL_COMMAND_INFO" ]; then
+            echo "ERROR: Unable to retrieve final command status from SSM"
+            echo "This may indicate:"
+            echo "  - SSM service is unavailable"
+            echo "  - Command ID is invalid: ${COMMAND_ID}"
+            echo "  - Instance is not accessible: ${INSTANCE_ID}"
+            echo "  - IAM permissions issue"
+          else
+            FINAL_STATUS=$(echo "$FINAL_COMMAND_INFO" | jq -r '.Status // "Unknown"' 2>/dev/null || echo "Unknown")
+            FINAL_RESPONSE_CODE=$(echo "$FINAL_COMMAND_INFO" | jq -r '.ResponseCode // "N/A"' 2>/dev/null || echo "N/A")
+            FINAL_EXECUTION_TIME=$(echo "$FINAL_COMMAND_INFO" | jq -r '.ExecutionElapsedTime // "N/A"' 2>/dev/null || echo "N/A")
+            FINAL_OUTPUT=$(echo "$FINAL_COMMAND_INFO" | jq -r '.StandardOutputContent // "No output available"' 2>/dev/null || echo "No output available")
+            FINAL_ERROR=$(echo "$FINAL_COMMAND_INFO" | jq -r '.StandardErrorContent // "No error output available"' 2>/dev/null || echo "No error output available")
+            
+            echo "Status: ${FINAL_STATUS}"
+            echo "Response Code: ${FINAL_RESPONSE_CODE}"
+            echo "SSM Execution Time: ${FINAL_EXECUTION_TIME}s"
+            echo "Polling Time: ${ELAPSED}s"
+            echo ""
+            echo "=== Final Output ==="
+            if [ "$FINAL_OUTPUT" != "No output available" ] && [ "$FINAL_OUTPUT" != "null" ] && [ -n "$FINAL_OUTPUT" ]; then
+              echo "$FINAL_OUTPUT"
+            else
+              echo "No output available (command may not have started or SSM is not returning output)"
+            fi
+            echo ""
+            echo "=== Final Error Output ==="
+            if [ "$FINAL_ERROR" != "No error output available" ] && [ "$FINAL_ERROR" != "null" ] && [ -n "$FINAL_ERROR" ]; then
+              echo "$FINAL_ERROR"
+            else
+              echo "No error output available"
+            fi
+            echo ""
+            echo "=== Full Command Details (JSON) ==="
+            echo "$FINAL_COMMAND_INFO" | jq '.' 2>/dev/null || echo "$FINAL_COMMAND_INFO"
+          fi
           echo ""
           echo "::error::Troubleshooting: Check instance CPU/memory, network connectivity, and package repository access. Timeout may need to be increased for slow instances."
           exit 1
@@ -357,16 +385,36 @@ runs:
         
         # Wait for Docker Compose installation to complete
         echo "Waiting for Docker Compose installation..."
+        echo "Checking SSM command status every 5 seconds..."
         MAX_WAIT=${TIMEOUT}
         ELAPSED=0
         LAST_OUTPUT_CHECK=0
+        LAST_STATUS=""
         while [ ${ELAPSED} -lt ${MAX_WAIT} ]; do
-          STATUS=$(aws ssm get-command-invocation \
+          # Get full command invocation details
+          COMMAND_INFO=$(aws ssm get-command-invocation \
             --region "${INSTANCE_REGION}" \
             --command-id "${COMMAND_ID}" \
             --instance-id "${INSTANCE_ID}" \
-            --query 'Status' \
-            --output text 2>/dev/null || echo "Pending")
+            2>/dev/null || echo "")
+          
+          if [ -z "$COMMAND_INFO" ]; then
+            STATUS="ErrorRetrievingStatus"
+            echo "::warning::Failed to retrieve SSM command status at ${ELAPSED}s"
+          else
+            STATUS=$(echo "$COMMAND_INFO" | jq -r '.Status // "Unknown"' 2>/dev/null || echo "Unknown")
+            RESPONSE_CODE=$(echo "$COMMAND_INFO" | jq -r '.ResponseCode // "N/A"' 2>/dev/null || echo "N/A")
+            EXECUTION_ELAPSED=$(echo "$COMMAND_INFO" | jq -r '.ExecutionElapsedTime // "N/A"' 2>/dev/null || echo "N/A")
+          fi
+          
+          # Show status change or progress update
+          if [ "$STATUS" != "$LAST_STATUS" ] || [ $((ELAPSED % 15)) -eq 0 ]; then
+            if [ "$STATUS" != "$LAST_STATUS" ]; then
+              echo "::notice::SSM Command Status changed: ${LAST_STATUS:-Initial} -> ${STATUS}"
+            fi
+            echo "[${ELAPSED}s] Status: ${STATUS} | ResponseCode: ${RESPONSE_CODE} | SSM Execution Time: ${EXECUTION_ELAPSED}s"
+            LAST_STATUS="$STATUS"
+          fi
           
           if [ "$STATUS" = "Success" ]; then
             echo "::notice::Docker Compose installation completed successfully"
@@ -375,79 +423,87 @@ runs:
             echo "::error::Docker Compose installation failed with status: ${STATUS}"
             echo ""
             echo "=== Error Details ==="
-            ERROR_OUTPUT=$(aws ssm get-command-invocation \
-              --region "${INSTANCE_REGION}" \
-              --command-id "${COMMAND_ID}" \
-              --instance-id "${INSTANCE_ID}" \
-              --query 'StandardErrorContent' \
-              --output text 2>/dev/null || echo "No error details available")
+            ERROR_OUTPUT=$(echo "$COMMAND_INFO" | jq -r '.StandardErrorContent // "No error details available"' 2>/dev/null || echo "No error details available")
             echo "Error output: ${ERROR_OUTPUT}"
             echo ""
-            STDOUT=$(aws ssm get-command-invocation \
-              --region "${INSTANCE_REGION}" \
-              --command-id "${COMMAND_ID}" \
-              --instance-id "${INSTANCE_ID}" \
-              --query 'StandardOutputContent' \
-              --output text 2>/dev/null || echo "No output available")
+            STDOUT=$(echo "$COMMAND_INFO" | jq -r '.StandardOutputContent // "No output available"' 2>/dev/null || echo "No output available")
             echo "Standard output: ${STDOUT}"
+            echo ""
+            echo "Response Code: ${RESPONSE_CODE}"
+            echo "Execution Elapsed Time: ${EXECUTION_ELAPSED}s"
             echo ""
             echo "::error::Troubleshooting: Check network connectivity and GitHub releases access"
             exit 1
           fi
           
-          # Retrieve and display output every 60 seconds
-          if [ $((ELAPSED - LAST_OUTPUT_CHECK)) -ge 60 ]; then
-            PARTIAL_OUTPUT=$(aws ssm get-command-invocation \
-              --region "${INSTANCE_REGION}" \
-              --command-id "${COMMAND_ID}" \
-              --instance-id "${INSTANCE_ID}" \
-              --query 'StandardOutputContent' \
-              --output text 2>/dev/null || echo "")
-            if [ -n "$PARTIAL_OUTPUT" ]; then
-              echo "=== Current Installation Progress ==="
-              echo "$PARTIAL_OUTPUT"
-              echo ""
+          # Retrieve and display output every 30 seconds (more frequent)
+          if [ $((ELAPSED - LAST_OUTPUT_CHECK)) -ge 30 ]; then
+            if [ -n "$COMMAND_INFO" ]; then
+              PARTIAL_OUTPUT=$(echo "$COMMAND_INFO" | jq -r '.StandardOutputContent // ""' 2>/dev/null || echo "")
+              if [ -n "$PARTIAL_OUTPUT" ] && [ "$PARTIAL_OUTPUT" != "null" ]; then
+                echo ""
+                echo "=== Current Installation Progress (at ${ELAPSED}s) ==="
+                echo "$PARTIAL_OUTPUT"
+                echo ""
+              else
+                echo "[${ELAPSED}s] No output available yet (command may still be starting)"
+              fi
+            else
+              echo "[${ELAPSED}s] Unable to retrieve command information"
             fi
             LAST_OUTPUT_CHECK=${ELAPSED}
           fi
           
           sleep 5
           ELAPSED=$((ELAPSED + 5))
-          # Progress update every 15 seconds
-          if [ $((ELAPSED % 15)) -eq 0 ]; then
-            echo "Still installing Docker Compose... (${ELAPSED}s / ${MAX_WAIT}s)"
-          fi
         done
         
         if [ "$STATUS" != "Success" ]; then
           echo "::error::Docker Compose installation timed out or failed after ${ELAPSED}s"
           echo ""
-          echo "=== Final Command Status ==="
-          FINAL_STATUS=$(aws ssm get-command-invocation \
+          echo "=== Final Command Status Check ==="
+          FINAL_COMMAND_INFO=$(aws ssm get-command-invocation \
             --region "${INSTANCE_REGION}" \
             --command-id "${COMMAND_ID}" \
             --instance-id "${INSTANCE_ID}" \
-            --query 'Status' \
-            --output text 2>/dev/null || echo "Unknown")
-          echo "Status: ${FINAL_STATUS}"
-          echo ""
-          FINAL_OUTPUT=$(aws ssm get-command-invocation \
-            --region "${INSTANCE_REGION}" \
-            --command-id "${COMMAND_ID}" \
-            --instance-id "${INSTANCE_ID}" \
-            --query 'StandardOutputContent' \
-            --output text 2>/dev/null || echo "No output available")
-          echo "=== Final Output ==="
-          echo "${FINAL_OUTPUT}"
-          echo ""
-          FINAL_ERROR=$(aws ssm get-command-invocation \
-            --region "${INSTANCE_REGION}" \
-            --command-id "${COMMAND_ID}" \
-            --instance-id "${INSTANCE_ID}" \
-            --query 'StandardErrorContent' \
-            --output text 2>/dev/null || echo "No error output available")
-          echo "=== Final Error Output ==="
-          echo "${FINAL_ERROR}"
+            2>/dev/null || echo "")
+          
+          if [ -z "$FINAL_COMMAND_INFO" ]; then
+            echo "ERROR: Unable to retrieve final command status from SSM"
+            echo "This may indicate:"
+            echo "  - SSM service is unavailable"
+            echo "  - Command ID is invalid: ${COMMAND_ID}"
+            echo "  - Instance is not accessible: ${INSTANCE_ID}"
+            echo "  - IAM permissions issue"
+          else
+            FINAL_STATUS=$(echo "$FINAL_COMMAND_INFO" | jq -r '.Status // "Unknown"' 2>/dev/null || echo "Unknown")
+            FINAL_RESPONSE_CODE=$(echo "$FINAL_COMMAND_INFO" | jq -r '.ResponseCode // "N/A"' 2>/dev/null || echo "N/A")
+            FINAL_EXECUTION_TIME=$(echo "$FINAL_COMMAND_INFO" | jq -r '.ExecutionElapsedTime // "N/A"' 2>/dev/null || echo "N/A")
+            FINAL_OUTPUT=$(echo "$FINAL_COMMAND_INFO" | jq -r '.StandardOutputContent // "No output available"' 2>/dev/null || echo "No output available")
+            FINAL_ERROR=$(echo "$FINAL_COMMAND_INFO" | jq -r '.StandardErrorContent // "No error output available"' 2>/dev/null || echo "No error output available")
+            
+            echo "Status: ${FINAL_STATUS}"
+            echo "Response Code: ${FINAL_RESPONSE_CODE}"
+            echo "SSM Execution Time: ${FINAL_EXECUTION_TIME}s"
+            echo "Polling Time: ${ELAPSED}s"
+            echo ""
+            echo "=== Final Output ==="
+            if [ "$FINAL_OUTPUT" != "No output available" ] && [ "$FINAL_OUTPUT" != "null" ] && [ -n "$FINAL_OUTPUT" ]; then
+              echo "$FINAL_OUTPUT"
+            else
+              echo "No output available (command may not have started or SSM is not returning output)"
+            fi
+            echo ""
+            echo "=== Final Error Output ==="
+            if [ "$FINAL_ERROR" != "No error output available" ] && [ "$FINAL_ERROR" != "null" ] && [ -n "$FINAL_ERROR" ]; then
+              echo "$FINAL_ERROR"
+            else
+              echo "No error output available"
+            fi
+            echo ""
+            echo "=== Full Command Details (JSON) ==="
+            echo "$FINAL_COMMAND_INFO" | jq '.' 2>/dev/null || echo "$FINAL_COMMAND_INFO"
+          fi
           echo ""
           echo "::error::Troubleshooting: Check network connectivity and GitHub releases access. Timeout may need to be increased for slow network connections."
           exit 1
