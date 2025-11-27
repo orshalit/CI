@@ -157,36 +157,78 @@ runs:
         LAST_OUTPUT_CHECK=0
         LAST_STATUS=""
         RETRY_COUNT=0
+        
+        # Check if jq is available
+        if ! command -v jq &> /dev/null; then
+          echo "::warning::jq not found, using grep/awk for JSON parsing"
+          USE_JQ=false
+        else
+          USE_JQ=true
+        fi
+        
         while [ ${ELAPSED} -lt ${MAX_WAIT} ]; do
           # Get full command invocation details with error capture
+          set +e  # Temporarily disable exit on error to capture exit code
           COMMAND_INFO=$(aws ssm get-command-invocation \
             --region "${INSTANCE_REGION}" \
             --command-id "${COMMAND_ID}" \
             --instance-id "${INSTANCE_ID}" \
             2>&1)
           AWS_EXIT_CODE=$?
+          set -e  # Re-enable exit on error
           
-          if [ $AWS_EXIT_CODE -ne 0 ] || [ -z "$COMMAND_INFO" ] || echo "$COMMAND_INFO" | grep -q "An error occurred"; then
+          # Check for errors
+          if [ $AWS_EXIT_CODE -ne 0 ]; then
             STATUS="ErrorRetrievingStatus"
             RETRY_COUNT=$((RETRY_COUNT + 1))
             
             # Show the actual AWS error on first failure and every 30 seconds
             if [ $RETRY_COUNT -eq 1 ] || [ $((ELAPSED % 30)) -eq 0 ]; then
               echo "::warning::Failed to retrieve SSM command status at ${ELAPSED}s"
-              if [ $AWS_EXIT_CODE -ne 0 ]; then
-                echo "AWS CLI exit code: ${AWS_EXIT_CODE}"
-                echo "Error output: ${COMMAND_INFO}"
-                if echo "$COMMAND_INFO" | grep -q "AccessDenied\|UnauthorizedOperation"; then
-                  echo "::error::IAM Permission Issue: The GitHub Actions role may not have 'ssm:GetCommandInvocation' permission"
-                  echo "::error::Required resource ARN: arn:aws:ssm:${INSTANCE_REGION}:*:command/*"
-                  echo "::error::Please apply the Terraform fix in DEVOPS/modules/backend/github-oidc/main.tf"
-                fi
+              echo "AWS CLI exit code: ${AWS_EXIT_CODE}"
+              echo "Error output: ${COMMAND_INFO}"
+              if echo "$COMMAND_INFO" | grep -q "AccessDenied\|UnauthorizedOperation"; then
+                echo "::error::IAM Permission Issue: The GitHub Actions role may not have 'ssm:GetCommandInvocation' permission"
+                echo "::error::Required resource ARN: arn:aws:ssm:${INSTANCE_REGION}:*:command/*"
+                echo "::error::Please apply the Terraform fix in DEVOPS/modules/backend/github-oidc/main.tf"
               fi
             fi
+          elif [ -z "$COMMAND_INFO" ]; then
+            STATUS="ErrorRetrievingStatus"
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            if [ $RETRY_COUNT -eq 1 ] || [ $((ELAPSED % 30)) -eq 0 ]; then
+              echo "::warning::Failed to retrieve SSM command status at ${ELAPSED}s (empty response)"
+            fi
           else
-            STATUS=$(echo "$COMMAND_INFO" | jq -r '.Status // "Unknown"' 2>/dev/null || echo "Unknown")
-            RESPONSE_CODE=$(echo "$COMMAND_INFO" | jq -r '.ResponseCode // "N/A"' 2>/dev/null || echo "N/A")
-            EXECUTION_ELAPSED=$(echo "$COMMAND_INFO" | jq -r '.ExecutionElapsedTime // "N/A"' 2>/dev/null || echo "N/A")
+            # Check if response contains error message (without causing script to exit)
+            set +e
+            echo "$COMMAND_INFO" | grep -q "^An error occurred" 2>/dev/null
+            HAS_ERROR=$?
+            set -e
+            
+            if [ $HAS_ERROR -eq 0 ]; then
+              STATUS="ErrorRetrievingStatus"
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+              if [ $RETRY_COUNT -eq 1 ] || [ $((ELAPSED % 30)) -eq 0 ]; then
+                echo "::warning::Failed to retrieve SSM command status at ${ELAPSED}s (error in response)"
+                echo "Response: ${COMMAND_INFO}"
+              fi
+            else
+              # Parse JSON response
+              set +e  # Disable exit on error for parsing
+              if [ "$USE_JQ" = "true" ]; then
+                STATUS=$(echo "$COMMAND_INFO" | jq -r '.Status // "Unknown"' 2>/dev/null || echo "Unknown")
+                RESPONSE_CODE=$(echo "$COMMAND_INFO" | jq -r '.ResponseCode // "N/A"' 2>/dev/null || echo "N/A")
+                EXECUTION_ELAPSED=$(echo "$COMMAND_INFO" | jq -r '.ExecutionElapsedTime // "N/A"' 2>/dev/null || echo "N/A")
+              else
+                # Fallback parsing without jq
+                STATUS=$(echo "$COMMAND_INFO" | grep -o '"Status"[[:space:]]*:[[:space:]]*"[^"]*"' 2>/dev/null | cut -d'"' -f4 || echo "Unknown")
+                RESPONSE_CODE=$(echo "$COMMAND_INFO" | grep -o '"ResponseCode"[[:space:]]*:[[:space:]]*[0-9]*' 2>/dev/null | cut -d':' -f2 | tr -d ' ' || echo "N/A")
+                EXECUTION_ELAPSED=$(echo "$COMMAND_INFO" | grep -o '"ExecutionElapsedTime"[[:space:]]*:[[:space:]]*[0-9]*' 2>/dev/null | cut -d':' -f2 | tr -d ' ' || echo "N/A")
+              fi
+              set -e  # Re-enable exit on error
+              RETRY_COUNT=0  # Reset retry count on successful retrieval
+            fi
           fi
           
           # Show status change or progress update
@@ -415,37 +457,82 @@ runs:
         LAST_OUTPUT_CHECK=0
         LAST_STATUS=""
         RETRY_COUNT=0
+        
+        # Check if jq is available
+        if ! command -v jq &> /dev/null; then
+          echo "::warning::jq not found, using grep/awk for JSON parsing"
+          USE_JQ=false
+        else
+          USE_JQ=true
+        fi
+        
         while [ ${ELAPSED} -lt ${MAX_WAIT} ]; do
           # Get full command invocation details with error capture
+          set +e  # Temporarily disable exit on error to capture exit code
           COMMAND_INFO=$(aws ssm get-command-invocation \
             --region "${INSTANCE_REGION}" \
             --command-id "${COMMAND_ID}" \
             --instance-id "${INSTANCE_ID}" \
             2>&1)
           AWS_EXIT_CODE=$?
+          set -e  # Re-enable exit on error
           
-          if [ $AWS_EXIT_CODE -ne 0 ] || [ -z "$COMMAND_INFO" ] || echo "$COMMAND_INFO" | grep -q "An error occurred"; then
+          # Check for errors
+          if [ $AWS_EXIT_CODE -ne 0 ]; then
             STATUS="ErrorRetrievingStatus"
             RETRY_COUNT=$((RETRY_COUNT + 1))
             
             # Show the actual AWS error on first failure and every 30 seconds
             if [ $RETRY_COUNT -eq 1 ] || [ $((ELAPSED % 30)) -eq 0 ]; then
               echo "::warning::Failed to retrieve SSM command status at ${ELAPSED}s"
-              if [ $AWS_EXIT_CODE -ne 0 ]; then
-                echo "AWS CLI exit code: ${AWS_EXIT_CODE}"
-                echo "Error output: ${COMMAND_INFO}"
-                if echo "$COMMAND_INFO" | grep -q "AccessDenied\|UnauthorizedOperation"; then
-                  echo "::error::IAM Permission Issue: The GitHub Actions role may not have 'ssm:GetCommandInvocation' permission"
-                  echo "::error::Required resource ARN: arn:aws:ssm:${INSTANCE_REGION}:*:command/*"
-                  echo "::error::Please apply the Terraform fix in DEVOPS/modules/backend/github-oidc/main.tf"
-                fi
+              echo "AWS CLI exit code: ${AWS_EXIT_CODE}"
+              echo "Error output: ${COMMAND_INFO}"
+              set +e
+              echo "$COMMAND_INFO" | grep -q "AccessDenied\|UnauthorizedOperation" 2>/dev/null
+              HAS_ACCESS_DENIED=$?
+              set -e
+              if [ $HAS_ACCESS_DENIED -eq 0 ]; then
+                echo "::error::IAM Permission Issue: The GitHub Actions role may not have 'ssm:GetCommandInvocation' permission"
+                echo "::error::Required resource ARN: arn:aws:ssm:${INSTANCE_REGION}:*:command/*"
+                echo "::error::Please apply the Terraform fix in DEVOPS/modules/backend/github-oidc/main.tf"
               fi
             fi
+          elif [ -z "$COMMAND_INFO" ]; then
+            STATUS="ErrorRetrievingStatus"
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            if [ $RETRY_COUNT -eq 1 ] || [ $((ELAPSED % 30)) -eq 0 ]; then
+              echo "::warning::Failed to retrieve SSM command status at ${ELAPSED}s (empty response)"
+            fi
           else
-            STATUS=$(echo "$COMMAND_INFO" | jq -r '.Status // "Unknown"' 2>/dev/null || echo "Unknown")
-            RESPONSE_CODE=$(echo "$COMMAND_INFO" | jq -r '.ResponseCode // "N/A"' 2>/dev/null || echo "N/A")
-            EXECUTION_ELAPSED=$(echo "$COMMAND_INFO" | jq -r '.ExecutionElapsedTime // "N/A"' 2>/dev/null || echo "N/A")
-            RETRY_COUNT=0  # Reset retry count on successful retrieval
+            # Check if response contains error message (without causing script to exit)
+            set +e
+            echo "$COMMAND_INFO" | grep -q "^An error occurred" 2>/dev/null
+            HAS_ERROR=$?
+            set -e
+            
+            if [ $HAS_ERROR -eq 0 ]; then
+              STATUS="ErrorRetrievingStatus"
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+              if [ $RETRY_COUNT -eq 1 ] || [ $((ELAPSED % 30)) -eq 0 ]; then
+                echo "::warning::Failed to retrieve SSM command status at ${ELAPSED}s (error in response)"
+                echo "Response: ${COMMAND_INFO}"
+              fi
+            else
+              # Parse JSON response
+              set +e  # Disable exit on error for parsing
+              if [ "$USE_JQ" = "true" ]; then
+                STATUS=$(echo "$COMMAND_INFO" | jq -r '.Status // "Unknown"' 2>/dev/null || echo "Unknown")
+                RESPONSE_CODE=$(echo "$COMMAND_INFO" | jq -r '.ResponseCode // "N/A"' 2>/dev/null || echo "N/A")
+                EXECUTION_ELAPSED=$(echo "$COMMAND_INFO" | jq -r '.ExecutionElapsedTime // "N/A"' 2>/dev/null || echo "N/A")
+              else
+                # Fallback parsing without jq
+                STATUS=$(echo "$COMMAND_INFO" | grep -o '"Status"[[:space:]]*:[[:space:]]*"[^"]*"' 2>/dev/null | cut -d'"' -f4 || echo "Unknown")
+                RESPONSE_CODE=$(echo "$COMMAND_INFO" | grep -o '"ResponseCode"[[:space:]]*:[[:space:]]*[0-9]*' 2>/dev/null | cut -d':' -f2 | tr -d ' ' || echo "N/A")
+                EXECUTION_ELAPSED=$(echo "$COMMAND_INFO" | grep -o '"ExecutionElapsedTime"[[:space:]]*:[[:space:]]*[0-9]*' 2>/dev/null | cut -d':' -f2 | tr -d ' ' || echo "N/A")
+              fi
+              set -e  # Re-enable exit on error
+              RETRY_COUNT=0  # Reset retry count on successful retrieval
+            fi
           fi
           
           # Show status change or progress update
