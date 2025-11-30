@@ -9,10 +9,18 @@ name: "CodeQL Analysis"
 on:
   push:
     branches: [main, develop]
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - 'scripts/**'
   pull_request:
     branches: [main]
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - 'scripts/**'
   schedule:
-    - cron: '0 6 * * 1'  # Weekly on Monday at 6 AM UTC
+    - cron: '0 6 * * 1'  # Weekly on Monday at 6 AM UTC - always runs for comprehensive analysis
 
 jobs:
   analyze:
