@@ -211,7 +211,7 @@ docker --version || echo "Docker will be installed during deployment"
 
 Trigger a manual deployment to test the setup:
 
-1. Go to: `https://github.com/<owner>/<repo>/actions/workflows/deploy.yml`
+1. Go to: `https://github.com/<owner>/<repo>/actions/workflows/app-deploy-ec2.yml`
 2. Click "Run workflow"
 3. Select environment: `dev`
 4. Leave image tag empty (uses latest from main)
@@ -348,7 +348,7 @@ You can manually trigger deployments for testing or emergency releases.
 
 ### Via GitHub UI
 
-1. Go to: `https://github.com/<owner>/<repo>/actions/workflows/deploy.yml`
+1. Go to: `https://github.com/<owner>/<repo>/actions/workflows/app-deploy-ec2.yml`
 2. Click "Run workflow"
 3. Configure:
    - **Branch**: Choose branch to deploy from
@@ -360,10 +360,10 @@ You can manually trigger deployments for testing or emergency releases.
 
 ```bash
 # Deploy latest version to dev
-gh workflow run deploy.yml
+gh workflow run app-deploy-ec2.yml
 
 # Deploy specific version
-gh workflow run deploy.yml -f image_tag=v1.2.3 -f environment=production
+gh workflow run app-deploy-ec2.yml -f image_tag=v1.2.3 -f environment=production
 ```
 
 ### Via AWS SSM (Direct)
@@ -528,14 +528,14 @@ If deployment health checks fail, the deployment script automatically rolls back
 
 1. Find the previous successful deployment:
    ```bash
-   gh run list --workflow=deploy.yml --status=success --limit=5
+   gh run list --workflow=app-deploy-ec2.yml --status=success --limit=5
    ```
 
 2. Get the commit SHA from that deployment
 
 3. Trigger deployment with that version:
    ```bash
-   gh workflow run deploy.yml -f image_tag=main-abc1234
+   gh workflow run app-deploy-ec2.yml -f image_tag=main-abc1234
    ```
 
 ### Manual Rollback via SSM

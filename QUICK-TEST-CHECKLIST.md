@@ -41,7 +41,7 @@ exit
 ## ☐ Phase 4: Test Manual Deployment (5 min)
 ```bash
 cd E:/CI
-gh workflow run deploy.yml
+gh workflow run app-deploy-ec2.yml
 gh run watch  # Watch until complete
 
 # In parallel, monitor EC2:

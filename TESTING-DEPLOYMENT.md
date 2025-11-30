@@ -258,10 +258,10 @@ cd E:/CI
 
 # Check workflows
 ls -la .github/workflows/
-# Should show: ci.yml, deploy.yml, and others
+# Should show: ci.yml, app-deploy-ec2.yml, and others
 
-# Verify deploy.yml exists
-cat .github/workflows/deploy.yml | head -20
+# Verify app-deploy-ec2.yml exists
+cat .github/workflows/app-deploy-ec2.yml | head -20
 ```
 
 ### Step 4.2: Check Current CI Status
@@ -299,10 +299,10 @@ gh run watch
 
 ```bash
 # Trigger deployment manually via GitHub Actions
-gh workflow run deploy.yml
+gh workflow run app-deploy-ec2.yml
 
 # Or via web UI:
-# https://github.com/YOUR-USERNAME/CI/actions/workflows/deploy.yml
+# https://github.com/YOUR-USERNAME/CI/actions/workflows/app-deploy-ec2.yml
 # Click "Run workflow" → Select branch: main → Run workflow
 
 # Watch deployment
@@ -397,7 +397,7 @@ curl -f http://localhost:3000/ | head -20
 
 ```bash
 # Get the latest deployment run
-gh run list --workflow=deploy.yml --limit 1
+gh run list --workflow=app-deploy-ec2.yml --limit 1
 
 # View detailed logs
 gh run view --log
@@ -658,7 +658,7 @@ Once everything works:
 
 ```bash
 # Deploy manually
-gh workflow run deploy.yml
+gh workflow run app-deploy-ec2.yml
 
 # Watch deployment
 gh run watch
@@ -671,7 +671,7 @@ tail -f /var/log/ci-deploy.log
 docker compose ps
 
 # View recent deployments
-gh run list --workflow=deploy.yml --limit 5
+gh run list --workflow=app-deploy-ec2.yml --limit 5
 
 # Rollback manually
 cd /opt/ci-app

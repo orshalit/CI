@@ -181,7 +181,7 @@ docker compose version
 # Select: environment=dev, leave image tag empty
 
 # Or via GitHub CLI
-gh workflow run deploy.yml
+gh workflow run app-deploy-ec2.yml
 ```
 
 ### 3. Monitor Deployment

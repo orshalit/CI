@@ -90,7 +90,7 @@ A complete, secure, production-ready deployment pipeline for deploying your full
 ### CI/CD Workflows (CI)
 
 #### GitHub Actions
-- ✅ `.github/workflows/deploy.yml` - NEW deployment workflow
+- ✅ `.github/workflows/app-deploy-ec2.yml` - NEW deployment workflow
   - OIDC authentication
   - EC2 instance discovery (by tags: Environment=dev, SubnetType=app)
   - SSM-based deployment execution
@@ -336,7 +336,7 @@ gh secret set AWS_ROLE_ARN --body "arn:..."
 gh secret set AWS_REGION --body "us-east-1"
 
 # Deploy manually
-gh workflow run deploy.yml
+gh workflow run app-deploy-ec2.yml
 
 # Watch deployment
 gh run watch

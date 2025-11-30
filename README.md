@@ -422,6 +422,20 @@ The project uses GitHub Actions for automated CI/CD:
    - Code quality analysis
    - Vulnerability detection
 
+4. **`app-deploy-ec2.yml`** - Deploy to EC2 via SSM
+   - Manual deployment to EC2 instances
+   - OIDC authentication
+   - Docker Compose orchestration
+
+5. **`app-deploy-ecs.yml`** - Deploy to ECS Fargate
+   - Automatic deployment after CI success
+   - Terraform-based infrastructure updates
+   - ECS service updates with new image tags
+
+6. **`deploy-infra.yml`** - Infrastructure deployment
+   - Manual Terraform operations (plan/apply/destroy)
+   - VPC, OIDC, DNS/ACM, ECS Fargate management
+
 ### Pipeline Features
 
 - ✅ Parallel job execution

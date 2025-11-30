@@ -1,4 +1,4 @@
-name: Deploy Infrastructure
+name: Deploy Infrastructure (deploy-infra)
 
 # This workflow manages infrastructure deployments (VPC, OIDC, DNS/ACM, ECS Fargate)
 # It is manual-only for safety and control over infrastructure changes.
