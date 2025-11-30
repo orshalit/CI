@@ -6,7 +6,7 @@
 # Its primary job is to run `terraform apply` with the new Docker image tags.
 # ==============================================================================
 
-name: Deploy Application to ECS
+name: Deploy Application to ECS (app-deploy-ecs)
 
 on:
   workflow_run:
@@ -33,10 +33,40 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  check-changes:
+    name: Check if deployment needed
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_run'
+    outputs:
+      should_deploy: ${{ steps.filter.outputs.backend || steps.filter.outputs.frontend }}
+    steps:
+      - name: Checkout code to access workflow_run commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 2
+      
+      - name: Check for application code changes
+        uses: dorny/paths-filter@v2
+        id: filter
+        with:
+          base: ${{ github.event.workflow_run.head_sha }}~1
+          list-files: shell
+          filters: |
+            backend:
+              - 'backend/**'
+            frontend:
+              - 'frontend/**'
+
   plan:
     name: Terraform Plan
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    needs: check-changes
+    if: |
+      (github.event_name == 'workflow_dispatch') ||
+      (github.event_name == 'workflow_run' && 
+       github.event.workflow_run.conclusion == 'success' && 
+       needs.check-changes.outputs.should_deploy == 'true')
 
     outputs:
       tf_plan_exitcode: ${{ steps.plan.outputs.exitcode }}
