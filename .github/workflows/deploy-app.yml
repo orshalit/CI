@@ -6,7 +6,7 @@
 # Its primary job is to run `terraform apply` with the new Docker image tags.
 # ==============================================================================
 
-name: Deploy Application to ECS (app-deploy-ecs)
+name: Deploy Application to ECS
 
 on:
   workflow_run:
