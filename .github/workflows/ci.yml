@@ -16,6 +16,8 @@ name: CI/CD Pipeline
 on:
   push:
     branches: [main, develop]
+    tags:
+      - 'v*'  # Always run on version tags
     paths:
       - 'backend/**'
       - 'frontend/**'
@@ -23,7 +25,6 @@ on:
       - 'docker-compose*.yml'
       - 'Dockerfile*'
       - '.github/workflows/ci.yml'  # Run if CI workflow itself changes
-  tags: ['v*']  # Always run on version tags
   pull_request:
     branches: [main, develop]
     paths:
