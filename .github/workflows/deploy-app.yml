@@ -1,0 +1,215 @@
+# ==============================================================================
+# Application Deployment Pipeline - AWS ECS Fargate
+#
+# This workflow deploys application updates to an existing ECS Fargate cluster.
+# It is triggered automatically after a successful CI build on the main branch.
+# Its primary job is to run `terraform apply` with the new Docker image tags.
+# ==============================================================================
+
+name: Deploy Application to ECS
+
+on:
+  workflow_run:
+    workflows: ["CI/CD Pipeline"]
+    branches: [main]
+    types:
+      - completed
+
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'dev'
+        type: choice
+        options: [dev, staging, production]
+      image_tag:
+        description: 'Docker image tag (leave empty for latest from main)'
+        required: false
+        type: string
+
+concurrency:
+  group: deploy-app-ecs-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  plan:
+    name: Terraform Plan
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+
+    outputs:
+      tf_plan_exitcode: ${{ steps.plan.outputs.exitcode }}
+      environment: ${{ steps.vars.outputs.environment }}
+      image_tag: ${{ steps.vars.outputs.image_tag }}
+      tf_path: ${{ steps.vars.outputs.tf_path }}
+
+    steps:
+      - name: Checkout DEVOPS repository
+        uses: actions/checkout@v4
+        with:
+          repository: 'orshalit/DEVOPS'
+          path: 'DEVOPS'
+          ssh-key: ${{ secrets.DEVOPS_REPO_KEY }}
+
+      - name: Set up environment variables
+        id: vars
+        run: |
+          ENV="${{ github.event.inputs.environment || 'dev' }}"
+          echo "environment=$ENV" >> $GITHUB_OUTPUT
+          echo "tf_path=DEVOPS/live/$ENV/04-ecs-fargate" >> $GITHUB_OUTPUT
+
+          if [ -n "${{ github.event.inputs.image_tag }}" ]; then
+            TAG="${{ github.event.inputs.image_tag }}"
+          else
+            TAG="${{ github.event.workflow_run.head_sha || github.sha }}"
+          fi
+          TAG_SHORT=$(echo "$TAG" | cut -c 1-7)
+          echo "image_tag=$TAG_SHORT" >> $GITHUB_OUTPUT
+          
+          echo "::notice::Environment: $ENV"
+          echo "::notice::Image Tag: $TAG_SHORT"
+          echo "::notice::Terraform Path: DEVOPS/live/$ENV/04-ecs-fargate"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+          role-session-name: GitHubActions-ECS-Plan-${{ github.run_id }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init
+        id: init
+        run: terraform -chdir=${{ steps.vars.outputs.tf_path }} init
+
+      - name: Terraform Plan
+        id: plan
+        env:
+          ACM_CERTIFICATE_ARN: ${{ secrets.ACM_CERTIFICATE_ARN }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          terraform -chdir=${{ steps.vars.outputs.tf_path }} plan \
+            -no-color \
+            -out=tfplan \
+            -var="backend_image_tag=${{ steps.vars.outputs.image_tag }}" \
+            -var="frontend_image_tag=${{ steps.vars.outputs.image_tag }}" \
+            -var="acm_certificate_arn=${ACM_CERTIFICATE_ARN}" \
+            -var="database_url=${DATABASE_URL}" \
+            -var="image_repository_url=ghcr.io/${{ github.repository_owner }}/CI"
+        continue-on-error: true
+
+      - name: Add Plan to Summary
+        if: steps.plan.outputs.exitcode == 0
+        run: |
+          echo "## Terraform Plan" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          terraform -chdir=${{ steps.vars.outputs.tf_path }} show -no-color tfplan >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+      
+      - name: Upload Plan Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-${{ steps.vars.outputs.environment }}
+          path: ${{ steps.vars.outputs.tf_path }}/tfplan
+
+  apply:
+    name: Terraform Apply
+    runs-on: ubuntu-latest
+    needs: plan
+    if: needs.plan.outputs.tf_plan_exitcode == 0
+
+    environment:
+      name: ${{ needs.plan.outputs.environment }}
+      url: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+    steps:
+      - name: Checkout DEVOPS repository
+        uses: actions/checkout@v4
+        with:
+          repository: 'orshalit/DEVOPS'
+          path: 'DEVOPS'
+          ssh-key: ${{ secrets.DEVOPS_REPO_KEY }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+          role-session-name: GitHubActions-ECS-Apply-${{ github.run_id }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Download Plan Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan-${{ needs.plan.outputs.environment }}
+          path: ${{ needs.plan.outputs.tf_path }}
+      
+      - name: Terraform Init
+        run: terraform -chdir=${{ needs.plan.outputs.tf_path }} init
+
+      - name: Terraform Apply
+        run: terraform -chdir=${{ needs.plan.outputs.tf_path }} apply -auto-approve tfplan
+
+      - name: Verify ECS Service Stability
+        id: verify
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+        run: |
+          CLUSTER_NAME=$(terraform -chdir=${{ needs.plan.outputs.tf_path }} output -raw ecs_cluster_name)
+          BACKEND_SERVICE_NAME=$(terraform -chdir=${{ needs.plan.outputs.tf_path }} output -raw backend_service_name)
+          FRONTEND_SERVICE_NAME=$(terraform -chdir=${{ needs.plan.outputs.tf_path }} output -raw frontend_service_name)
+
+          echo "::notice::Waiting for services to become stable..."
+          aws ecs wait services-stable \
+            --region ${AWS_REGION} \
+            --cluster $CLUSTER_NAME \
+            --services $BACKEND_SERVICE_NAME $FRONTEND_SERVICE_NAME
+          
+          echo "✅ Services are stable."
+
+      - name: Verify Service Discovery and CloudWatch Logs
+        if: success()
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+        run: |
+          NAMESPACE_ID=$(terraform -chdir=${{ needs.plan.outputs.tf_path }} output -raw service_discovery_namespace_id)
+          BACKEND_LOG_GROUP=$(terraform -chdir=${{ needs.plan.outputs.tf_path }} output -raw backend_log_group_name)
+
+          echo "::group::Verifying Service Discovery..."
+          aws servicediscovery discover-instances \
+            --region ${AWS_REGION} \
+            --namespace-name $(aws servicediscovery get-namespace --id $NAMESPACE_ID --query 'Namespace.Name' --output text) \
+            --service-name ${{ needs.plan.outputs.environment }}-backend-service
+          echo "✅ Service discovery for backend is resolving."
+          echo "::endgroup::"
+
+          echo "::group::Verifying CloudWatch Logs..."
+          aws logs describe-log-streams \
+            --region ${AWS_REGION} \
+            --log-group-name $BACKEND_LOG_GROUP \
+            --order-by LastEventTime \
+            --descending \
+            --max-items 1
+          echo "✅ CloudWatch log stream found for backend."
+          echo "::endgroup::"
+
+      - name: Deployment Summary
+        if: always()
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY <<EOF
+          ## 🚀 Application Deployment Summary
+
+          **Status:** ${{ job.status == 'success' && '✅ Success' || '❌ Failed' }}
+          
+          **Environment:** \`${{ needs.plan.outputs.environment }}\`
+          **Image Tag:** \`${{ needs.plan.outputs.image_tag }}\`
+          
+          **ALB Endpoint:**
+          \`\`\`
+          $(terraform -chdir=${{ needs.plan.outputs.tf_path }} output -raw alb_dns_name)
+          \`

@@ -1,0 +1,140 @@
+name: Deploy Infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target Environment'
+        required: true
+        default: 'dev'
+        type: choice
+        options: [dev, staging, production]
+      module_path:
+        description: 'Terraform module to deploy (e.g., 01-vpc, 04-ecs-fargate)'
+        required: true
+        type: string
+      action:
+        description: 'Terraform action to perform'
+        required: true
+        default: 'plan'
+        type: choice
+        options: [plan, apply, destroy]
+
+jobs:
+  deploy:
+    name: ${{ inputs.action }} - ${{ inputs.module_path }}
+    runs-on: ubuntu-latest
+    
+    permissions:
+      id-token: write
+      contents: read
+
+    environment:
+      name: ${{ inputs.environment }}
+
+    steps:
+      - name: Checkout DEVOPS repository
+        uses: actions/checkout@v4
+        with:
+          repository: 'orshalit/DEVOPS' # The private DEVOPS repo
+          path: 'DEVOPS'
+          ssh-key: ${{ secrets.DEVOPS_REPO_KEY }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.6.0'
+
+      - name: Terraform Format Check
+        id: fmt
+        run: terraform fmt -check -recursive DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}
+        continue-on-error: true
+
+      - name: Terraform Init
+        id: init
+        run: terraform -chdir=DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }} init
+
+      - name: Terraform Validate
+        id: validate
+        run: terraform -chdir=DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }} validate -no-color
+
+      - name: Check for terraform.tfvars
+        id: check_tfvars
+        run: |
+          if [ -f "DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}/terraform.tfvars" ]; then
+            echo "tfvars_exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "tfvars_exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Terraform Plan
+        id: plan
+        if: inputs.action == 'plan' || inputs.action == 'apply'
+        run: |
+          PLAN_ARGS="-no-color -out=tfplan"
+          if [ "${{ steps.check_tfvars.outputs.tfvars_exists }}" == "true" ]; then
+            PLAN_ARGS="$PLAN_ARGS -var-file=terraform.tfvars"
+          fi
+          terraform -chdir=DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }} plan $PLAN_ARGS
+        continue-on-error: true
+
+      - name: Add Plan to Summary
+        if: inputs.action == 'plan' || (inputs.action == 'apply' && steps.plan.outcome == 'success')
+        run: |
+          echo "## Terraform Plan Output" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          terraform -chdir=DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }} show -no-color tfplan >> $GITHUB_STEP_SUMMARY 2>&1 || echo "Plan file not available" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+      - name: Check if plan has changes
+        id: plan_changes
+        if: inputs.action == 'apply' && steps.plan.outcome == 'success'
+        run: |
+          PLAN_OUTPUT=$(terraform -chdir=DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }} show -no-color tfplan 2>&1)
+          if echo "$PLAN_OUTPUT" | grep -q "No changes"; then
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "::notice::No changes detected. Skipping apply."
+          else
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "::notice::Changes detected. Proceeding with apply."
+          fi
+
+      - name: Terraform Apply
+        if: inputs.action == 'apply' && steps.plan.outcome == 'success' && steps.plan_changes.outputs.has_changes == 'true'
+        run: |
+          terraform -chdir=DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }} apply -auto-approve tfplan
+
+      - name: No Changes Detected
+        if: inputs.action == 'apply' && steps.plan.outcome == 'success' && steps.plan_changes.outputs.has_changes == 'false'
+        run: |
+          echo "::notice::No changes to apply. Infrastructure is already up to date."
+          echo "## ✅ No Changes Required" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The Terraform plan showed no changes. Your infrastructure matches the configuration." >> $GITHUB_STEP_SUMMARY
+
+      - name: Plan Failed
+        if: inputs.action == 'apply' && steps.plan.outcome == 'failure'
+        run: |
+          echo "::error::Terraform plan failed. Apply cannot proceed."
+          exit 1
+
+      - name: Terraform Destroy (Production Protection)
+        if: inputs.action == 'destroy' && inputs.environment == 'production'
+        run: |
+          echo "::error::Destroy action is blocked for production environment for safety."
+          exit 1
+
+      - name: Terraform Destroy
+        if: inputs.action == 'destroy' && inputs.environment != 'production'
+        run: |
+          DESTROY_ARGS="-auto-approve"
+          if [ "${{ steps.check_tfvars.outputs.tfvars_exists }}" == "true" ]; then
+            DESTROY_ARGS="$DESTROY_ARGS -var-file=terraform.tfvars"
+          fi
+          terraform -chdir=DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }} destroy $DESTROY_ARGS
