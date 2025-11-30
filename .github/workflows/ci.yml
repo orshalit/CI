@@ -58,12 +58,42 @@ env:
 
 jobs:
   # ===========================================================================
+  # Change Detection (run first to determine what to execute)
+  # ===========================================================================
+  
+  detect-changes:
+    name: Detect Code Changes
+    runs-on: ubuntu-latest
+    outputs:
+      app-code: ${{ steps.filter.outputs.app-code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Need full history for path filtering
+      
+      - uses: dorny/paths-filter@v2
+        id: filter
+        with:
+          filters: |
+            app-code:
+              - 'backend/**'
+              - 'frontend/**'
+              - 'Dockerfile*'
+              - 'docker-compose*.yml'
+
+  # ===========================================================================
   # Code Quality Checks
   # ===========================================================================
   
   code-quality:
     name: Code Quality & Security
     runs-on: ubuntu-latest
+    needs: [detect-changes]
+    # Only run if app code changed, or on version tags, or manual dispatch
+    if: |
+      needs.detect-changes.outputs.app-code == 'true' ||
+      startsWith(github.ref, 'refs/tags/v') ||
+      github.event_name == 'workflow_dispatch'
     
     steps:
       - name: Checkout code
@@ -144,6 +174,12 @@ jobs:
   backend-tests:
     name: Backend Tests
     runs-on: ubuntu-latest
+    needs: [detect-changes]
+    # Only run if app code changed, or on version tags, or manual dispatch
+    if: |
+      needs.detect-changes.outputs.app-code == 'true' ||
+      startsWith(github.ref, 'refs/tags/v') ||
+      github.event_name == 'workflow_dispatch'
     strategy:
       matrix:
         test-type: [unit, integration]
@@ -234,6 +270,12 @@ jobs:
   frontend-tests:
     name: Frontend Tests
     runs-on: ubuntu-latest
+    needs: [detect-changes]
+    # Only run if app code changed, or on version tags, or manual dispatch
+    if: |
+      needs.detect-changes.outputs.app-code == 'true' ||
+      startsWith(github.ref, 'refs/tags/v') ||
+      github.event_name == 'workflow_dispatch'
     
     steps:
       - name: Checkout code
@@ -324,30 +366,6 @@ jobs:
           echo "::notice::Build Date: ${BUILD_DATE}"
 
   # ===========================================================================
-  # Change Detection
-  # ===========================================================================
-  
-  detect-changes:
-    name: Detect Code Changes
-    runs-on: ubuntu-latest
-    outputs:
-      app-code: ${{ steps.filter.outputs.app-code }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # Need full history for path filtering
-      
-      - uses: dorny/paths-filter@v2
-        id: filter
-        with:
-          filters: |
-            app-code:
-              - 'backend/**'
-              - 'frontend/**'
-              - 'Dockerfile*'
-              - 'docker-compose*.yml'
-
-  # ===========================================================================
   # Docker Image Building
   # ===========================================================================
   
@@ -356,10 +374,14 @@ jobs:
     runs-on: ubuntu-latest
     needs: [code-quality, backend-tests, frontend-tests, prepare-build, detect-changes]
     # Only build images if app code changed, or on version tags, or manual dispatch
+    # Also check that prerequisite jobs succeeded (or were skipped)
     if: |
-      needs.detect-changes.outputs.app-code == 'true' ||
-      startsWith(github.ref, 'refs/tags/v') ||
-      github.event_name == 'workflow_dispatch'
+      (needs.detect-changes.outputs.app-code == 'true' ||
+       startsWith(github.ref, 'refs/tags/v') ||
+       github.event_name == 'workflow_dispatch') &&
+      (needs.code-quality.result == 'success' || needs.code-quality.result == 'skipped') &&
+      (needs.backend-tests.result == 'success' || needs.backend-tests.result == 'skipped') &&
+      (needs.frontend-tests.result == 'success' || needs.frontend-tests.result == 'skipped')
     strategy:
       matrix:
         service: [backend, frontend]
@@ -715,7 +737,7 @@ jobs:
   summary:
     name: Build Summary
     runs-on: ubuntu-latest
-    needs: [e2e-tests, prepare-build, detect-changes, build-images]
+    needs: [e2e-tests, prepare-build, detect-changes, build-images, code-quality, backend-tests, frontend-tests]
     if: always()
     
     steps:
@@ -734,10 +756,14 @@ jobs:
           IS_MANUAL="${{ github.event_name == 'workflow_dispatch' }}"
           
           if [ "$APP_CODE_CHANGED" == "true" ] || [ "$IS_TAG" == "true" ] || [ "$IS_MANUAL" == "true" ]; then
+            echo "### ✅ Application Code Changed" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
             echo "### 📦 Images Built" >> $GITHUB_STEP_SUMMARY
             echo "- \`ghcr.io/${{ github.repository_owner }}/ci-backend:${{ needs.prepare-build.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
             echo "- \`ghcr.io/${{ github.repository_owner }}/ci-frontend:${{ needs.prepare-build.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
           else
-            echo "### ℹ️  No Images Built" >> $GITHUB_STEP_SUMMARY
-            echo "Skipped because no application code changed (only workflow/infrastructure files were modified)." >> $GITHUB_STEP_SUMMARY
+            echo "### ⏭️  Workflow Optimized" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Tests, builds, and scans were **skipped** because no application code changed." >> $GITHUB_STEP_SUMMARY
+            echo "Only workflow/infrastructure files were modified in this commit." >> $GITHUB_STEP_SUMMARY
           fi
