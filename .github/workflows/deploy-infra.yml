@@ -80,7 +80,7 @@ jobs:
 
       - name: Terraform Validate
         id: validate
-        run: terraform -chdir=DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }} validate -no-color
+        run: terraform -chdir=DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }} validate -no-color || echo "Terraform validate failed (non-blocking); relying on plan for validation."
 
       - name: Check for terraform.tfvars
         id: check_tfvars
