@@ -106,9 +106,14 @@ jobs:
         if: inputs.action == 'plan' || (inputs.action == 'apply' && steps.plan.outcome == 'success')
         run: |
           echo "## Terraform Plan Output" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          terraform -chdir=DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }} show -no-color tfplan >> $GITHUB_STEP_SUMMARY 2>&1 || echo "Plan file not available" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          PLAN_DIR="DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}"
+          if [ -f "$PLAN_DIR/tfplan" ]; then
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            terraform -chdir="$PLAN_DIR" show -no-color tfplan >> $GITHUB_STEP_SUMMARY 2>&1
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          else
+            echo "Plan file not available (tfplan not found)" >> $GITHUB_STEP_SUMMARY
+          fi
 
       - name: Check if plan has changes
         id: plan_changes
