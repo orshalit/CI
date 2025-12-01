@@ -43,6 +43,21 @@ jobs:
           path: 'DEVOPS'
           ssh-key: ${{ secrets.DEVOPS_REPO_KEY }}
 
+      - name: Debug GitHub context
+        run: |
+          echo "repository: $GITHUB_REPOSITORY"
+          echo "ref:        $GITHUB_REF"
+          echo "event_name: $GITHUB_EVENT_NAME"
+
+      - name: Debug AWS role and region
+        run: |
+          echo "Has AWS_ROLE_ARN: $([ -n \"$AWS_ROLE_ARN\" ] && echo yes || echo no)"
+          echo "AWS_ROLE_ARN length: ${#AWS_ROLE_ARN}"
+          echo "AWS_REGION: $AWS_REGION"
+        env:
+          AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
