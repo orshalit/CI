@@ -19,6 +19,16 @@ fi
 # Substitute environment variables in nginx.conf template
 envsubst '${CSP_CONNECT_SRC}' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf
 
+# Ensure log directories and files are writable by appuser
+# We're running as root here, so we can fix permissions
+chown -R appuser:appuser /var/log/nginx /var/cache/nginx /var/run
+chmod -R 755 /var/log/nginx /var/cache/nginx /var/run
+
+# Create log files if they don't exist and ensure appuser can write to them
+touch /var/log/nginx/access.log /var/log/nginx/error.log
+chown appuser:appuser /var/log/nginx/access.log /var/log/nginx/error.log
+chmod 644 /var/log/nginx/access.log /var/log/nginx/error.log
+
 # Verify nginx config
 nginx -t
 
