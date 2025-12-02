@@ -29,6 +29,12 @@ touch /var/log/nginx/access.log /var/log/nginx/error.log
 chown appuser:appuser /var/log/nginx/access.log /var/log/nginx/error.log
 chmod 644 /var/log/nginx/access.log /var/log/nginx/error.log
 
+# Ensure PID file location is writable by appuser
+# Remove any existing PID file that might be owned by root
+rm -f /tmp/nginx.pid
+# Ensure /tmp is writable (it should be, but make sure)
+chmod 1777 /tmp
+
 # Verify nginx config
 nginx -t
 
