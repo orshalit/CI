@@ -28,11 +28,41 @@ alb:
     - "app.dev.example.com"
 ```
 
-Notes:
+## Service Configuration
 
 - `image_repo` is the base image name; the actual tag is normally supplied
   at deploy time via `service_image_tags` from the CI pipeline.
-- This first version focuses on **attaching services to existing ALBs**.
-  Creating new ALBs or Route 53 records still happens in the DEVOPS repo.
+- Services **attach to existing ALBs** defined in DEVOPS by referencing the ALB's key in `alb_id`.
+- Creating new ALBs or Route 53 records still happens manually in the DEVOPS repo.
+
+## ALB Topology Support
+
+The generator supports all common ALB/service topologies:
+
+- **Multiple services on one ALB**: Set the same `alb_id` for different services
+- **Different services on different ALBs**: Use different `alb_id` values
+- **Service without ALB**: Omit the `alb` block entirely (service will use Cloud Map only)
+
+Example: Two services sharing one ALB:
+
+```yaml
+# services/api.yaml
+name: api
+alb:
+  alb_id: app_shared
+  path_patterns: ["/api/*"]
+
+# services/frontend.yaml
+name: frontend
+alb:
+  alb_id: app_shared  # Same ALB
+  path_patterns: ["/"]
+```
+
+## Ownership Model
+
+- **CI owns all services**: All ECS services are defined here and generated into `services.generated.tfvars`
+- **DEVOPS owns ALBs/DNS**: ALB definitions, certificates, Route 53 records are managed in `terraform.tfvars`
+- **No conflicts**: Services reference ALBs by key (`alb_id`), ensuring clean separation
 
 

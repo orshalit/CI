@@ -8,6 +8,12 @@
 #   cp env-example.txt .env.local
 #   # Edit .env.local with your values
 
-# Backend API URL
+# Backend API URL (Build-time variable for Vite)
+# This is baked into the React build at build time.
+# For production ECS deployments, this should be set during the Docker build.
 VITE_BACKEND_URL=http://localhost:8000
+
+# Note: There is also BACKEND_API_URL (runtime variable) used by nginx
+# for Content Security Policy configuration. That is set in the ECS task definition,
+# not in this file. See services/frontend.yaml for runtime configuration.
 

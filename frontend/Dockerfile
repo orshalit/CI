@@ -91,7 +91,9 @@ LABEL org.opencontainers.image.created="${BUILD_DATE}" \
 
 # Create non-root user for security
 RUN addgroup -g 1000 appuser && \
-    adduser -D -u 1000 -G appuser appuser
+    adduser -D -u 1000 -G appuser appuser && \
+    # Install su-exec for switching users in entrypoint
+    apk add --no-cache su-exec
 
 # Create necessary directories with proper permissions
 RUN mkdir -p /var/cache/nginx /var/log/nginx /var/run /usr/share/nginx/html && \
@@ -100,8 +102,10 @@ RUN mkdir -p /var/cache/nginx /var/log/nginx /var/run /usr/share/nginx/html && \
     # Remove default nginx content
     rm -rf /usr/share/nginx/html/*
 
-# Copy custom nginx configuration
-COPY nginx.conf /etc/nginx/nginx.conf
+# Copy custom nginx configuration template and entrypoint script
+COPY nginx.conf.template /etc/nginx/nginx.conf.template
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
 
 # Copy built application from builder stage
 COPY --from=builder --chown=appuser:appuser /app/dist /usr/share/nginx/html
@@ -113,10 +117,11 @@ RUN echo "Frontend Version: ${BUILD_VERSION}" > /usr/share/nginx/html/build-info
     echo "Build Date: ${BUILD_DATE}" >> /usr/share/nginx/html/build-info.txt && \
     chown appuser:appuser /usr/share/nginx/html/build-info.txt
 
-# Set environment variables for version info
+# Set environment variables for version info and backend URL
 ENV APP_VERSION="${BUILD_VERSION}" \
     GIT_COMMIT="${GIT_COMMIT}" \
-    BUILD_DATE="${BUILD_DATE}"
+    BUILD_DATE="${BUILD_DATE}" \
+    BACKEND_API_URL="${BACKEND_API_URL:-https://app.dev.example.com}"
 
 # Expose application port
 EXPOSE 3000
@@ -125,8 +130,7 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD wget --no-verbose --tries=1 --spider http://localhost:3000/ || exit 1
 
-# Switch to non-root user
-USER appuser
-
-# Start nginx in foreground
-CMD ["nginx", "-g", "daemon off;"]
+# Keep as root for entrypoint (needs to write to /etc/nginx/)
+# Entrypoint will switch to appuser before starting nginx
+# Use entrypoint script to inject environment variables into nginx config
+ENTRYPOINT ["/docker-entrypoint.sh"]
