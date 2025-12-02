@@ -1,0 +1,22 @@
+name: api_single
+
+image_repo: ghcr.io/orshalit/CI/ci-backend
+
+container_port: 8000
+cpu: 256
+memory: 512
+desired_count: 1
+
+env:
+  LOG_LEVEL: INFO
+
+alb:
+  alb_id: app_single
+  listener_protocol: HTTPS
+  listener_port: 443
+  path_patterns:
+    - "/single-api/*"
+  host_patterns:
+    - "single.dev.example.com"
+
+

@@ -156,9 +156,14 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
+          EXTRA_ARGS=""
+          if [ -f "${{ steps.vars.outputs.tf_path }}/services.generated.tfvars" ]; then
+            EXTRA_ARGS="$EXTRA_ARGS -var-file=services.generated.tfvars"
+          fi
           terraform -chdir=${{ steps.vars.outputs.tf_path }} plan \
             -no-color \
             -out=tfplan \
+            $EXTRA_ARGS \
             -var="terraform_backend_bucket_name=devops-project-terraform" \
             -var="database_url=${DATABASE_URL}"
         continue-on-error: true

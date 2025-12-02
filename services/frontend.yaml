@@ -1,0 +1,23 @@
+name: frontend
+
+image_repo: ghcr.io/orshalit/CI/ci-frontend
+
+container_port: 3000
+cpu: 256
+memory: 512
+desired_count: 2
+
+env:
+  LOG_LEVEL: INFO
+  BACKEND_API_URL: "https://app.dev.example.com/api"
+
+alb:
+  alb_id: app_shared
+  listener_protocol: HTTPS
+  listener_port: 443
+  path_patterns:
+    - "/"
+  host_patterns:
+    - "app.dev.example.com"
+
+

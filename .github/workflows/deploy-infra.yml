@@ -91,6 +91,15 @@ jobs:
             echo "tfvars_exists=false" >> $GITHUB_OUTPUT
           fi
 
+      - name: Check for services.generated.tfvars
+        id: check_services_tfvars
+        run: |
+          if [ -f "DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}/services.generated.tfvars" ]; then
+            echo "services_tfvars_exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "services_tfvars_exists=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Terraform Plan
         id: plan
         if: inputs.action == 'plan' || inputs.action == 'apply'
@@ -98,6 +107,9 @@ jobs:
           PLAN_ARGS="-no-color -out=tfplan"
           if [ "${{ steps.check_tfvars.outputs.tfvars_exists }}" == "true" ]; then
             PLAN_ARGS="$PLAN_ARGS -var-file=terraform.tfvars"
+          fi
+          if [ "${{ steps.check_services_tfvars.outputs.services_tfvars_exists }}" == "true" ]; then
+            PLAN_ARGS="$PLAN_ARGS -var-file=services.generated.tfvars"
           fi
           terraform -chdir=DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }} plan $PLAN_ARGS
         continue-on-error: true
@@ -159,5 +171,8 @@ jobs:
           DESTROY_ARGS="-auto-approve"
           if [ "${{ steps.check_tfvars.outputs.tfvars_exists }}" == "true" ]; then
             DESTROY_ARGS="$DESTROY_ARGS -var-file=terraform.tfvars"
+          fi
+          if [ "${{ steps.check_services_tfvars.outputs.services_tfvars_exists }}" == "true" ]; then
+            DESTROY_ARGS="$DESTROY_ARGS -var-file=services.generated.tfvars"
           fi
           terraform -chdir=DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }} destroy $DESTROY_ARGS
