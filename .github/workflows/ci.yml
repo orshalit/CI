@@ -365,6 +365,17 @@ jobs:
           echo "::notice::Git Branch: ${BRANCH}"
           echo "::notice::Build Date: ${BUILD_DATE}"
 
+      - name: Persist build version for downstream workflows
+        run: |
+          echo "${{ steps.metadata.outputs.version }}" > build-version.txt
+        shell: bash
+
+      - name: Upload build version artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-version
+          path: build-version.txt
+
   # ===========================================================================
   # Docker Image Building
   # ===========================================================================

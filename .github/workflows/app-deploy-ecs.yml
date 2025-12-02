@@ -82,6 +82,14 @@ jobs:
           path: 'DEVOPS'
           ssh-key: ${{ secrets.DEVOPS_REPO_KEY }}
 
+      - name: Download build version from CI workflow
+        if: github.event_name == 'workflow_run'
+        uses: actions/download-artifact@v4
+        with:
+          name: build-version
+          path: build-metadata
+          run-id: ${{ github.event.workflow_run.id }}
+
       - name: Set up environment variables
         id: vars
         run: |
@@ -90,15 +98,17 @@ jobs:
           echo "tf_path=DEVOPS/live/$ENV/04-ecs-fargate" >> $GITHUB_OUTPUT
 
           if [ -n "${{ github.event.inputs.image_tag }}" ]; then
-            TAG="${{ github.event.inputs.image_tag }}"
+            VERSION="${{ github.event.inputs.image_tag }}"
+          elif [ "${{ github.event_name }}" = "workflow_run" ]; then
+            VERSION="$(cat build-metadata/build-version.txt)"
           else
-            TAG="${{ github.event.workflow_run.head_sha || github.sha }}"
+            VERSION="${GITHUB_SHA}"
           fi
-          TAG_SHORT=$(echo "$TAG" | cut -c 1-7)
-          echo "image_tag=$TAG_SHORT" >> $GITHUB_OUTPUT
+
+          echo "image_tag=$VERSION" >> $GITHUB_OUTPUT
           
           echo "::notice::Environment: $ENV"
-          echo "::notice::Image Tag: $TAG_SHORT"
+          echo "::notice::Image Tag (version): $VERSION"
           echo "::notice::Terraform Path: DEVOPS/live/$ENV/04-ecs-fargate"
 
       - name: Debug GitHub context
@@ -130,20 +140,27 @@ jobs:
         id: init
         run: terraform -chdir=${{ steps.vars.outputs.tf_path }} init
 
+      - name: Generate service image tag overrides
+        id: override
+        run: |
+          cat > ${{ steps.vars.outputs.tf_path }}/ci-service-tags.auto.tfvars <<EOF
+          service_image_tags = {
+            api_single = "${{ steps.vars.outputs.image_tag }}"
+            api        = "${{ steps.vars.outputs.image_tag }}"
+            frontend   = "${{ steps.vars.outputs.image_tag }}"
+          }
+          EOF
+
       - name: Terraform Plan
         id: plan
         env:
-          ACM_CERTIFICATE_ARN: ${{ secrets.ACM_CERTIFICATE_ARN }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
           terraform -chdir=${{ steps.vars.outputs.tf_path }} plan \
             -no-color \
             -out=tfplan \
-            -var="backend_image_tag=${{ steps.vars.outputs.image_tag }}" \
-            -var="frontend_image_tag=${{ steps.vars.outputs.image_tag }}" \
-            -var="acm_certificate_arn=${ACM_CERTIFICATE_ARN}" \
-            -var="database_url=${DATABASE_URL}" \
-            -var="image_repository_url=ghcr.io/${{ github.repository_owner }}/CI"
+            -var="terraform_backend_bucket_name=devops-project-terraform" \
+            -var="database_url=${DATABASE_URL}"
         continue-on-error: true
 
       - name: Add Plan to Summary
@@ -206,14 +223,14 @@ jobs:
           AWS_REGION: ${{ secrets.AWS_REGION }}
         run: |
           CLUSTER_NAME=$(terraform -chdir=${{ needs.plan.outputs.tf_path }} output -raw ecs_cluster_name)
-          BACKEND_SERVICE_NAME=$(terraform -chdir=${{ needs.plan.outputs.tf_path }} output -raw backend_service_name)
-          FRONTEND_SERVICE_NAME=$(terraform -chdir=${{ needs.plan.outputs.tf_path }} output -raw frontend_service_name)
+          SERVICE_NAMES_JSON=$(terraform -chdir=${{ needs.plan.outputs.tf_path }} output -json service_names)
+          SERVICES=$(echo "$SERVICE_NAMES_JSON" | jq -r '.[]')
 
           echo "::notice::Waiting for services to become stable..."
           aws ecs wait services-stable \
             --region ${AWS_REGION} \
             --cluster $CLUSTER_NAME \
-            --services $BACKEND_SERVICE_NAME $FRONTEND_SERVICE_NAME
+            --services $SERVICES
           
           echo "✅ Services are stable."
 
@@ -223,24 +240,28 @@ jobs:
           AWS_REGION: ${{ secrets.AWS_REGION }}
         run: |
           NAMESPACE_ID=$(terraform -chdir=${{ needs.plan.outputs.tf_path }} output -raw service_discovery_namespace_id)
-          BACKEND_LOG_GROUP=$(terraform -chdir=${{ needs.plan.outputs.tf_path }} output -raw backend_log_group_name)
+          LOG_GROUPS_JSON=$(terraform -chdir=${{ needs.plan.outputs.tf_path }} output -json log_group_names)
 
           echo "::group::Verifying Service Discovery..."
           aws servicediscovery discover-instances \
             --region ${AWS_REGION} \
             --namespace-name $(aws servicediscovery get-namespace --id $NAMESPACE_ID --query 'Namespace.Name' --output text) \
-            --service-name ${{ needs.plan.outputs.environment }}-backend-service
-          echo "✅ Service discovery for backend is resolving."
+            --service-name ${{ needs.plan.outputs.environment }}-api-service
+          echo "✅ Service discovery for api service is resolving."
           echo "::endgroup::"
 
           echo "::group::Verifying CloudWatch Logs..."
-          aws logs describe-log-streams \
-            --region ${AWS_REGION} \
-            --log-group-name $BACKEND_LOG_GROUP \
-            --order-by LastEventTime \
-            --descending \
-            --max-items 1
-          echo "✅ CloudWatch log stream found for backend."
+          for name in $(echo "$LOG_GROUPS_JSON" | jq -r 'keys[]'); do
+            GROUP=$(echo "$LOG_GROUPS_JSON" | jq -r --arg k "$name" '.[$k]')
+            echo "Checking log group: $GROUP"
+            aws logs describe-log-streams \
+              --region ${AWS_REGION} \
+              --log-group-name "$GROUP" \
+              --order-by LastEventTime \
+              --descending \
+              --max-items 1 >/dev/null
+          done
+          echo "✅ CloudWatch log streams found for all services."
           echo "::endgroup::"
 
       - name: Deployment Summary
@@ -254,7 +275,7 @@ jobs:
           **Environment:** \`${{ needs.plan.outputs.environment }}\`
           **Image Tag:** \`${{ needs.plan.outputs.image_tag }}\`
           
-          **ALB Endpoint:**
+          **ALB Endpoints (per service):**
           \`\`\`
-          $(terraform -chdir=${{ needs.plan.outputs.tf_path }} output -raw alb_dns_name)
+          $(terraform -chdir=${{ needs.plan.outputs.tf_path }} output -json alb_dns_names | jq -r 'to_entries[] | "\(.key): \(.value)"')
           \`
