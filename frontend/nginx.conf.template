@@ -1,7 +1,7 @@
 # Note: user directive omitted - container already runs as non-root (appuser)
 worker_processes auto;
-# PID file in /tmp for non-root container compatibility
-pid /tmp/nginx.pid;
+# PID file in /var/run (owned by appuser) for non-root container compatibility
+pid /var/run/nginx.pid;
 
 events {
     worker_connections 1024;
