@@ -44,13 +44,23 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
-          fetch-depth: 2
+          fetch-depth: 0  # Fetch full history for proper diff comparison
+      
+      - name: Get parent commit
+        id: parent
+        run: |
+          PARENT=$(git rev-parse ${{ github.event.workflow_run.head_sha }}^ 2>/dev/null || echo "")
+          if [ -z "$PARENT" ]; then
+            # If no parent (first commit), compare against base branch
+            PARENT="${{ github.event.workflow_run.head_branch || 'main' }}"
+          fi
+          echo "parent=$PARENT" >> $GITHUB_OUTPUT
       
       - name: Check for application code changes
         uses: dorny/paths-filter@v2
         id: filter
         with:
-          base: ${{ github.event.workflow_run.head_sha }}~1
+          base: ${{ steps.parent.outputs.parent }}
           list-files: shell
           filters: |
             backend:
