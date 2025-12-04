@@ -114,6 +114,23 @@ jobs:
           terraform -chdir=DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }} plan $PLAN_ARGS
         continue-on-error: true
 
+      - name: Debug Plan - Show Replacement Reasons
+        if: inputs.action == 'plan' || inputs.action == 'apply'
+        run: |
+          PLAN_DIR="DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}"
+          if [ -f "$PLAN_DIR/tfplan" ]; then
+            echo "::group::Debug: Resources Being Replaced"
+            echo "Checking for resources that need replacement..."
+            terraform -chdir="$PLAN_DIR" show -no-color tfplan | grep -A 10 "must be replaced" || echo "No replacements detected"
+            echo "::endgroup::"
+            
+            echo "::group::Debug: Detailed Plan Output"
+            terraform -chdir="$PLAN_DIR" show -no-color -detailed-exitcode tfplan || true
+            echo "::endgroup::"
+          else
+            echo "::notice::Plan file not available for debugging"
+          fi
+
       - name: Add Plan to Summary
         if: inputs.action == 'plan' || (inputs.action == 'apply' && steps.plan.outcome == 'success')
         run: |
@@ -123,6 +140,21 @@ jobs:
             echo '```' >> $GITHUB_STEP_SUMMARY
             terraform -chdir="$PLAN_DIR" show -no-color tfplan >> $GITHUB_STEP_SUMMARY 2>&1
             echo '```' >> $GITHUB_STEP_SUMMARY
+            
+            # Add replacement analysis to summary
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "## 🔍 Replacement Analysis" >> $GITHUB_STEP_SUMMARY
+            REPLACEMENTS=$(terraform -chdir="$PLAN_DIR" show -no-color tfplan 2>&1 | grep -c "must be replaced" || echo "0")
+            if [ "$REPLACEMENTS" -gt "0" ]; then
+              echo "⚠️ **Warning:** $REPLACEMENTS resource(s) will be replaced" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "Resources being replaced:" >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
+              terraform -chdir="$PLAN_DIR" show -no-color tfplan 2>&1 | grep -B 2 -A 5 "must be replaced" >> $GITHUB_STEP_SUMMARY || true
+              echo '```' >> $GITHUB_STEP_SUMMARY
+            else
+              echo "✅ No replacements detected" >> $GITHUB_STEP_SUMMARY
+            fi
           else
             echo "Plan file not available (tfplan not found)" >> $GITHUB_STEP_SUMMARY
           fi
