@@ -114,6 +114,7 @@ jobs:
 
       - name: Download build version from CI workflow
         if: github.event_name == 'workflow_run'
+        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           name: build-version
@@ -129,9 +130,10 @@ jobs:
 
           if [ -n "${{ github.event.inputs.image_tag }}" ]; then
             VERSION="${{ github.event.inputs.image_tag }}"
-          elif [ "${{ github.event_name }}" = "workflow_run" ]; then
+          elif [ "${{ github.event_name }}" = "workflow_run" ] && [ -f "build-metadata/build-version.txt" ]; then
             VERSION="$(cat build-metadata/build-version.txt)"
           else
+            # Fall back to commit SHA if artifact not available
             VERSION="${GITHUB_SHA}"
           fi
 
