@@ -132,11 +132,18 @@ jobs:
 
           if [ -n "${{ github.event.inputs.image_tag }}" ]; then
             VERSION="${{ github.event.inputs.image_tag }}"
+            echo "::notice::Using provided image tag: ${VERSION}"
           elif [ "${{ github.event_name }}" = "workflow_run" ] && [ -f "build-metadata/build-version.txt" ]; then
             VERSION="$(cat build-metadata/build-version.txt)"
+            echo "::notice::Using build version from CI workflow: ${VERSION}"
           else
             # Fall back to commit SHA if artifact not available
+            # This can happen if:
+            # - Manual workflow_dispatch trigger
+            # - CI workflow failed before creating artifact
+            # - Artifact expired or not found
             VERSION="${GITHUB_SHA}"
+            echo "::notice::Using commit SHA as version: ${VERSION}"
           fi
 
           echo "image_tag=$VERSION" >> $GITHUB_OUTPUT
