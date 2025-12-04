@@ -102,7 +102,7 @@ async def health_check():
     # Check if database is available
     if not database_available:
         return HealthResponse(status="healthy", database="unavailable")
-    
+
     # Test database connection if available
     try:
         db = next(get_db())
@@ -210,7 +210,7 @@ async def greet_user(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Database is not available. Please configure DATABASE_URL."
         )
-    
+
     try:
         # Validate and sanitize input
         user_clean = user.strip()
@@ -302,7 +302,7 @@ async def get_greetings(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Database is not available. Please configure DATABASE_URL."
         )
-    
+
     try:
         # Validate pagination parameters
         if skip < 0:
@@ -366,7 +366,7 @@ async def get_user_greetings(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Database is not available. Please configure DATABASE_URL."
         )
-    
+
     try:
         # Validate and sanitize input
         user_clean = user.strip()

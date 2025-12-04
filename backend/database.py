@@ -156,7 +156,7 @@ def get_db():
     """
     if not database_available or SessionLocal is None:
         raise RuntimeError("Database is not available. DATABASE_URL is not configured.")
-    
+
     db = SessionLocal()
     try:
         yield db
