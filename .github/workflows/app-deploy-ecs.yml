@@ -36,17 +36,18 @@ jobs:
   check-changes:
     name: Check if deployment needed
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_run'
     outputs:
-      should_deploy: ${{ steps.filter.outputs.backend || steps.filter.outputs.frontend }}
+      should_deploy: ${{ steps.set-output.outputs.should_deploy }}
     steps:
       - name: Checkout code to access workflow_run commit
+        if: github.event_name == 'workflow_run'
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0  # Fetch full history for proper diff comparison
       
       - name: Get parent commit
+        if: github.event_name == 'workflow_run'
         id: parent
         run: |
           PARENT=$(git rev-parse ${{ github.event.workflow_run.head_sha }}^ 2>/dev/null || echo "")
@@ -57,6 +58,7 @@ jobs:
           echo "parent=$PARENT" >> $GITHUB_OUTPUT
       
       - name: Check for application code changes
+        if: github.event_name == 'workflow_run'
         uses: dorny/paths-filter@v2
         id: filter
         with:
@@ -67,6 +69,17 @@ jobs:
               - 'backend/**'
             frontend:
               - 'frontend/**'
+      
+      - name: Set should_deploy output
+        id: set-output
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Manual dispatch detected - deploying"
+            echo "should_deploy=true" >> $GITHUB_OUTPUT
+          else
+            SHOULD_DEPLOY="${{ steps.filter.outputs.backend || steps.filter.outputs.frontend }}"
+            echo "should_deploy=$SHOULD_DEPLOY" >> $GITHUB_OUTPUT
+          fi
 
   plan:
     name: Terraform Plan
