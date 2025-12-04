@@ -13,29 +13,45 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
+# Check if database is available
+DATABASE_URL = None
+engine = None
+SessionLocal = None
+database_available = False
+
 # Use in-memory SQLite for testing, PostgreSQL otherwise
 if settings.TESTING:
     DATABASE_URL = "sqlite:///:memory:"
     connect_args = {"check_same_thread": False}
     # SQLite-specific engine configuration (no pooling)
     engine = create_engine(DATABASE_URL, echo=False, connect_args=connect_args)
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    database_available = True
 else:
-    DATABASE_URL = settings.DATABASE_URL
-    connect_args = {}
-    # PostgreSQL-specific engine configuration with connection pooling
-    engine = create_engine(
-        DATABASE_URL,
-        poolclass=QueuePool,
-        pool_size=settings.DATABASE_POOL_SIZE,
-        max_overflow=settings.DATABASE_MAX_OVERFLOW,
-        pool_timeout=settings.DATABASE_POOL_TIMEOUT,
-        pool_recycle=settings.DATABASE_POOL_RECYCLE,
-        pool_pre_ping=True,  # Verify connections before using
-        echo=False,  # Set to True for SQL query logging in development
-        connect_args=connect_args,
-    )
+    # Check if DATABASE_URL is provided and not empty
+    db_url = settings.DATABASE_URL
+    if db_url and db_url.strip() and db_url.strip() != "":
+        DATABASE_URL = db_url.strip()
+        connect_args = {}
+        # PostgreSQL-specific engine configuration with connection pooling
+        engine = create_engine(
+            DATABASE_URL,
+            poolclass=QueuePool,
+            pool_size=settings.DATABASE_POOL_SIZE,
+            max_overflow=settings.DATABASE_MAX_OVERFLOW,
+            pool_timeout=settings.DATABASE_POOL_TIMEOUT,
+            pool_recycle=settings.DATABASE_POOL_RECYCLE,
+            pool_pre_ping=True,  # Verify connections before using
+            echo=False,  # Set to True for SQL query logging in development
+            connect_args=connect_args,
+        )
+        SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+        database_available = True
+        logger.info("Database engine created successfully")
+    else:
+        logger.warning("DATABASE_URL is empty or not set. Database features will be unavailable.")
+        database_available = False
 
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 
@@ -44,27 +60,27 @@ Base = declarative_base()
 # =============================================================================
 
 
-@event.listens_for(engine, "connect")
-def on_connect(dbapi_conn, connection_record):
-    """Handle new database connection - set pragmas and log."""
-    logger.info("Database connection established")
-    # Set SQLite pragmas for better performance and safety
-    if "sqlite" in DATABASE_URL:
-        cursor = dbapi_conn.cursor()
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.close()
+# Register event listeners only if engine exists
+if engine is not None:
+    @event.listens_for(engine, "connect")
+    def on_connect(dbapi_conn, connection_record):
+        """Handle new database connection - set pragmas and log."""
+        logger.info("Database connection established")
+        # Set SQLite pragmas for better performance and safety
+        if DATABASE_URL and "sqlite" in DATABASE_URL:
+            cursor = dbapi_conn.cursor()
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
 
+    @event.listens_for(engine, "checkout")
+    def on_checkout(dbapi_conn, connection_record, connection_proxy):
+        """Log connection checkout from pool for monitoring."""
+        logger.debug("Connection checked out from pool")
 
-@event.listens_for(engine, "checkout")
-def on_checkout(dbapi_conn, connection_record, connection_proxy):
-    """Log connection checkout from pool for monitoring."""
-    logger.debug("Connection checked out from pool")
-
-
-@event.listens_for(engine, "checkin")
-def on_checkin(dbapi_conn, connection_record):
-    """Log connection returned to pool for monitoring."""
-    logger.debug("Connection returned to pool")
+    @event.listens_for(engine, "checkin")
+    def on_checkin(dbapi_conn, connection_record):
+        """Log connection returned to pool for monitoring."""
+        logger.debug("Connection returned to pool")
 
 
 # =============================================================================
@@ -106,6 +122,10 @@ def init_db(max_retries: int = 3):
     Raises:
         Exception: If database initialization fails after all retries.
     """
+    if not database_available or engine is None:
+        logger.warning("Database is not available. Skipping database initialization.")
+        return
+
     for attempt in range(max_retries):
         try:
             Base.metadata.create_all(bind=engine)
@@ -130,7 +150,13 @@ def get_db():
 
     Yields:
         Session: SQLAlchemy database session.
+
+    Raises:
+        RuntimeError: If database is not available.
     """
+    if not database_available or SessionLocal is None:
+        raise RuntimeError("Database is not available. DATABASE_URL is not configured.")
+    
     db = SessionLocal()
     try:
         yield db
@@ -144,5 +170,8 @@ def dispose_engine():
 
     Call this during graceful shutdown to clean up resources.
     """
-    logger.info("Disposing database engine and closing all connections")
-    engine.dispose()
+    if engine is not None:
+        logger.info("Disposing database engine and closing all connections")
+        engine.dispose()
+    else:
+        logger.debug("No database engine to dispose")

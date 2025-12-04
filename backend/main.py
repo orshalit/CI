@@ -16,7 +16,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from config import settings
-from database import Greeting, get_db, init_db
+from database import Greeting, database_available, get_db, init_db
 from logging_config import setup_logging
 from middleware import (
     ErrorHandlingMiddleware,
@@ -45,8 +45,8 @@ limiter = Limiter(key_func=get_remote_address)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan event handler for startup and shutdown"""
-    # Startup: Initialize database only if not in testing mode
-    if not settings.TESTING:
+    # Startup: Initialize database only if available and not in testing mode
+    if not settings.TESTING and database_available:
         logger.info("Initializing database...")
         try:
             init_db()
@@ -54,6 +54,8 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"Failed to initialize database: {e}", exc_info=True)
             raise
+    elif not settings.TESTING and not database_available:
+        logger.warning("Database is not available (DATABASE_URL is empty). Application will run without database features.")
     yield
     # Shutdown: cleanup if needed
     logger.info("Shutting down application...")
@@ -95,11 +97,17 @@ app.add_middleware(
     summary="Health check endpoint",
     description="Check the health status of the API and database connectivity",
 )
-async def health_check(db: Session = Depends(get_db)):  # noqa: B008
+async def health_check():
     """Health check endpoint with database connectivity check"""
+    # Check if database is available
+    if not database_available:
+        return HealthResponse(status="healthy", database="unavailable")
+    
+    # Test database connection if available
     try:
-        # Test database connection
+        db = next(get_db())
         db.execute(text("SELECT 1"))
+        db.close()
         return HealthResponse(status="healthy", database="connected")
     except SQLAlchemyError as e:
         logger.error(f"Database health check failed: {e}", exc_info=True)
@@ -196,6 +204,13 @@ async def greet_user(
     db: Session = Depends(get_db),  # noqa: B008
 ):
     """Personalized greeting endpoint that stores greetings in database"""
+    # Check if database is available (get_db will raise RuntimeError if not, but we want 503)
+    if not database_available:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database is not available. Please configure DATABASE_URL."
+        )
+    
     try:
         # Validate and sanitize input
         user_clean = user.strip()
@@ -251,6 +266,14 @@ async def greet_user(
     except (HTTPException, RequestValidationError):
         # Re-raise HTTPException and RequestValidationError to let FastAPI handle them
         raise
+    except RuntimeError as e:
+        # Handle database unavailable error from get_db()
+        if "Database is not available" in str(e):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Database is not available. Please configure DATABASE_URL."
+            ) from e
+        raise
     except Exception as e:
         logger.error(f"Unexpected error in greet_user: {e}", exc_info=True)
         raise HTTPException(
@@ -273,6 +296,13 @@ async def get_greetings(
     db: Session = Depends(get_db),  # noqa: B008
 ):
     """Get all greetings from database with pagination"""
+    # Check if database is available (get_db will raise RuntimeError if not, but we want 503)
+    if not database_available:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database is not available. Please configure DATABASE_URL."
+        )
+    
     try:
         # Validate pagination parameters
         if skip < 0:
@@ -301,6 +331,14 @@ async def get_greetings(
         return GreetingsListResponse(total=total, greetings=greetings, skip=skip, limit=limit)
     except HTTPException:
         raise
+    except RuntimeError as e:
+        # Handle database unavailable error from get_db()
+        if "Database is not available" in str(e):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Database is not available. Please configure DATABASE_URL."
+            ) from e
+        raise
     except Exception as e:
         logger.error(f"Unexpected error in get_greetings: {e}", exc_info=True)
         raise HTTPException(
@@ -322,6 +360,13 @@ async def get_user_greetings(
     db: Session = Depends(get_db),  # noqa: B008
 ):
     """Get all greetings for a specific user"""
+    # Check if database is available (get_db will raise RuntimeError if not, but we want 503)
+    if not database_available:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database is not available. Please configure DATABASE_URL."
+        )
+    
     try:
         # Validate and sanitize input
         user_clean = user.strip()
@@ -346,6 +391,14 @@ async def get_user_greetings(
 
         return UserGreetingsResponse(user=user_clean, count=len(greetings), greetings=greetings)
     except HTTPException:
+        raise
+    except RuntimeError as e:
+        # Handle database unavailable error from get_db()
+        if "Database is not available" in str(e):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Database is not available. Please configure DATABASE_URL."
+            ) from e
         raise
     except Exception as e:
         logger.error(f"Unexpected error in get_user_greetings: {e}", exc_info=True)
