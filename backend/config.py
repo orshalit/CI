@@ -21,9 +21,9 @@ class Settings(BaseSettings):
     CORS_ALLOW_HEADERS: list[str] = ["*"]
 
     # Database Configuration
-    DATABASE_URL: str = os.getenv(
-        "DATABASE_URL", "postgresql://appuser:apppassword@localhost:5432/appdb"
-    )
+    # Default to empty string - database is optional
+    # If DATABASE_URL is not set, database features will be unavailable
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "")
     DATABASE_POOL_SIZE: int = int(os.getenv("DATABASE_POOL_SIZE", "5"))
     DATABASE_MAX_OVERFLOW: int = int(os.getenv("DATABASE_MAX_OVERFLOW", "10"))
     DATABASE_POOL_TIMEOUT: int = int(os.getenv("DATABASE_POOL_TIMEOUT", "30"))
