@@ -24,9 +24,7 @@ if settings.TESTING:
     DATABASE_URL = "sqlite:///:memory:"
     connect_args = {"check_same_thread": False}
     # SQLite-specific engine configuration (no pooling)
-    engine = create_engine(
-        DATABASE_URL, echo=False, connect_args=connect_args
-    )
+    engine = create_engine(DATABASE_URL, echo=False, connect_args=connect_args)
     SessionLocal = sessionmaker(
         autocommit=False, autoflush=False, bind=engine
     )
@@ -49,9 +47,7 @@ else:
             echo=False,  # Set to True for SQL query logging in development
             connect_args=connect_args,
         )
-        SessionLocal = sessionmaker(
-            autocommit=False, autoflush=False, bind=engine
-        )
+        SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
         database_available = True
         logger.info("Database engine created successfully")
     else:
