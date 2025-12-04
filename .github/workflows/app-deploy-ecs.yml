@@ -113,7 +113,9 @@ jobs:
           ssh-key: ${{ secrets.DEVOPS_REPO_KEY }}
 
       - name: Download build version from CI workflow
-        if: github.event_name == 'workflow_run'
+        if: |
+          github.event_name == 'workflow_run' &&
+          github.event.workflow_run.conclusion == 'success'
         continue-on-error: true
         uses: actions/download-artifact@v4
         with:
