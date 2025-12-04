@@ -1,6 +1,6 @@
 name: frontend
 
-image_repo: ghcr.io/orshalit/CI/ci-frontend
+image_repo: ghcr.io/orshalit/ci-frontend
 
 container_port: 3000
 cpu: 256

@@ -8,7 +8,7 @@ Each file describes one service, for example:
 
 ```yaml
 name: api
-image_repo: ghcr.io/orshalit/CI/ci-backend
+image_repo: ghcr.io/orshalit/ci-backend
 container_port: 8000
 
 cpu: 256
