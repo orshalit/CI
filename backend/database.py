@@ -24,8 +24,12 @@ if settings.TESTING:
     DATABASE_URL = "sqlite:///:memory:"
     connect_args = {"check_same_thread": False}
     # SQLite-specific engine configuration (no pooling)
-    engine = create_engine(DATABASE_URL, echo=False, connect_args=connect_args)
-    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    engine = create_engine(
+        DATABASE_URL, echo=False, connect_args=connect_args
+    )
+    SessionLocal = sessionmaker(
+        autocommit=False, autoflush=False, bind=engine
+    )
     database_available = True
 else:
     # Check if DATABASE_URL is provided and not empty
@@ -45,7 +49,9 @@ else:
             echo=False,  # Set to True for SQL query logging in development
             connect_args=connect_args,
         )
-        SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+        SessionLocal = sessionmaker(
+            autocommit=False, autoflush=False, bind=engine
+        )
         database_available = True
         logger.info("Database engine created successfully")
     else:
@@ -103,7 +109,9 @@ class Greeting(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_name = Column(String(100), index=True, nullable=False)
     message = Column(String(500), nullable=False)
-    created_at = Column(DateTime, default=_get_utc_now, nullable=False, index=True)
+    created_at = Column(
+        DateTime, default=_get_utc_now, nullable=False, index=True
+    )
 
     def __repr__(self):
         return (
@@ -138,7 +146,8 @@ def init_db(max_retries: int = 3):
             return
         except Exception as e:
             logger.warning(
-                f"Database initialization attempt {attempt + 1}/{max_retries} failed: {e}"
+                f"Database initialization attempt {attempt + 1}/{max_retries} "
+                f"failed: {e}"
             )
             if attempt == max_retries - 1:
                 logger.error("Database initialization failed after all retries")
@@ -160,7 +169,9 @@ def get_db():
         RuntimeError: If database is not available.
     """
     if not database_available or SessionLocal is None:
-        raise RuntimeError("Database is not available. DATABASE_URL is not configured.")
+        raise RuntimeError(
+            "Database is not available. DATABASE_URL is not configured."
+        )
 
     db = SessionLocal()
     try:
