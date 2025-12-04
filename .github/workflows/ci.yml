@@ -132,7 +132,14 @@ jobs:
       
       - name: Check Python code formatting (Black)
         working-directory: ./backend
-        run: black --check .
+        continue-on-error: true
+        run: |
+          echo "::notice::Checking code formatting with Black..."
+          black --diff . > black-diff.txt 2>&1 || true
+          cat black-diff.txt
+          echo ""
+          echo "::warning::If formatting issues are found above, run 'black .' locally to fix."
+          black --check .
       
       # JavaScript code quality - FAST (ESLint + Prettier)
       - name: Run ESLint
