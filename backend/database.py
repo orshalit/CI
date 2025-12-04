@@ -49,7 +49,9 @@ else:
         database_available = True
         logger.info("Database engine created successfully")
     else:
-        logger.warning("DATABASE_URL is empty or not set. Database features will be unavailable.")
+        logger.warning(
+            "DATABASE_URL is empty or not set. Database features will be unavailable."
+        )
         database_available = False
 
 Base = declarative_base()
@@ -104,7 +106,10 @@ class Greeting(Base):
     created_at = Column(DateTime, default=_get_utc_now, nullable=False, index=True)
 
     def __repr__(self):
-        return f"<Greeting(id={self.id}, user_name='{self.user_name}', created_at='{self.created_at}')>"
+        return (
+            f"<Greeting(id={self.id}, user_name='{self.user_name}', "
+            f"created_at='{self.created_at}')>"
+        )
 
 
 # =============================================================================

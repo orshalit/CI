@@ -55,7 +55,10 @@ async def lifespan(app: FastAPI):
             logger.error(f"Failed to initialize database: {e}", exc_info=True)
             raise
     elif not settings.TESTING and not database_available:
-        logger.warning("Database is not available (DATABASE_URL is empty). Application will run without database features.")
+        logger.warning(
+            "Database is not available (DATABASE_URL is empty). "
+            "Application will run without database features."
+        )
     yield
     # Shutdown: cleanup if needed
     logger.info("Shutting down application...")
@@ -148,7 +151,8 @@ async def get_version():
                 commit=version_data.get("commit", os.getenv("GIT_COMMIT", "unknown")),
                 build_date=version_data.get("build_date", os.getenv("BUILD_DATE", "unknown")),
                 python_version=version_data.get(
-                    "python_version", f"{sys.version_info.major}.{sys.version_info.minor}"
+                    "python_version",
+                    f"{sys.version_info.major}.{sys.version_info.minor}",
                 ),
                 environment=os.getenv("ENVIRONMENT", "development"),
             )
