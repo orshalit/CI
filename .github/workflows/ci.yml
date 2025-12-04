@@ -132,14 +132,18 @@ jobs:
       
       - name: Check Python code formatting (Black)
         working-directory: ./backend
-        continue-on-error: true
         run: |
-          echo "::notice::Checking code formatting with Black..."
-          black --diff . > black-diff.txt 2>&1 || true
-          cat black-diff.txt
-          echo ""
-          echo "::warning::If formatting issues are found above, run 'black .' locally to fix."
-          black --check .
+          echo "::notice::Formatting code with Black..."
+          black .
+          if [ -n "$(git status --porcelain backend/)" ]; then
+            echo "::error::Code was reformatted by Black. Changes:"
+            git diff backend/
+            echo ""
+            echo "::error::Please commit these formatting changes."
+            exit 1
+          else
+            echo "::notice::Code is already properly formatted."
+          fi
       
       # JavaScript code quality - FAST (ESLint + Prettier)
       - name: Run ESLint
