@@ -256,7 +256,7 @@ jobs:
         run: |
           CLUSTER_NAME=$(terraform -chdir=${{ needs.plan.outputs.tf_path }} output -raw ecs_cluster_name)
           SERVICE_NAMES_JSON=$(terraform -chdir=${{ needs.plan.outputs.tf_path }} output -json service_names)
-          SERVICES=$(echo "$SERVICE_NAMES_JSON" | jq -r '.[]')
+          SERVICES=$(echo "$SERVICE_NAMES_JSON" | jq -r 'to_entries[] | .value')
 
           echo "::notice::Waiting for services to become stable..."
           aws ecs wait services-stable \
