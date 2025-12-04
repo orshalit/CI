@@ -15,11 +15,15 @@ env:
 
 alb:
   alb_id: app_single
+  # listener_protocol: HTTPS in YAML, but will fall back to HTTP if HTTPS disabled on ALB
   listener_protocol: HTTPS
   listener_port: 443
   path_patterns:
     - "/single-api/*"
+  # host_patterns: Optional - remove to allow access via ALB DNS name directly
+  # In dev: Can be removed or use ALB DNS name
+  # In prod: Set to actual domain
   host_patterns:
-    - "single.dev.example.com"
+    - "single.dev.example.com"  # ⚠️ Replace with actual domain or remove
 
 

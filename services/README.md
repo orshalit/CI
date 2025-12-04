@@ -25,7 +25,7 @@ alb:
   path_patterns:
     - "/api/*"
   host_patterns:
-    - "app.dev.example.com"
+    - "app.dev.example.com"  # ⚠️ Replace with actual domain or remove for ALB DNS access
 ```
 
 ## Service Configuration
@@ -64,5 +64,20 @@ alb:
 - **CI owns all services**: All ECS services are defined here and generated into `services.generated.tfvars`
 - **DEVOPS owns ALBs/DNS**: ALB definitions, certificates, Route 53 records are managed in `terraform.tfvars`
 - **No conflicts**: Services reference ALBs by key (`alb_id`), ensuring clean separation
+
+## Environment-Specific Configuration
+
+### Dev Environment (HTTPS Disabled)
+
+- **listener_protocol**: Can be set to `HTTPS` in YAML, but will automatically fall back to `HTTP` if HTTPS is disabled on the ALB
+- **host_patterns**: Optional - can be removed to allow access via ALB DNS name directly
+- **BACKEND_API_URL**: Use `http://` (not `https://`) when HTTPS is disabled
+- **Example domains**: `app.dev.example.com` is a placeholder - replace with actual domain or remove `host_patterns` to use ALB DNS
+
+### Production Environment (HTTPS Enabled)
+
+- **listener_protocol**: Use `HTTPS` with proper certificate configured in DEVOPS
+- **host_patterns**: Set to actual production domain
+- **BACKEND_API_URL**: Use `https://` with proper domain
 
 
