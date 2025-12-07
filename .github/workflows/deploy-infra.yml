@@ -116,7 +116,7 @@ jobs:
         if: inputs.action == 'plan' || inputs.action == 'apply'
         run: |
           PLAN_DIR="DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}"
-          REFRESH_ARGS="-no-color"
+          REFRESH_ARGS="-no-color -upgrade"
           
           # Add var files if they exist (same logic as plan)
           if [ "${{ steps.check_tfvars.outputs.tfvars_exists }}" == "true" ]; then
@@ -127,9 +127,47 @@ jobs:
           fi
           
           echo "::notice::Refreshing Terraform state to sync with AWS..."
-          terraform -chdir="$PLAN_DIR" refresh $REFRESH_ARGS || {
-            echo "::warning::State refresh failed, but continuing with plan..."
-          }
+          echo "::notice::This will update the remote state to match actual AWS resources..."
+          terraform -chdir="$PLAN_DIR" refresh $REFRESH_ARGS
+          REFRESH_EXITCODE=$?
+          
+          if [ $REFRESH_EXITCODE -ne 0 ]; then
+            echo "::warning::State refresh failed with exit code $REFRESH_EXITCODE, but continuing with plan..."
+          else
+            echo "::notice::State refresh completed successfully"
+          fi
+
+      - name: Detect State Drift (Target Groups)
+        id: detect_drift
+        if: inputs.action == 'plan' || inputs.action == 'apply'
+        continue-on-error: true
+        run: |
+          PLAN_DIR="DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}"
+          
+          # Only check for ECS Fargate module
+          if [[ "${{ inputs.module_path }}" == "04-ecs-fargate" ]]; then
+            echo "::notice::Checking for state drift in target group health check paths..."
+            
+            if [ -f "scripts/verify-target-group-health-checks.sh" ]; then
+              chmod +x scripts/verify-target-group-health-checks.sh
+              export TERRAFORM_DIR="$PLAN_DIR"
+              export ENVIRONMENT="${{ inputs.environment }}"
+              
+              if scripts/verify-target-group-health-checks.sh; then
+                echo "drift_detected=false" >> $GITHUB_OUTPUT
+                echo "::notice::No state drift detected"
+              else
+                echo "drift_detected=true" >> $GITHUB_OUTPUT
+                echo "::warning::State drift detected! Consider running terraform refresh manually."
+              fi
+            else
+              echo "::notice::State drift detection script not found, skipping..."
+              echo "drift_detected=unknown" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "::notice::State drift detection only runs for ECS Fargate module"
+            echo "drift_detected=skipped" >> $GITHUB_OUTPUT
+          fi
 
       - name: Terraform Plan
         id: plan
@@ -221,6 +259,32 @@ jobs:
           terraform_path: DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}
           plan_file: "tfplan"
           auto_approve: "true"
+
+      - name: Verify Target Group Health Check Paths (Post-Apply)
+        id: verify_health_checks
+        if: inputs.action == 'apply' && steps.apply.outcome == 'success' && inputs.module_path == '04-ecs-fargate'
+        continue-on-error: true
+        run: |
+          PLAN_DIR="DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}"
+          
+          echo "::notice::Verifying target group health check paths after apply..."
+          
+          if [ -f "scripts/verify-target-group-health-checks.sh" ]; then
+            chmod +x scripts/verify-target-group-health-checks.sh
+            export TERRAFORM_DIR="$PLAN_DIR"
+            export ENVIRONMENT="${{ inputs.environment }}"
+            
+            if scripts/verify-target-group-health-checks.sh; then
+              echo "::notice::✓ All target group health check paths verified successfully"
+              echo "verification_passed=true" >> $GITHUB_OUTPUT
+            else
+              echo "::warning::⚠ State drift detected after apply. Target groups may not match configuration."
+              echo "verification_passed=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "::notice::Verification script not found, skipping..."
+            echo "verification_passed=skipped" >> $GITHUB_OUTPUT
+          fi
 
       - name: Cleanup partially created resources on apply failure
         if: inputs.action == 'apply' && steps.apply.outcome == 'failure' && steps.save_state.outputs.state_backed_up == 'true' && inputs.environment != 'production'
