@@ -194,8 +194,6 @@ jobs:
 
       - name: Terraform Plan
         id: plan
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
           EXTRA_ARGS=""
           if [ -f "${{ steps.vars.outputs.tf_path }}/services.generated.tfvars" ]; then
@@ -205,8 +203,7 @@ jobs:
             -no-color \
             -out=tfplan \
             $EXTRA_ARGS \
-            -var="terraform_backend_bucket_name=devops-project-terraform" \
-            -var="database_url=${DATABASE_URL}"
+            -var="terraform_backend_bucket_name=devops-project-terraform"
         continue-on-error: true
 
       - name: Add Plan to Summary
@@ -267,7 +264,6 @@ jobs:
         id: save_current_tags
         env:
           AWS_REGION: ${{ secrets.AWS_REGION }}
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
           echo "::notice::Saving current service image tags for potential rollback..."
           
@@ -592,7 +588,6 @@ jobs:
         if: failure() && steps.apply.outcome == 'success' && steps.save_current_tags.outputs.previous_image_tag != ''
         env:
           AWS_REGION: ${{ secrets.AWS_REGION }}
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
           echo "::error::Deployment verification failed. Rolling back to previous image tags..."
           
@@ -617,8 +612,7 @@ jobs:
           terraform -chdir=${{ needs.plan.outputs.tf_path }} apply \
             -auto-approve \
             $EXTRA_ARGS \
-            -var="terraform_backend_bucket_name=devops-project-terraform" \
-            -var="database_url=${DATABASE_URL}"
+            -var="terraform_backend_bucket_name=devops-project-terraform"
           
           echo "::notice::Rollback completed. Services reverted to previous image tag: ${PREVIOUS_TAG}"
           
