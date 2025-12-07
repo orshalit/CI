@@ -60,19 +60,29 @@ get_terraform_health_check_paths() {
     local tf_dir="$1"
     cd "$tf_dir" || exit 1
     
-    # Get target group ARNs from state
+    # Get all target group resources from state
     terraform state list 2>/dev/null | grep "aws_lb_target_group" | while read -r resource; do
-        # Get the resource attributes
-        TG_JSON=$(terraform state show -json "$resource" 2>/dev/null || echo "{}")
+        # Get the resource attributes using terraform state show (HCL output)
+        TG_OUTPUT=$(terraform state show "$resource" 2>/dev/null || echo "")
         
-        if [ "$TG_JSON" != "{}" ]; then
-            TG_NAME=$(echo "$TG_JSON" | jq -r '.values.name // .values.tags.Name // "unknown"')
-            HC_PATH=$(echo "$TG_JSON" | jq -r '.values.health_check[0].path // "/"')
+        if [ -n "$TG_OUTPUT" ]; then
+            # Extract target group name (look for name = "..." or name = ...)
+            TG_NAME=$(echo "$TG_OUTPUT" | grep -E "^\s*name\s*=" | head -1 | sed -E 's/.*name\s*=\s*"?([^"]+)"?.*/\1/' | tr -d ' ' || echo "")
+            
+            # Extract health check path from health_check block
+            # Look for the health_check block and find path within it
+            HC_BLOCK=$(echo "$TG_OUTPUT" | sed -n '/health_check {/,/}/p')
+            HC_PATH=$(echo "$HC_BLOCK" | grep -E "^\s+path\s*=" | head -1 | sed -E 's/.*path\s*=\s*"?([^"]+)"?.*/\1/' | tr -d ' ' || echo "/")
+            
+            # If path not found in health_check block, default to "/"
+            if [ -z "$HC_PATH" ] || [ "$HC_PATH" = "" ]; then
+                HC_PATH="/"
+            fi
             
             # Get the service name from the resource key (e.g., module.ecs_fargate.aws_lb_target_group.services["app_shared::api"])
             SERVICE_NAME=$(echo "$resource" | sed -n 's/.*\["\([^"]*\)::\([^"]*\)"\]/\2/p' || echo "")
             
-            if [ -n "$SERVICE_NAME" ]; then
+            if [ -n "$SERVICE_NAME" ] && [ -n "$TG_NAME" ]; then
                 echo "$SERVICE_NAME|$HC_PATH|$TG_NAME"
             fi
         fi
