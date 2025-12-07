@@ -36,6 +36,9 @@ jobs:
       name: ${{ inputs.environment }}
 
     steps:
+      - name: Checkout CI repository
+        uses: actions/checkout@v4
+
       - name: Debug GitHub context
         run: |
           echo "repository: $GITHUB_REPOSITORY"
