@@ -27,6 +27,11 @@ on:
         description: 'Docker image tag (leave empty for latest from main)'
         required: false
         type: string
+      skip_verification:
+        description: 'Skip verification steps (diagnostics, stability, load balancer, rollback) for faster testing. Default: true (disabled by default)'
+        required: false
+        default: true
+        type: boolean
 
 concurrency:
   group: deploy-app-ecs-${{ github.ref }}
@@ -103,6 +108,7 @@ jobs:
       environment: ${{ steps.vars.outputs.environment }}
       image_tag: ${{ steps.vars.outputs.image_tag }}
       tf_path: ${{ steps.vars.outputs.tf_path }}
+      skip_verification: ${{ steps.vars.outputs.skip_verification }}
 
     steps:
       - name: Download build version from CI workflow
@@ -122,6 +128,18 @@ jobs:
           ENV="${{ github.event.inputs.environment || 'dev' }}"
           echo "environment=$ENV" >> $GITHUB_OUTPUT
           echo "tf_path=DEVOPS/live/$ENV/04-ecs-fargate" >> $GITHUB_OUTPUT
+          # Skip verification by default for faster testing (can be enabled by setting skip_verification=false)
+          # For workflow_run events, skip_verification input is not available, so default to true
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            echo "skip_verification=true" >> $GITHUB_OUTPUT
+          else
+            SKIP_VERIFICATION="${{ github.event.inputs.skip_verification }}"
+            if [ -z "$SKIP_VERIFICATION" ] || [ "$SKIP_VERIFICATION" = "true" ]; then
+              echo "skip_verification=true" >> $GITHUB_OUTPUT
+            else
+              echo "skip_verification=false" >> $GITHUB_OUTPUT
+            fi
+          fi
 
           if [ -n "${{ github.event.inputs.image_tag }}" ]; then
             VERSION="${{ github.event.inputs.image_tag }}"
@@ -256,6 +274,7 @@ jobs:
           auto_approve: "true"
 
       - name: Diagnose ECS Services Before Verification
+        if: needs.plan.outputs.skip_verification != 'true'
         id: diagnose
         uses: ./.github/actions/ecs-diagnostics
         with:
@@ -264,6 +283,7 @@ jobs:
         continue-on-error: true
 
       - name: Verify ECS Service Stability
+        if: needs.plan.outputs.skip_verification != 'true'
         id: verify
         uses: ./.github/actions/verify-ecs-stability
         with:
@@ -271,7 +291,7 @@ jobs:
           aws_region: ${{ secrets.AWS_REGION }}
 
       - name: Verify Load Balancer Configuration
-        if: success()
+        if: needs.plan.outputs.skip_verification != 'true' && success()
         uses: ./.github/actions/verify-load-balancer
         with:
           terraform_path: ${{ needs.plan.outputs.tf_path }}
@@ -279,7 +299,7 @@ jobs:
         continue-on-error: true
 
       - name: Verify Service Discovery and CloudWatch Logs
-        if: success()
+        if: needs.plan.outputs.skip_verification != 'true' && success()
         env:
           AWS_REGION: ${{ secrets.AWS_REGION }}
         run: |
@@ -352,13 +372,19 @@ jobs:
           echo "::endgroup::"
 
       - name: Rollback to previous image tags on failure
-        if: failure() && steps.apply.outcome == 'success' && steps.save_current_tags.outputs.previous_image_tag != ''
+        if: needs.plan.outputs.skip_verification != 'true' && failure() && steps.apply.outcome == 'success' && steps.save_current_tags.outputs.previous_image_tag != ''
         uses: ./.github/actions/ecs-rollback
         with:
           terraform_path: ${{ needs.plan.outputs.tf_path }}
           previous_image_tag: ${{ steps.save_current_tags.outputs.previous_image_tag }}
           aws_region: ${{ secrets.AWS_REGION }}
           var_files: "services.generated.tfvars"
+
+      - name: Verification Skipped Notice
+        if: needs.plan.outputs.skip_verification == 'true'
+        run: |
+          echo "::notice::Verification steps skipped (diagnostics, stability, load balancer, rollback)"
+          echo "::notice::Run the diagnose script locally for verification: scripts/diagnose-ecs-deployment.sh"
 
       - name: Deployment Summary
         if: always()
