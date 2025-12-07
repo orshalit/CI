@@ -1,0 +1,112 @@
+name: 'ECS Rollback'
+description: 'Rollback ECS services to previous image tags'
+
+inputs:
+  terraform_path:
+    description: 'Path to Terraform directory'
+    required: true
+  previous_image_tag:
+    description: 'Previous image tag to rollback to'
+    required: true
+  aws_region:
+    description: 'AWS region'
+    required: true
+  var_files:
+    description: 'Space-separated list of var file names (default: "terraform.tfvars services.generated.tfvars")'
+    required: false
+    default: 'terraform.tfvars services.generated.tfvars'
+
+outputs:
+  rolled_back:
+    description: 'Whether rollback was successful (true/false)'
+    value: ${{ steps.rollback.outputs.rolled_back }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Rollback to previous image tags
+      id: rollback
+      shell: bash
+      env:
+        AWS_REGION: ${{ inputs.aws_region }}
+      run: |
+        if [ -z "${{ inputs.previous_image_tag }}" ]; then
+          echo "::error::No previous image tag provided. Cannot rollback."
+          echo "rolled_back=false" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+        
+        echo "::notice::Rolling back to previous image tag: ${{ inputs.previous_image_tag }}"
+        
+        # Get service names from Terraform outputs
+        SERVICE_NAMES_JSON=$(terraform -chdir="${{ inputs.terraform_path }}" output -json service_names 2>/dev/null || echo "{}")
+        
+        if [ "$SERVICE_NAMES_JSON" = "{}" ] || [ "$SERVICE_NAMES_JSON" = "null" ]; then
+          echo "::error::Could not determine service names from Terraform outputs"
+          echo "rolled_back=false" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+        
+        # Create rollback tfvars file
+        ROLLBACK_FILE="${{ inputs.terraform_path }}/ci-service-tags.auto.tfvars"
+        
+        echo "# Auto-generated rollback file" > "$ROLLBACK_FILE"
+        echo "# Created: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> "$ROLLBACK_FILE"
+        echo "" >> "$ROLLBACK_FILE"
+        
+        # Build service_image_tags map
+        echo "service_image_tags = {" >> "$ROLLBACK_FILE"
+        for service_name in $(echo "$SERVICE_NAMES_JSON" | jq -r 'to_entries[] | .value'); do
+          echo "  \"$service_name\" = \"${{ inputs.previous_image_tag }}\"" >> "$ROLLBACK_FILE"
+        done
+        echo "}" >> "$ROLLBACK_FILE"
+        
+        echo "::notice::Created rollback file: $ROLLBACK_FILE"
+        echo "::group::Rollback Configuration"
+        cat "$ROLLBACK_FILE"
+        echo "::endgroup::"
+        
+        # Apply rollback
+        cd "${{ inputs.terraform_path }}"
+        
+        APPLY_ARGS="-auto-approve"
+        
+        # Add var files if provided
+        if [ -n "${{ inputs.var_files }}" ]; then
+          for var_file in ${{ inputs.var_files }}; do
+            if [ -f "$var_file" ]; then
+              APPLY_ARGS="$APPLY_ARGS -var-file=$var_file"
+            fi
+          done
+        fi
+        
+        # Add the rollback file
+        APPLY_ARGS="$APPLY_ARGS -var-file=ci-service-tags.auto.tfvars"
+        
+        echo "::notice::Applying rollback configuration..."
+        terraform apply $APPLY_ARGS
+        
+        if [ $? -eq 0 ]; then
+          echo "✅ Rollback applied successfully"
+          
+          # Wait for services to stabilize
+          CLUSTER_NAME=$(terraform output -raw ecs_cluster_name 2>/dev/null || echo "")
+          SERVICES=$(echo "$SERVICE_NAMES_JSON" | jq -r 'to_entries[] | .value')
+          
+          if [ -n "$CLUSTER_NAME" ] && [ "$CLUSTER_NAME" != "null" ]; then
+            echo "::notice::Waiting for services to stabilize after rollback..."
+            aws ecs wait services-stable \
+              --region ${AWS_REGION} \
+              --cluster "$CLUSTER_NAME" \
+              --services $SERVICES || {
+              echo "::warning::Services did not stabilize after rollback, but rollback was applied"
+            }
+          fi
+          
+          echo "rolled_back=true" >> $GITHUB_OUTPUT
+        else
+          echo "::error::Rollback failed"
+          echo "rolled_back=false" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+

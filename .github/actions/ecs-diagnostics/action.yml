@@ -1,0 +1,143 @@
+name: 'ECS Diagnostics'
+description: 'Run comprehensive diagnostics on ECS services to identify issues'
+
+inputs:
+  terraform_path:
+    description: 'Path to Terraform directory'
+    required: true
+  aws_region:
+    description: 'AWS region'
+    required: true
+  diagnostic_script:
+    description: 'Path to diagnostic script (optional, will use inline diagnostics if not provided)'
+    required: false
+    default: ''
+
+outputs:
+  has_issues:
+    description: 'Whether any issues were detected (true/false)'
+    value: ${{ steps.diagnose.outputs.has_issues }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Diagnose ECS Services
+      id: diagnose
+      shell: bash
+      env:
+        AWS_REGION: ${{ inputs.aws_region }}
+      run: |
+        CLUSTER_NAME=$(terraform -chdir="${{ inputs.terraform_path }}" output -raw ecs_cluster_name 2>/dev/null || echo "")
+        SERVICE_NAMES_JSON=$(terraform -chdir="${{ inputs.terraform_path }}" output -json service_names 2>/dev/null || echo "{}")
+        SERVICES=$(echo "$SERVICE_NAMES_JSON" | jq -r 'to_entries[] | .value' 2>/dev/null || echo "")
+        
+        if [ -z "$CLUSTER_NAME" ] || [ "$CLUSTER_NAME" = "null" ]; then
+          echo "::error::Could not determine cluster name from Terraform outputs"
+          echo "has_issues=true" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+        
+        if [ -z "$SERVICES" ]; then
+          echo "::warning::No services found in Terraform outputs"
+          echo "has_issues=false" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+        
+        echo "::group::ECS Service Diagnostics"
+        HAS_ISSUES=false
+        
+        for service in $SERVICES; do
+          echo ""
+          echo "=== Service: $service ==="
+          
+          # Get service status
+          SERVICE_INFO=$(aws ecs describe-services \
+            --cluster "$CLUSTER_NAME" \
+            --services "$service" \
+            --region ${AWS_REGION} \
+            --output json 2>/dev/null || echo "{}")
+          
+          DESIRED=$(echo "$SERVICE_INFO" | jq -r '.services[0].desiredCount // 0')
+          RUNNING=$(echo "$SERVICE_INFO" | jq -r '.services[0].runningCount // 0')
+          PENDING=$(echo "$SERVICE_INFO" | jq -r '.services[0].pendingCount // 0')
+          
+          echo "Desired: $DESIRED | Running: $RUNNING | Pending: $PENDING"
+          
+          if [ "$RUNNING" -lt "$DESIRED" ]; then
+            echo "::warning::Service $service has fewer running tasks than desired"
+            HAS_ISSUES=true
+          fi
+          
+          # Check recent events
+          echo "Recent Events:"
+          echo "$SERVICE_INFO" | jq -r '.services[0].events[:3] | .[]? | "  [\(.createdAt)] \(.message)"' 2>/dev/null || echo "  (no events)"
+          
+          # Check stopped tasks
+          STOPPED_TASKS=$(aws ecs list-tasks \
+            --cluster "$CLUSTER_NAME" \
+            --service-name "$service" \
+            --desired-status STOPPED \
+            --region ${AWS_REGION} \
+            --max-items 3 \
+            --output json 2>/dev/null | jq -r '.taskArns[]?' || echo "")
+          
+          if [ -n "$STOPPED_TASKS" ]; then
+            echo "Stopped Tasks Found:"
+            for task_arn in $STOPPED_TASKS; do
+              TASK_INFO=$(aws ecs describe-tasks \
+                --cluster "$CLUSTER_NAME" \
+                --tasks "$task_arn" \
+                --region ${AWS_REGION} \
+                --output json 2>/dev/null || echo "{}")
+              
+              STOP_CODE=$(echo "$TASK_INFO" | jq -r '.tasks[0].stopCode // "unknown"')
+              STOP_REASON=$(echo "$TASK_INFO" | jq -r '.tasks[0].stoppedReason // "unknown"')
+              EXIT_CODE=$(echo "$TASK_INFO" | jq -r '.tasks[0].containers[0].exitCode // "N/A"')
+              
+              echo "  Task: $(basename $task_arn)"
+              echo "    Stop Code: $STOP_CODE"
+              echo "    Stop Reason: $STOP_REASON"
+              echo "    Exit Code: $EXIT_CODE"
+              
+              if [ "$STOP_CODE" != "UserInitiated" ]; then
+                HAS_ISSUES=true
+              fi
+            done
+          fi
+          
+          # Check target group health
+          TASK_DEF_ARN=$(echo "$SERVICE_INFO" | jq -r '.services[0].taskDefinition // empty')
+          if [ -n "$TASK_DEF_ARN" ] && [ "$TASK_DEF_ARN" != "null" ]; then
+            LB_INFO=$(echo "$SERVICE_INFO" | jq -r '.services[0].loadBalancers[0] // empty')
+            if [ -n "$LB_INFO" ] && [ "$LB_INFO" != "null" ]; then
+              TG_ARN=$(echo "$LB_INFO" | jq -r '.targetGroupArn // empty')
+              if [ -n "$TG_ARN" ] && [ "$TG_ARN" != "null" ]; then
+                echo "Target Group Health:"
+                TG_HEALTH=$(aws elbv2 describe-target-health \
+                  --target-group-arn "$TG_ARN" \
+                  --region ${AWS_REGION} \
+                  --output json 2>/dev/null || echo "{}")
+                
+                HEALTHY=$(echo "$TG_HEALTH" | jq -r '[.TargetHealthDescriptions[]? | select(.TargetHealth.State == "healthy")] | length // 0')
+                UNHEALTHY=$(echo "$TG_HEALTH" | jq -r '[.TargetHealthDescriptions[]? | select(.TargetHealth.State != "healthy")] | length // 0')
+                
+                echo "  Healthy: $HEALTHY | Unhealthy: $UNHEALTHY"
+                
+                if [ "$UNHEALTHY" -gt 0 ]; then
+                  echo "  Unhealthy Targets:"
+                  echo "$TG_HEALTH" | jq -r '.TargetHealthDescriptions[]? | select(.TargetHealth.State != "healthy") | "    \(.Target.Id): \(.TargetHealth.State) - \(.TargetHealth.Reason // "N/A")"' 2>/dev/null || echo "    (could not parse)"
+                  HAS_ISSUES=true
+                fi
+              fi
+            fi
+          fi
+        done
+        
+        echo "::endgroup::"
+        
+        if [ "$HAS_ISSUES" = "true" ]; then
+          echo "has_issues=true" >> $GITHUB_OUTPUT
+        else
+          echo "has_issues=false" >> $GITHUB_OUTPUT
+        fi
+

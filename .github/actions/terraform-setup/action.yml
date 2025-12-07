@@ -1,0 +1,61 @@
+name: 'Terraform Setup'
+description: 'Setup Terraform with AWS authentication and optional DEVOPS repository checkout'
+
+inputs:
+  devops_repo:
+    description: 'DEVOPS repository name (owner/repo). Leave empty to skip checkout.'
+    required: false
+    default: ''
+  devops_repo_key:
+    description: 'SSH key secret name for DEVOPS repository'
+    required: false
+    default: ''
+  aws_role_arn:
+    description: 'AWS IAM role ARN for OIDC authentication'
+    required: true
+  aws_region:
+    description: 'AWS region'
+    required: true
+  terraform_version:
+    description: 'Terraform version (empty for latest)'
+    required: false
+    default: ''
+  session_name:
+    description: 'AWS session name for role assumption'
+    required: false
+    default: 'GitHubActions-Terraform'
+  devops_path:
+    description: 'Path where DEVOPS repo should be checked out'
+    required: false
+    default: 'DEVOPS'
+
+outputs:
+  terraform_path:
+    description: 'Path to terraform binary (for reference)'
+    value: ${{ steps.setup.outputs.terraform_path }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Checkout DEVOPS repository
+      if: inputs.devops_repo != ''
+      uses: actions/checkout@v4
+      shell: bash
+      with:
+        repository: ${{ inputs.devops_repo }}
+        path: ${{ inputs.devops_path }}
+        ssh-key: ${{ inputs.devops_repo_key }}
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ inputs.aws_role_arn }}
+        aws-region: ${{ inputs.aws_region }}
+        role-session-name: ${{ inputs.session_name }}
+
+    - name: Setup Terraform
+      id: setup
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ inputs.terraform_version }}
+

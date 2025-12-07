@@ -1,0 +1,87 @@
+name: 'Terraform Plan'
+description: 'Execute Terraform plan with optional variable files and extra variables'
+
+inputs:
+  terraform_path:
+    description: 'Path to Terraform directory (relative to workspace root)'
+    required: true
+  var_files:
+    description: 'Space-separated list of var file names (e.g., "terraform.tfvars services.generated.tfvars")'
+    required: false
+    default: ''
+  extra_vars:
+    description: 'Space-separated list of -var arguments (e.g., "key=value key2=value2")'
+    required: false
+    default: ''
+  plan_file:
+    description: 'Output plan file name'
+    required: false
+    default: 'tfplan'
+  backend_bucket:
+    description: 'Terraform backend bucket name (optional, will be added as -var if provided)'
+    required: false
+    default: ''
+
+outputs:
+  exitcode:
+    description: 'Terraform plan exit code (0 = success, 1 = failure, 2 = success with changes)'
+    value: ${{ steps.plan.outputs.exitcode }}
+  has_changes:
+    description: 'Whether the plan has changes (true/false)'
+    value: ${{ steps.plan.outputs.has_changes }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Terraform Plan
+      id: plan
+      shell: bash
+      run: |
+        cd "${{ inputs.terraform_path }}"
+        
+        # Build plan arguments
+        PLAN_ARGS="-no-color -out=${{ inputs.plan_file }}"
+        
+        # Add var files if provided
+        if [ -n "${{ inputs.var_files }}" ]; then
+          for var_file in ${{ inputs.var_files }}; do
+            if [ -f "$var_file" ]; then
+              PLAN_ARGS="$PLAN_ARGS -var-file=$var_file"
+              echo "::notice::Using var file: $var_file"
+            else
+              echo "::warning::Var file not found: $var_file"
+            fi
+          done
+        fi
+        
+        # Add extra vars if provided
+        if [ -n "${{ inputs.extra_vars }}" ]; then
+          for var in ${{ inputs.extra_vars }}; do
+            PLAN_ARGS="$PLAN_ARGS -var=\"$var\""
+          done
+        fi
+        
+        # Add backend bucket if provided
+        if [ -n "${{ inputs.backend_bucket }}" ]; then
+          PLAN_ARGS="$PLAN_ARGS -var=\"terraform_backend_bucket_name=${{ inputs.backend_bucket }}\""
+        fi
+        
+        # Execute plan
+        terraform plan $PLAN_ARGS
+        PLAN_EXITCODE=$?
+        
+        # Check if plan has changes
+        if [ $PLAN_EXITCODE -eq 0 ] || [ $PLAN_EXITCODE -eq 2 ]; then
+          PLAN_OUTPUT=$(terraform show -no-color ${{ inputs.plan_file }} 2>&1 || echo "")
+          if echo "$PLAN_OUTPUT" | grep -q "No changes"; then
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          else
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          fi
+        else
+          echo "has_changes=false" >> $GITHUB_OUTPUT
+        fi
+        
+        echo "exitcode=$PLAN_EXITCODE" >> $GITHUB_OUTPUT
+        exit $PLAN_EXITCODE
+

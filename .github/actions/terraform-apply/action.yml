@@ -1,0 +1,88 @@
+name: 'Terraform Apply'
+description: 'Execute Terraform apply with optional plan file or direct apply'
+
+inputs:
+  terraform_path:
+    description: 'Path to Terraform directory (relative to workspace root)'
+    required: true
+  plan_file:
+    description: 'Plan file to apply (if empty, will do direct apply)'
+    required: false
+    default: ''
+  var_files:
+    description: 'Space-separated list of var file names (only used if plan_file is empty)'
+    required: false
+    default: ''
+  extra_vars:
+    description: 'Space-separated list of -var arguments (only used if plan_file is empty)'
+    required: false
+    default: ''
+  backend_bucket:
+    description: 'Terraform backend bucket name (only used if plan_file is empty)'
+    required: false
+    default: ''
+  auto_approve:
+    description: 'Auto-approve apply (default: true)'
+    required: false
+    default: 'true'
+
+outputs:
+  exitcode:
+    description: 'Terraform apply exit code'
+    value: ${{ steps.apply.outputs.exitcode }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Terraform Apply
+      id: apply
+      shell: bash
+      run: |
+        cd "${{ inputs.terraform_path }}"
+        
+        if [ -n "${{ inputs.plan_file }}" ] && [ -f "${{ inputs.plan_file }}" ]; then
+          # Apply using plan file
+          echo "::notice::Applying using plan file: ${{ inputs.plan_file }}"
+          if [ "${{ inputs.auto_approve }}" = "true" ]; then
+            terraform apply -auto-approve "${{ inputs.plan_file }}"
+          else
+            terraform apply "${{ inputs.plan_file }}"
+          fi
+        else
+          # Direct apply with variables
+          echo "::notice::Applying directly (no plan file)"
+          APPLY_ARGS=""
+          
+          if [ "${{ inputs.auto_approve }}" = "true" ]; then
+            APPLY_ARGS="-auto-approve"
+          fi
+          
+          # Add var files if provided
+          if [ -n "${{ inputs.var_files }}" ]; then
+            for var_file in ${{ inputs.var_files }}; do
+              if [ -f "$var_file" ]; then
+                APPLY_ARGS="$APPLY_ARGS -var-file=$var_file"
+                echo "::notice::Using var file: $var_file"
+              fi
+            done
+          fi
+          
+          # Add extra vars if provided
+          if [ -n "${{ inputs.extra_vars }}" ]; then
+            for var in ${{ inputs.extra_vars }}; do
+              APPLY_ARGS="$APPLY_ARGS -var=\"$var\""
+            done
+          fi
+          
+          # Add backend bucket if provided
+          if [ -n "${{ inputs.backend_bucket }}" ]; then
+            APPLY_ARGS="$APPLY_ARGS -var=\"terraform_backend_bucket_name=${{ inputs.backend_bucket }}\""
+          fi
+          
+          terraform apply $APPLY_ARGS
+        fi
+        
+        APPLY_EXITCODE=$?
+        echo "exitcode=$APPLY_EXITCODE" >> $GITHUB_OUTPUT
+        exit $APPLY_EXITCODE
+

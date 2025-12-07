@@ -1,0 +1,124 @@
+name: 'Verify Load Balancer'
+description: 'Verify load balancer configuration and target group health'
+
+inputs:
+  terraform_path:
+    description: 'Path to Terraform directory'
+    required: true
+  aws_region:
+    description: 'AWS region'
+    required: true
+
+outputs:
+  all_healthy:
+    description: 'Whether all target groups are healthy (true/false)'
+    value: ${{ steps.verify.outputs.all_healthy }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Verify Load Balancer Configuration
+      id: verify
+      shell: bash
+      env:
+        AWS_REGION: ${{ inputs.aws_region }}
+      run: |
+        echo "::group::Verifying Load Balancer and Target Group Associations..."
+        
+        # Get ALB information from Terraform outputs
+        ALB_DNS_JSON=$(terraform -chdir="${{ inputs.terraform_path }}" output -json alb_dns_names 2>/dev/null || echo "{}")
+        
+        if [ "$ALB_DNS_JSON" = "{}" ] || [ "$ALB_DNS_JSON" = "null" ]; then
+          echo "⚠️  Could not retrieve ALB information from Terraform outputs"
+          echo "all_healthy=false" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+        
+        echo "ALBs found:"
+        echo "$ALB_DNS_JSON" | jq -r 'to_entries[] | "  \(.key): \(.value)"'
+        
+        ALL_HEALTHY=true
+        
+        # Check each ALB for listeners and rules
+        for alb_name in $(echo "$ALB_DNS_JSON" | jq -r 'keys[]'); do
+          ALB_DNS=$(echo "$ALB_DNS_JSON" | jq -r --arg k "$alb_name" '.[$k]')
+          
+          # Get ALB ARN
+          ALB_ARN=$(aws elbv2 describe-load-balancers \
+            --region ${AWS_REGION} \
+            --query "LoadBalancers[?DNSName=='$ALB_DNS'].LoadBalancerArn" \
+            --output text 2>/dev/null || echo "")
+          
+          if [ -z "$ALB_ARN" ] || [ "$ALB_ARN" = "None" ]; then
+            echo "::warning::Could not find ALB ARN for $alb_name"
+            ALL_HEALTHY=false
+            continue
+          fi
+          
+          echo ""
+          echo "=== ALB: $alb_name ==="
+          
+          # Check listeners
+          LISTENERS=$(aws elbv2 describe-listeners \
+            --load-balancer-arn "$ALB_ARN" \
+            --region ${AWS_REGION} \
+            --output json 2>/dev/null || echo "{}")
+          
+          LISTENER_COUNT=$(echo "$LISTENERS" | jq -r '.Listeners | length // 0')
+          echo "Listeners: $LISTENER_COUNT"
+          
+          if [ "$LISTENER_COUNT" -eq 0 ]; then
+            echo "⚠️  No listeners found for this ALB"
+            ALL_HEALTHY=false
+          else
+            # Check listener rules
+            for listener_arn in $(echo "$LISTENERS" | jq -r '.Listeners[].ListenerArn'); do
+              RULES=$(aws elbv2 describe-rules \
+                --listener-arn "$listener_arn" \
+                --region ${AWS_REGION} \
+                --output json 2>/dev/null || echo "{}")
+              
+              RULE_COUNT=$(echo "$RULES" | jq -r '.Rules | length // 0')
+              echo "  Listener $listener_arn: $RULE_COUNT rules"
+              
+              # Check if rules forward to target groups
+              TARGET_GROUPS=$(echo "$RULES" | jq -r '.Rules[]? | select(.Actions[].Type == "forward") | .Actions[].TargetGroupArn // empty' | sort -u)
+              
+              if [ -n "$TARGET_GROUPS" ]; then
+                echo "  Target groups associated:"
+                for tg_arn in $TARGET_GROUPS; do
+                  TG_NAME=$(aws elbv2 describe-target-groups \
+                    --target-group-arns "$tg_arn" \
+                    --region ${AWS_REGION} \
+                    --query 'TargetGroups[0].TargetGroupName' \
+                    --output text 2>/dev/null || echo "unknown")
+                  
+                  HEALTH=$(aws elbv2 describe-target-health \
+                    --target-group-arn "$tg_arn" \
+                    --region ${AWS_REGION} \
+                    --output json 2>/dev/null || echo "{}")
+                  
+                  HEALTHY=$(echo "$HEALTH" | jq -r '[.TargetHealthDescriptions[]? | select(.TargetHealth.State == "healthy")] | length // 0')
+                  TOTAL=$(echo "$HEALTH" | jq -r '.TargetHealthDescriptions | length // 0')
+                  
+                  echo "    $TG_NAME: $HEALTHY/$TOTAL healthy"
+                  
+                  if [ "$TOTAL" -gt 0 ] && [ "$HEALTHY" -lt "$TOTAL" ]; then
+                    ALL_HEALTHY=false
+                  fi
+                done
+              fi
+            done
+          fi
+        done
+        
+        echo "::endgroup::"
+        
+        if [ "$ALL_HEALTHY" = "true" ]; then
+          echo "✅ All target groups are healthy"
+          echo "all_healthy=true" >> $GITHUB_OUTPUT
+        else
+          echo "⚠️  Some target groups are not fully healthy"
+          echo "all_healthy=false" >> $GITHUB_OUTPUT
+        fi
+

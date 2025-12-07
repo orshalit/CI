@@ -1,0 +1,71 @@
+name: 'Verify ECS Stability'
+description: 'Wait for ECS services to become stable and verify they are running correctly'
+
+inputs:
+  terraform_path:
+    description: 'Path to Terraform directory'
+    required: true
+  aws_region:
+    description: 'AWS region'
+    required: true
+  timeout_seconds:
+    description: 'Timeout in seconds for services to become stable'
+    required: false
+    default: '600'
+
+outputs:
+  stable:
+    description: 'Whether services became stable (true/false)'
+    value: ${{ steps.verify.outputs.stable }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Verify ECS Service Stability
+      id: verify
+      shell: bash
+      env:
+        AWS_REGION: ${{ inputs.aws_region }}
+      run: |
+        CLUSTER_NAME=$(terraform -chdir="${{ inputs.terraform_path }}" output -raw ecs_cluster_name 2>/dev/null || echo "")
+        SERVICE_NAMES_JSON=$(terraform -chdir="${{ inputs.terraform_path }}" output -json service_names 2>/dev/null || echo "{}")
+        SERVICES=$(echo "$SERVICE_NAMES_JSON" | jq -r 'to_entries[] | .value' 2>/dev/null || echo "")
+        
+        if [ -z "$CLUSTER_NAME" ] || [ "$CLUSTER_NAME" = "null" ]; then
+          echo "::error::Could not determine cluster name from Terraform outputs"
+          echo "stable=false" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+        
+        if [ -z "$SERVICES" ]; then
+          echo "::warning::No services found in Terraform outputs"
+          echo "stable=true" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+        
+        echo "::notice::Waiting for services to become stable (timeout: ${{ inputs.timeout_seconds }}s)..."
+        
+        # Use timeout command if available, otherwise just run the wait
+        if command -v timeout &> /dev/null; then
+          timeout ${{ inputs.timeout_seconds }} aws ecs wait services-stable \
+            --region ${AWS_REGION} \
+            --cluster "$CLUSTER_NAME" \
+            --services $SERVICES || {
+            echo "::error::Services did not become stable within timeout period"
+            echo "stable=false" >> $GITHUB_OUTPUT
+            exit 1
+          }
+        else
+          aws ecs wait services-stable \
+            --region ${AWS_REGION} \
+            --cluster "$CLUSTER_NAME" \
+            --services $SERVICES || {
+            echo "::error::Services did not become stable"
+            echo "stable=false" >> $GITHUB_OUTPUT
+            exit 1
+          }
+        fi
+        
+        echo "✅ Services are stable."
+        echo "stable=true" >> $GITHUB_OUTPUT
+

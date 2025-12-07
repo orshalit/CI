@@ -1,0 +1,86 @@
+name: 'Save ECS State for Rollback'
+description: 'Save current ECS service image tags and state for potential rollback'
+
+inputs:
+  terraform_path:
+    description: 'Path to Terraform directory'
+    required: true
+  aws_region:
+    description: 'AWS region'
+    required: true
+
+outputs:
+  previous_image_tag:
+    description: 'Previous image tag found (empty if not found)'
+    value: ${{ steps.save.outputs.previous_image_tag }}
+  cluster_name:
+    description: 'ECS cluster name'
+    value: ${{ steps.save.outputs.cluster_name }}
+  service_names:
+    description: 'JSON object of service names'
+    value: ${{ steps.save.outputs.service_names }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Save current service image tags
+      id: save
+      shell: bash
+      env:
+        AWS_REGION: ${{ inputs.aws_region }}
+      run: |
+        echo "::notice::Saving current service image tags for potential rollback..."
+        
+        # Get cluster name and service names from Terraform outputs
+        CLUSTER_NAME=$(terraform -chdir="${{ inputs.terraform_path }}" output -raw ecs_cluster_name 2>/dev/null || echo "")
+        SERVICE_NAMES_JSON=$(terraform -chdir="${{ inputs.terraform_path }}" output -json service_names 2>/dev/null || echo "{}")
+        
+        if [ -n "$CLUSTER_NAME" ] && [ "$CLUSTER_NAME" != "null" ]; then
+          echo "cluster_name=$CLUSTER_NAME" >> $GITHUB_OUTPUT
+          echo "service_names=$SERVICE_NAMES_JSON" >> $GITHUB_OUTPUT
+          
+          # Try to get current image tags from ECS services
+          if [ "$SERVICE_NAMES_JSON" != "{}" ] && [ "$SERVICE_NAMES_JSON" != "null" ]; then
+            # Get first service to check current image
+            FIRST_SERVICE=$(echo "$SERVICE_NAMES_JSON" | jq -r 'to_entries[0].value' 2>/dev/null || echo "")
+            if [ -n "$FIRST_SERVICE" ]; then
+              CURRENT_TASK_DEF=$(aws ecs describe-services \
+                --cluster "$CLUSTER_NAME" \
+                --services "$FIRST_SERVICE" \
+                --region ${AWS_REGION} \
+                --query 'services[0].taskDefinition' \
+                --output text 2>/dev/null || echo "")
+              
+              if [ -n "$CURRENT_TASK_DEF" ] && [ "$CURRENT_TASK_DEF" != "None" ]; then
+                CURRENT_TAGS=$(aws ecs describe-task-definition \
+                  --task-definition "$CURRENT_TASK_DEF" \
+                  --region ${AWS_REGION} \
+                  --query 'taskDefinition.containerDefinitions[0].image' \
+                  --output text 2>/dev/null | sed 's/.*://' || echo "")
+                
+                if [ -n "$CURRENT_TAGS" ] && [ "$CURRENT_TAGS" != "null" ]; then
+                  echo "previous_image_tag=$CURRENT_TAGS" >> $GITHUB_OUTPUT
+                  echo "::notice::Saved previous image tag: $CURRENT_TAGS"
+                else
+                  echo "previous_image_tag=" >> $GITHUB_OUTPUT
+                  echo "::warning::Could not determine previous image tag from task definition"
+                fi
+              else
+                echo "previous_image_tag=" >> $GITHUB_OUTPUT
+                echo "::warning::Could not get task definition for service"
+              fi
+            else
+              echo "previous_image_tag=" >> $GITHUB_OUTPUT
+              echo "::warning::No services found in outputs"
+            fi
+          else
+            echo "previous_image_tag=" >> $GITHUB_OUTPUT
+            echo "::warning::Service names output is empty"
+          fi
+        else
+          echo "cluster_name=" >> $GITHUB_OUTPUT
+          echo "service_names={}" >> $GITHUB_OUTPUT
+          echo "previous_image_tag=" >> $GITHUB_OUTPUT
+          echo "::warning::Could not determine cluster name. Rollback may not be possible."
+        fi
+

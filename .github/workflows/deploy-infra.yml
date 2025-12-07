@@ -36,13 +36,6 @@ jobs:
       name: ${{ inputs.environment }}
 
     steps:
-      - name: Checkout DEVOPS repository
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ secrets.DEVOPS_REPO_NAME || 'orshalit/DEVOPS' }} # DEVOPS repository (owner/repo-name)
-          path: 'DEVOPS'
-          ssh-key: ${{ secrets.DEVOPS_REPO_KEY }}
-
       - name: Debug GitHub context
         run: |
           echo "repository: $GITHUB_REPOSITORY"
@@ -58,15 +51,13 @@ jobs:
           AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
           AWS_REGION: ${{ secrets.AWS_REGION }}
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: Terraform Setup
+        uses: ./.github/actions/terraform-setup
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ secrets.AWS_REGION }}
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
+          devops_repo: ${{ secrets.DEVOPS_REPO_NAME || 'orshalit/DEVOPS' }}
+          devops_repo_key: ${{ secrets.DEVOPS_REPO_KEY }}
+          aws_role_arn: ${{ secrets.AWS_ROLE_ARN }}
+          aws_region: ${{ secrets.AWS_REGION }}
           terraform_version: '1.6.0'
 
       - name: Terraform Format Check
@@ -100,18 +91,31 @@ jobs:
             echo "services_tfvars_exists=false" >> $GITHUB_OUTPUT
           fi
 
+      - name: Build var files list
+        id: build_var_files
+        if: inputs.action == 'plan' || inputs.action == 'apply'
+        run: |
+          VAR_FILES=""
+          if [ "${{ steps.check_tfvars.outputs.tfvars_exists }}" == "true" ]; then
+            VAR_FILES="terraform.tfvars"
+          fi
+          if [ "${{ steps.check_services_tfvars.outputs.services_tfvars_exists }}" == "true" ]; then
+            if [ -n "$VAR_FILES" ]; then
+              VAR_FILES="$VAR_FILES services.generated.tfvars"
+            else
+              VAR_FILES="services.generated.tfvars"
+            fi
+          fi
+          echo "var_files=$VAR_FILES" >> $GITHUB_OUTPUT
+
       - name: Terraform Plan
         id: plan
         if: inputs.action == 'plan' || inputs.action == 'apply'
-        run: |
-          PLAN_ARGS="-no-color -out=tfplan"
-          if [ "${{ steps.check_tfvars.outputs.tfvars_exists }}" == "true" ]; then
-            PLAN_ARGS="$PLAN_ARGS -var-file=terraform.tfvars"
-          fi
-          if [ "${{ steps.check_services_tfvars.outputs.services_tfvars_exists }}" == "true" ]; then
-            PLAN_ARGS="$PLAN_ARGS -var-file=services.generated.tfvars"
-          fi
-          terraform -chdir=DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }} plan $PLAN_ARGS
+        uses: ./.github/actions/terraform-plan
+        with:
+          terraform_path: DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}
+          var_files: ${{ steps.build_var_files.outputs.var_files }}
+          plan_file: "tfplan"
         continue-on-error: true
 
       - name: Debug Plan - Show Replacement Reasons
@@ -189,8 +193,11 @@ jobs:
       - name: Terraform Apply
         id: apply
         if: inputs.action == 'apply' && steps.plan.outcome == 'success' && steps.plan_changes.outputs.has_changes == 'true'
-        run: |
-          terraform -chdir=DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }} apply -auto-approve tfplan
+        uses: ./.github/actions/terraform-apply
+        with:
+          terraform_path: DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}
+          plan_file: "tfplan"
+          auto_approve: "true"
 
       - name: Cleanup partially created resources on apply failure
         if: inputs.action == 'apply' && steps.apply.outcome == 'failure' && steps.save_state.outputs.state_backed_up == 'true' && inputs.environment != 'production'
@@ -207,11 +214,12 @@ jobs:
           # Attempt to destroy what was created
           # Use the same variable files as the apply
           DESTROY_ARGS="-auto-approve"
-          if [ "${{ steps.check_tfvars.outputs.tfvars_exists }}" == "true" ]; then
-            DESTROY_ARGS="$DESTROY_ARGS -var-file=terraform.tfvars"
-          fi
-          if [ "${{ steps.check_services_tfvars.outputs.services_tfvars_exists }}" == "true" ]; then
-            DESTROY_ARGS="$DESTROY_ARGS -var-file=services.generated.tfvars"
+          if [ -n "${{ steps.build_var_files.outputs.var_files }}" ]; then
+            for var_file in ${{ steps.build_var_files.outputs.var_files }}; do
+              if [ -f "$PLAN_DIR/$var_file" ]; then
+                DESTROY_ARGS="$DESTROY_ARGS -var-file=$var_file"
+              fi
+            done
           fi
           
           echo "::notice::Running terraform destroy to clean up partially created resources..."
@@ -254,14 +262,33 @@ jobs:
           echo "::error::Destroy action is blocked for production environment for safety."
           exit 1
 
+      - name: Build var files list for destroy
+        id: build_var_files_destroy
+        if: inputs.action == 'destroy' && inputs.environment != 'production'
+        run: |
+          VAR_FILES=""
+          if [ "${{ steps.check_tfvars.outputs.tfvars_exists }}" == "true" ]; then
+            VAR_FILES="terraform.tfvars"
+          fi
+          if [ "${{ steps.check_services_tfvars.outputs.services_tfvars_exists }}" == "true" ]; then
+            if [ -n "$VAR_FILES" ]; then
+              VAR_FILES="$VAR_FILES services.generated.tfvars"
+            else
+              VAR_FILES="services.generated.tfvars"
+            fi
+          fi
+          echo "var_files=$VAR_FILES" >> $GITHUB_OUTPUT
+
       - name: Terraform Destroy
         if: inputs.action == 'destroy' && inputs.environment != 'production'
         run: |
+          PLAN_DIR="DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}"
           DESTROY_ARGS="-auto-approve"
-          if [ "${{ steps.check_tfvars.outputs.tfvars_exists }}" == "true" ]; then
-            DESTROY_ARGS="$DESTROY_ARGS -var-file=terraform.tfvars"
+          if [ -n "${{ steps.build_var_files_destroy.outputs.var_files }}" ]; then
+            for var_file in ${{ steps.build_var_files_destroy.outputs.var_files }}; do
+              if [ -f "$PLAN_DIR/$var_file" ]; then
+                DESTROY_ARGS="$DESTROY_ARGS -var-file=$var_file"
+              fi
+            done
           fi
-          if [ "${{ steps.check_services_tfvars.outputs.services_tfvars_exists }}" == "true" ]; then
-            DESTROY_ARGS="$DESTROY_ARGS -var-file=services.generated.tfvars"
-          fi
-          terraform -chdir=DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }} destroy $DESTROY_ARGS
+          terraform -chdir="$PLAN_DIR" destroy $DESTROY_ARGS
