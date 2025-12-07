@@ -149,8 +149,15 @@ jobs:
           if [ -f "$PLAN_DIR/services.generated.tfvars" ]; then
             echo "::notice::Checking services.generated.tfvars for health_check_path:"
             grep -A 2 -B 2 "health_check_path" "$PLAN_DIR/services.generated.tfvars" || echo "No health_check_path found in tfvars"
+            
+            echo ""
+            echo "::notice::Full alb block for api service:"
+            awk '/api = \{/,/alb = \{/,/\}/' "$PLAN_DIR/services.generated.tfvars" | head -20 || echo "Could not extract api alb block"
+          else
+            echo "::error::services.generated.tfvars not found at $PLAN_DIR/services.generated.tfvars"
           fi
           
+          echo ""
           echo "::notice::Checking what Terraform sees in state vs configuration:"
           cd "$PLAN_DIR"
           
@@ -161,6 +168,15 @@ jobs:
           echo ""
           echo "State value for api_single target group health check path:"
           terraform state show 'module.ecs_fargate.aws_lb_target_group.services["app_single::api_single"]' 2>/dev/null | grep -A 1 "path" | head -2 || echo "Could not read state"
+          
+          echo ""
+          echo "::notice::Checking what Terraform evaluates for the configuration:"
+          terraform console -var-file=terraform.tfvars -var-file=services.generated.tfvars <<'EOF' 2>&1 | head -30 || true
+var.services["api"].alb.health_check_path
+var.services["api_single"].alb.health_check_path
+local.service_bindings["app_shared::api"].config.health_check_path
+local.service_bindings["app_single::api_single"].config.health_check_path
+EOF
 
       - name: Detect State Drift (Target Groups)
         id: detect_drift
