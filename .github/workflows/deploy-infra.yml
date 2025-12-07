@@ -111,6 +111,26 @@ jobs:
           fi
           echo "var_files=$VAR_FILES" >> $GITHUB_OUTPUT
 
+      - name: Terraform Refresh State
+        id: refresh
+        if: inputs.action == 'plan' || inputs.action == 'apply'
+        run: |
+          PLAN_DIR="DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}"
+          REFRESH_ARGS="-no-color"
+          
+          # Add var files if they exist (same logic as plan)
+          if [ "${{ steps.check_tfvars.outputs.tfvars_exists }}" == "true" ]; then
+            REFRESH_ARGS="$REFRESH_ARGS -var-file=terraform.tfvars"
+          fi
+          if [ "${{ steps.check_services_tfvars.outputs.services_tfvars_exists }}" == "true" ]; then
+            REFRESH_ARGS="$REFRESH_ARGS -var-file=services.generated.tfvars"
+          fi
+          
+          echo "::notice::Refreshing Terraform state to sync with AWS..."
+          terraform -chdir="$PLAN_DIR" refresh $REFRESH_ARGS || {
+            echo "::warning::State refresh failed, but continuing with plan..."
+          }
+
       - name: Terraform Plan
         id: plan
         if: inputs.action == 'plan' || inputs.action == 'apply'
