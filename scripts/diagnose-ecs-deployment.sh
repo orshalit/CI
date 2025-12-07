@@ -207,24 +207,55 @@ check_target_groups() {
         print_info "Target Group: $TG_NAME"
         echo "  Port: $TG_PORT | Protocol: $TG_PROTOCOL | VPC: $TG_VPC"
         
-        # Get all listeners to check associations
-        ALL_LISTENERS=$(aws elbv2 describe-listeners \
+        # Get all load balancers first
+        ALL_LBS=$(aws elbv2 describe-load-balancers \
             --region "$REGION" \
             --output json 2>/dev/null || echo "{}")
         
-        LISTENERS=$(echo "$ALL_LISTENERS" | jq -r --arg tg_arn "$TG_ARN" '[.Listeners[]? | select(.DefaultActions[]?.TargetGroupArn == $tg_arn or (.DefaultActions[]?.ForwardConfig.TargetGroups[]?.TargetGroupArn // "") == $tg_arn)]' || echo "[]")
+        # Check if target group is associated with any listener or rule
+        ASSOCIATED=false
+        LISTENER_INFO=""
         
-        # Get all rules to check associations
-        ALL_RULES=$(aws elbv2 describe-rules \
-            --region "$REGION" \
-            --output json 2>/dev/null || echo "{}")
+        # Iterate through all load balancers
+        for LB_ARN in $(echo "$ALL_LBS" | jq -r '.LoadBalancers[]?.LoadBalancerArn // empty'); do
+            # Get listeners for this load balancer
+            LISTENERS_JSON=$(aws elbv2 describe-listeners \
+                --load-balancer-arn "$LB_ARN" \
+                --region "$REGION" \
+                --output json 2>/dev/null || echo "{}")
+            
+            # Check if target group is in default action of any listener
+            DEFAULT_MATCH=$(echo "$LISTENERS_JSON" | jq -r --arg tg_arn "$TG_ARN" '[.Listeners[]? | select(.DefaultActions[]?.TargetGroupArn == $tg_arn or (.DefaultActions[]?.ForwardConfig.TargetGroups[]?.TargetGroupArn // "") == $tg_arn)] | length')
+            
+            if [ "$DEFAULT_MATCH" != "0" ] && [ -n "$DEFAULT_MATCH" ]; then
+                ASSOCIATED=true
+                LISTENER_INFO="default action"
+                break
+            fi
+            
+            # Check rules for each listener
+            for LISTENER_ARN in $(echo "$LISTENERS_JSON" | jq -r '.Listeners[]?.ListenerArn // empty'); do
+                RULES_JSON=$(aws elbv2 describe-rules \
+                    --listener-arn "$LISTENER_ARN" \
+                    --region "$REGION" \
+                    --output json 2>/dev/null || echo "{}")
+                
+                RULE_MATCH=$(echo "$RULES_JSON" | jq -r --arg tg_arn "$TG_ARN" '[.Rules[]? | select(.Actions[]?.TargetGroupArn == $tg_arn or (.Actions[]?.ForwardConfig.TargetGroups[]?.TargetGroupArn // "") == $tg_arn)] | length')
+                
+                if [ "$RULE_MATCH" != "0" ] && [ -n "$RULE_MATCH" ]; then
+                    ASSOCIATED=true
+                    LISTENER_INFO="listener rule"
+                    break
+                fi
+            done
+            
+            if [ "$ASSOCIATED" = "true" ]; then
+                break
+            fi
+        done
         
-        RULES=$(echo "$ALL_RULES" | jq -r --arg tg_arn "$TG_ARN" '[.Rules[]? | select(.Actions[]?.TargetGroupArn == $tg_arn or (.Actions[]?.ForwardConfig.TargetGroups[]?.TargetGroupArn // "") == $tg_arn)]' || echo "[]")
-        
-        if [ "$LISTENERS" != "[]" ] && [ -n "$LISTENERS" ]; then
-            print_success "Target group is associated with a listener"
-        elif [ "$RULES" != "[]" ] && [ -n "$RULES" ]; then
-            print_success "Target group is associated with a listener rule"
+        if [ "$ASSOCIATED" = "true" ]; then
+            print_success "Target group is associated with a load balancer ($LISTENER_INFO)"
         else
             print_error "Target group is NOT associated with any load balancer listener"
         fi
