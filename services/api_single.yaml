@@ -25,5 +25,7 @@ alb:
   # In prod: Set to actual domain
   host_patterns:
     - "single.dev.example.com"  # ⚠️ Replace with actual domain or remove
+  # Health check configuration
+  health_check_path: "/health"  # Backend API health endpoint
 
 

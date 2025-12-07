@@ -185,32 +185,41 @@ check_stopped_tasks() {
 check_target_groups() {
     print_header "3. Checking Target Groups and Load Balancer Associations"
     
-    # Get all target groups
-    TARGET_GROUPS=$(aws elbv2 describe-target-groups \
+    # Get all target groups (keep as JSON)
+    TARGET_GROUPS_JSON=$(aws elbv2 describe-target-groups \
         --region "$REGION" \
-        --output json 2>/dev/null | jq -r '.TargetGroups[] | select(.TargetGroupName | startswith("dev-"))' || echo "[]")
+        --output json 2>/dev/null | jq '[.TargetGroups[] | select(.TargetGroupName | startswith("dev-"))]' || echo "[]")
     
-    if [ "$TARGET_GROUPS" = "[]" ] || [ -z "$TARGET_GROUPS" ]; then
+    if [ "$TARGET_GROUPS_JSON" = "[]" ] || [ -z "$TARGET_GROUPS_JSON" ]; then
         print_error "No target groups found"
         return
     fi
     
-    echo "$TARGET_GROUPS" | jq -r '.[] | "\(.TargetGroupName) | Port: \(.Port) | Protocol: \(.Protocol) | VPC: \(.VpcId)"' | while read -r tg_info; do
-        TG_NAME=$(echo "$tg_info" | cut -d'|' -f1 | xargs)
+    # Process each target group
+    echo "$TARGET_GROUPS_JSON" | jq -r '.[] | @json' | while read -r tg_json; do
+        TG_NAME=$(echo "$tg_json" | jq -r '.TargetGroupName')
+        TG_ARN=$(echo "$tg_json" | jq -r '.TargetGroupArn')
+        TG_PORT=$(echo "$tg_json" | jq -r '.Port')
+        TG_PROTOCOL=$(echo "$tg_json" | jq -r '.Protocol')
+        TG_VPC=$(echo "$tg_json" | jq -r '.VpcId')
+        
         echo ""
         print_info "Target Group: $TG_NAME"
-        echo "  $tg_info"
+        echo "  Port: $TG_PORT | Protocol: $TG_PROTOCOL | VPC: $TG_VPC"
         
-        # Check if target group is associated with a load balancer
-        TG_ARN=$(echo "$TARGET_GROUPS" | jq -r ".[] | select(.TargetGroupName == \"$TG_NAME\") | .TargetGroupArn")
-        
-        LISTENERS=$(aws elbv2 describe-listeners \
+        # Get all listeners to check associations
+        ALL_LISTENERS=$(aws elbv2 describe-listeners \
             --region "$REGION" \
-            --output json 2>/dev/null | jq -r --arg tg_arn "$TG_ARN" '.Listeners[] | select(.DefaultActions[].TargetGroupArn == $tg_arn or .DefaultActions[].ForwardConfig.TargetGroups[].TargetGroupArn == $tg_arn)' || echo "[]")
+            --output json 2>/dev/null || echo "{}")
         
-        RULES=$(aws elbv2 describe-rules \
+        LISTENERS=$(echo "$ALL_LISTENERS" | jq -r --arg tg_arn "$TG_ARN" '[.Listeners[]? | select(.DefaultActions[]?.TargetGroupArn == $tg_arn or (.DefaultActions[]?.ForwardConfig.TargetGroups[]?.TargetGroupArn // "") == $tg_arn)]' || echo "[]")
+        
+        # Get all rules to check associations
+        ALL_RULES=$(aws elbv2 describe-rules \
             --region "$REGION" \
-            --output json 2>/dev/null | jq -r --arg tg_arn "$TG_ARN" '.Rules[] | select(.Actions[].TargetGroupArn == $tg_arn or .Actions[].ForwardConfig.TargetGroups[].TargetGroupArn == $tg_arn)' || echo "[]")
+            --output json 2>/dev/null || echo "{}")
+        
+        RULES=$(echo "$ALL_RULES" | jq -r --arg tg_arn "$TG_ARN" '[.Rules[]? | select(.Actions[]?.TargetGroupArn == $tg_arn or (.Actions[]?.ForwardConfig.TargetGroups[]?.TargetGroupArn // "") == $tg_arn)]' || echo "[]")
         
         if [ "$LISTENERS" != "[]" ] && [ -n "$LISTENERS" ]; then
             print_success "Target group is associated with a listener"
@@ -226,15 +235,34 @@ check_target_groups() {
             --region "$REGION" \
             --output json 2>/dev/null || echo "{}")
         
-        HEALTHY_COUNT=$(echo "$HEALTH" | jq -r '[.TargetHealthDescriptions[] | select(.TargetHealth.State == "healthy")] | length')
-        UNHEALTHY_COUNT=$(echo "$HEALTH" | jq -r '[.TargetHealthDescriptions[] | select(.TargetHealth.State != "healthy")] | length')
+        HEALTHY_COUNT=$(echo "$HEALTH" | jq -r '[.TargetHealthDescriptions[]? | select(.TargetHealth.State == "healthy")] | length')
+        UNHEALTHY_COUNT=$(echo "$HEALTH" | jq -r '[.TargetHealthDescriptions[]? | select(.TargetHealth.State != "healthy")] | length')
+        TOTAL_TARGETS=$(echo "$HEALTH" | jq -r '.TargetHealthDescriptions | length')
         
-        echo "  Health: $HEALTHY_COUNT healthy, $UNHEALTHY_COUNT unhealthy"
+        echo "  Health: $HEALTHY_COUNT/$TOTAL_TARGETS healthy, $UNHEALTHY_COUNT unhealthy"
         
         if [ "$UNHEALTHY_COUNT" -gt 0 ]; then
             print_warning "Unhealthy targets found:"
-            echo "$HEALTH" | jq -r '.TargetHealthDescriptions[] | select(.TargetHealth.State != "healthy") | "    Target: \(.Target.Id) | State: \(.TargetHealth.State) | Reason: \(.TargetHealth.Reason // "N/A")"'
+            echo "$HEALTH" | jq -r '.TargetHealthDescriptions[]? | select(.TargetHealth.State != "healthy") | "    Target: \(.Target.Id) | State: \(.TargetHealth.State) | Reason: \(.TargetHealth.Reason // "N/A") | Description: \(.TargetHealth.Description // "N/A")"'
+            
+            # Show health check configuration
+            HEALTH_CHECK=$(echo "$tg_json" | jq -r '.HealthCheckPath // "N/A"')
+            echo "  Health Check Path: $HEALTH_CHECK"
         fi
+        
+        # Show health check configuration
+        HC_PATH=$(echo "$tg_json" | jq -r '.HealthCheckPath // "N/A"')
+        HC_PORT=$(echo "$tg_json" | jq -r '.HealthCheckPort // "N/A"')
+        HC_PROTOCOL=$(echo "$tg_json" | jq -r '.HealthCheckProtocol // "N/A"')
+        HC_INTERVAL=$(echo "$tg_json" | jq -r '.HealthCheckIntervalSeconds // "N/A"')
+        HC_TIMEOUT=$(echo "$tg_json" | jq -r '.HealthCheckTimeoutSeconds // "N/A"')
+        HC_THRESHOLD=$(echo "$tg_json" | jq -r '.HealthyThresholdCount // "N/A"')
+        HC_UNHEALTHY_THRESHOLD=$(echo "$tg_json" | jq -r '.UnhealthyThresholdCount // "N/A"')
+        
+        echo "  Health Check Config:"
+        echo "    Path: $HC_PATH | Port: $HC_PORT | Protocol: $HC_PROTOCOL"
+        echo "    Interval: ${HC_INTERVAL}s | Timeout: ${HC_TIMEOUT}s"
+        echo "    Healthy Threshold: $HC_THRESHOLD | Unhealthy Threshold: $HC_UNHEALTHY_THRESHOLD"
     done
 }
 
@@ -244,22 +272,26 @@ check_target_groups() {
 check_load_balancers() {
     print_header "4. Checking Load Balancers and Listeners"
     
-    ALBS=$(aws elbv2 describe-load-balancers \
+    # Get all load balancers (keep as JSON)
+    ALBS_JSON=$(aws elbv2 describe-load-balancers \
         --region "$REGION" \
-        --output json 2>/dev/null | jq -r '.LoadBalancers[] | select(.LoadBalancerName | startswith("dev-"))' || echo "[]")
+        --output json 2>/dev/null | jq '[.LoadBalancers[] | select(.LoadBalancerName | startswith("dev-"))]' || echo "[]")
     
-    if [ "$ALBS" = "[]" ] || [ -z "$ALBS" ]; then
+    if [ "$ALBS_JSON" = "[]" ] || [ -z "$ALBS_JSON" ]; then
         print_error "No load balancers found"
         return
     fi
     
-    echo "$ALBS" | jq -r '.[] | "\(.LoadBalancerName) | DNS: \(.DNSName) | State: \(.State.Code)"' | while read -r alb_info; do
-        ALB_NAME=$(echo "$alb_info" | cut -d'|' -f1 | xargs)
+    # Process each load balancer
+    echo "$ALBS_JSON" | jq -r '.[] | @json' | while read -r alb_json; do
+        ALB_NAME=$(echo "$alb_json" | jq -r '.LoadBalancerName')
+        ALB_DNS=$(echo "$alb_json" | jq -r '.DNSName')
+        ALB_STATE=$(echo "$alb_json" | jq -r '.State.Code')
+        ALB_ARN=$(echo "$alb_json" | jq -r '.LoadBalancerArn')
+        
         echo ""
         print_info "Load Balancer: $ALB_NAME"
-        echo "  $alb_info"
-        
-        ALB_ARN=$(echo "$ALBS" | jq -r ".[] | select(.LoadBalancerName == \"$ALB_NAME\") | .LoadBalancerArn")
+        echo "  DNS: $ALB_DNS | State: $ALB_STATE"
         
         # Check listeners
         LISTENERS=$(aws elbv2 describe-listeners \
