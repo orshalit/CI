@@ -116,7 +116,7 @@ jobs:
         if: inputs.action == 'plan' || inputs.action == 'apply'
         run: |
           PLAN_DIR="DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}"
-          REFRESH_ARGS="-no-color -upgrade"
+          REFRESH_ARGS="-no-color"
           
           # Add var files if they exist (same logic as plan)
           if [ "${{ steps.check_tfvars.outputs.tfvars_exists }}" == "true" ]; then
