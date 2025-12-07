@@ -263,8 +263,156 @@ jobs:
       - name: Terraform Init
         run: terraform -chdir=${{ needs.plan.outputs.tf_path }} init
 
+      - name: Save current service image tags for rollback
+        id: save_current_tags
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          echo "::notice::Saving current service image tags for potential rollback..."
+          
+          # Get current image tags from Terraform state
+          # We need to check the current state before applying
+          CURRENT_TAGS=$(terraform -chdir=${{ needs.plan.outputs.tf_path }} show -json 2>/dev/null | jq -r '
+            .values.root_module.resources[]? | 
+            select(.type == "aws_ecs_service") | 
+            .values.task_definition | 
+            split("/") | 
+            .[-1] | 
+            split(":") | 
+            .[-1]
+          ' | head -1 || echo "")
+          
+          # Also try to get from outputs if available
+          if [ -z "$CURRENT_TAGS" ]; then
+            # Try to get from ECS services directly
+            CLUSTER_NAME=$(terraform -chdir=${{ needs.plan.outputs.tf_path }} output -raw ecs_cluster_name 2>/dev/null || echo "")
+            if [ -n "$CLUSTER_NAME" ]; then
+              SERVICE_NAMES_JSON=$(terraform -chdir=${{ needs.plan.outputs.tf_path }} output -json service_names 2>/dev/null || echo "{}")
+              if [ "$SERVICE_NAMES_JSON" != "{}" ]; then
+                # Get first service to check current image
+                FIRST_SERVICE=$(echo "$SERVICE_NAMES_JSON" | jq -r 'to_entries[0].value' 2>/dev/null || echo "")
+                if [ -n "$FIRST_SERVICE" ]; then
+                  CURRENT_TASK_DEF=$(aws ecs describe-services \
+                    --cluster "$CLUSTER_NAME" \
+                    --services "$FIRST_SERVICE" \
+                    --region ${AWS_REGION} \
+                    --query 'services[0].taskDefinition' \
+                    --output text 2>/dev/null || echo "")
+                  if [ -n "$CURRENT_TASK_DEF" ]; then
+                    CURRENT_TAGS=$(aws ecs describe-task-definition \
+                      --task-definition "$CURRENT_TASK_DEF" \
+                      --region ${AWS_REGION} \
+                      --query 'taskDefinition.containerDefinitions[0].image' \
+                      --output text 2>/dev/null | sed 's/.*://' || echo "")
+                  fi
+                fi
+              fi
+            fi
+          fi
+          
+          # Save current tags to output for rollback
+          if [ -n "$CURRENT_TAGS" ] && [ "$CURRENT_TAGS" != "null" ]; then
+            echo "previous_image_tag=$CURRENT_TAGS" >> $GITHUB_OUTPUT
+            echo "::notice::Saved previous image tag: $CURRENT_TAGS"
+          else
+            echo "previous_image_tag=" >> $GITHUB_OUTPUT
+            echo "::warning::Could not determine previous image tag. Rollback may not be possible."
+          fi
+
       - name: Terraform Apply
+        id: apply
         run: terraform -chdir=${{ needs.plan.outputs.tf_path }} apply -auto-approve tfplan
+
+      - name: Diagnose ECS Services Before Verification
+        id: diagnose
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+        continue-on-error: true
+        run: |
+          CLUSTER_NAME=$(terraform -chdir=${{ needs.plan.outputs.tf_path }} output -raw ecs_cluster_name)
+          SERVICE_NAMES_JSON=$(terraform -chdir=${{ needs.plan.outputs.tf_path }} output -json service_names)
+          SERVICES=$(echo "$SERVICE_NAMES_JSON" | jq -r 'to_entries[] | .value')
+
+          echo "::group::ECS Service Diagnostics"
+          for service in $SERVICES; do
+            echo ""
+            echo "=== Service: $service ==="
+            
+            # Get service status
+            SERVICE_INFO=$(aws ecs describe-services \
+              --cluster "$CLUSTER_NAME" \
+              --services "$service" \
+              --region ${AWS_REGION} \
+              --output json)
+            
+            DESIRED=$(echo "$SERVICE_INFO" | jq -r '.services[0].desiredCount')
+            RUNNING=$(echo "$SERVICE_INFO" | jq -r '.services[0].runningCount')
+            PENDING=$(echo "$SERVICE_INFO" | jq -r '.services[0].pendingCount')
+            
+            echo "Desired: $DESIRED | Running: $RUNNING | Pending: $PENDING"
+            
+            # Check recent events
+            echo "Recent Events:"
+            echo "$SERVICE_INFO" | jq -r '.services[0].events[:3] | .[] | "  [\(.createdAt)] \(.message)"'
+            
+            # Check stopped tasks
+            STOPPED_TASKS=$(aws ecs list-tasks \
+              --cluster "$CLUSTER_NAME" \
+              --service-name "$service" \
+              --desired-status STOPPED \
+              --region ${AWS_REGION} \
+              --max-items 3 \
+              --output json | jq -r '.taskArns[]' || echo "")
+            
+            if [ -n "$STOPPED_TASKS" ]; then
+              echo "Stopped Tasks Found:"
+              for task_arn in $STOPPED_TASKS; do
+                TASK_INFO=$(aws ecs describe-tasks \
+                  --cluster "$CLUSTER_NAME" \
+                  --tasks "$task_arn" \
+                  --region ${AWS_REGION} \
+                  --output json)
+                
+                STOP_CODE=$(echo "$TASK_INFO" | jq -r '.tasks[0].stopCode // "unknown"')
+                STOP_REASON=$(echo "$TASK_INFO" | jq -r '.tasks[0].stoppedReason // "unknown"')
+                EXIT_CODE=$(echo "$TASK_INFO" | jq -r '.tasks[0].containers[0].exitCode // "N/A"')
+                
+                echo "  Task: $(basename $task_arn)"
+                echo "    Stop Code: $STOP_CODE"
+                echo "    Stop Reason: $STOP_REASON"
+                echo "    Exit Code: $EXIT_CODE"
+              done
+            fi
+            
+            # Check target group health
+            TASK_DEF_ARN=$(echo "$SERVICE_INFO" | jq -r '.services[0].taskDefinition // empty')
+            if [ -n "$TASK_DEF_ARN" ]; then
+              # Get load balancer info
+              LB_INFO=$(echo "$SERVICE_INFO" | jq -r '.services[0].loadBalancers[0] // empty')
+              if [ -n "$LB_INFO" ] && [ "$LB_INFO" != "null" ]; then
+                TG_ARN=$(echo "$LB_INFO" | jq -r '.targetGroupArn // empty')
+                if [ -n "$TG_ARN" ]; then
+                  echo "Target Group Health:"
+                  TG_HEALTH=$(aws elbv2 describe-target-health \
+                    --target-group-arn "$TG_ARN" \
+                    --region ${AWS_REGION} \
+                    --output json 2>/dev/null || echo "{}")
+                  
+                  HEALTHY=$(echo "$TG_HEALTH" | jq -r '[.TargetHealthDescriptions[] | select(.TargetHealth.State == "healthy")] | length')
+                  UNHEALTHY=$(echo "$TG_HEALTH" | jq -r '[.TargetHealthDescriptions[] | select(.TargetHealth.State != "healthy")] | length')
+                  
+                  echo "  Healthy: $HEALTHY | Unhealthy: $UNHEALTHY"
+                  
+                  if [ "$UNHEALTHY" -gt 0 ]; then
+                    echo "  Unhealthy Targets:"
+                    echo "$TG_HEALTH" | jq -r '.TargetHealthDescriptions[] | select(.TargetHealth.State != "healthy") | "    \(.Target.Id): \(.TargetHealth.State) - \(.TargetHealth.Reason // "N/A")"'
+                  fi
+                fi
+              fi
+            fi
+          done
+          echo "::endgroup::"
 
       - name: Verify ECS Service Stability
         id: verify
@@ -283,6 +431,90 @@ jobs:
           
           echo "✅ Services are stable."
 
+      - name: Verify Load Balancer Configuration
+        if: success()
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+        continue-on-error: true
+        run: |
+          echo "::group::Verifying Load Balancer and Target Group Associations..."
+          
+          # Get ALB information from Terraform outputs
+          ALB_DNS_JSON=$(terraform -chdir=${{ needs.plan.outputs.tf_path }} output -json alb_dns_names 2>/dev/null || echo "{}")
+          
+          if [ "$ALB_DNS_JSON" != "{}" ]; then
+            echo "ALBs found:"
+            echo "$ALB_DNS_JSON" | jq -r 'to_entries[] | "  \(.key): \(.value)"'
+            
+            # Check each ALB for listeners and rules
+            for alb_name in $(echo "$ALB_DNS_JSON" | jq -r 'keys[]'); do
+              ALB_DNS=$(echo "$ALB_DNS_JSON" | jq -r --arg k "$alb_name" '.[$k]')
+              
+              # Get ALB ARN
+              ALB_ARN=$(aws elbv2 describe-load-balancers \
+                --region ${AWS_REGION} \
+                --query "LoadBalancers[?DNSName=='$ALB_DNS'].LoadBalancerArn" \
+                --output text 2>/dev/null || echo "")
+              
+              if [ -n "$ALB_ARN" ] && [ "$ALB_ARN" != "None" ]; then
+                echo ""
+                echo "=== ALB: $alb_name ==="
+                
+                # Check listeners
+                LISTENERS=$(aws elbv2 describe-listeners \
+                  --load-balancer-arn "$ALB_ARN" \
+                  --region ${AWS_REGION} \
+                  --output json 2>/dev/null || echo "{}")
+                
+                LISTENER_COUNT=$(echo "$LISTENERS" | jq -r '.Listeners | length')
+                echo "Listeners: $LISTENER_COUNT"
+                
+                if [ "$LISTENER_COUNT" -eq 0 ]; then
+                  echo "⚠️  No listeners found for this ALB"
+                else
+                  # Check listener rules
+                  for listener_arn in $(echo "$LISTENERS" | jq -r '.Listeners[].ListenerArn'); do
+                    RULES=$(aws elbv2 describe-rules \
+                      --listener-arn "$listener_arn" \
+                      --region ${AWS_REGION} \
+                      --output json 2>/dev/null || echo "{}")
+                    
+                    RULE_COUNT=$(echo "$RULES" | jq -r '.Rules | length')
+                    echo "  Listener $listener_arn: $RULE_COUNT rules"
+                    
+                    # Check if rules forward to target groups
+                    TARGET_GROUPS=$(echo "$RULES" | jq -r '.Rules[] | select(.Actions[].Type == "forward") | .Actions[].TargetGroupArn // empty' | sort -u)
+                    
+                    if [ -n "$TARGET_GROUPS" ]; then
+                      echo "  Target groups associated:"
+                      for tg_arn in $TARGET_GROUPS; do
+                        TG_NAME=$(aws elbv2 describe-target-groups \
+                          --target-group-arns "$tg_arn" \
+                          --region ${AWS_REGION} \
+                          --query 'TargetGroups[0].TargetGroupName' \
+                          --output text 2>/dev/null || echo "unknown")
+                        
+                        HEALTH=$(aws elbv2 describe-target-health \
+                          --target-group-arn "$tg_arn" \
+                          --region ${AWS_REGION} \
+                          --output json 2>/dev/null || echo "{}")
+                        
+                        HEALTHY=$(echo "$HEALTH" | jq -r '[.TargetHealthDescriptions[]? | select(.TargetHealth.State == "healthy")] | length')
+                        TOTAL=$(echo "$HEALTH" | jq -r '.TargetHealthDescriptions | length')
+                        
+                        echo "    $TG_NAME: $HEALTHY/$TOTAL healthy"
+                      done
+                    fi
+                  done
+                fi
+              fi
+            done
+          else
+            echo "⚠️  Could not retrieve ALB information from Terraform outputs"
+          fi
+          
+          echo "::endgroup::"
+
       - name: Verify Service Discovery and CloudWatch Logs
         if: success()
         env:
@@ -299,19 +531,109 @@ jobs:
           echo "✅ Service discovery for api service is resolving."
           echo "::endgroup::"
 
-          echo "::group::Verifying CloudWatch Logs..."
+          echo "::group::Checking CloudWatch Logs for Errors..."
           for name in $(echo "$LOG_GROUPS_JSON" | jq -r 'keys[]'); do
             GROUP=$(echo "$LOG_GROUPS_JSON" | jq -r --arg k "$name" '.[$k]')
-            echo "Checking log group: $GROUP"
-            aws logs describe-log-streams \
+            echo ""
+            echo "=== Log Group: $GROUP ==="
+            
+            # Check if log group exists
+            if ! aws logs describe-log-groups \
+              --log-group-name-prefix "$GROUP" \
               --region ${AWS_REGION} \
+              --query "logGroups[?logGroupName=='$GROUP'].logGroupName" \
+              --output text | grep -q "$GROUP"; then
+              echo "⚠️  Log group does not exist yet"
+              continue
+            fi
+            
+            # Get most recent log stream
+            STREAM=$(aws logs describe-log-streams \
               --log-group-name "$GROUP" \
               --order-by LastEventTime \
               --descending \
-              --max-items 1 >/dev/null
+              --max-items 1 \
+              --region ${AWS_REGION} \
+              --query 'logStreams[0].logStreamName' \
+              --output text 2>/dev/null || echo "")
+            
+            if [ -z "$STREAM" ] || [ "$STREAM" = "None" ]; then
+              echo "⚠️  No log streams found"
+              continue
+            fi
+            
+            echo "Most recent stream: $STREAM"
+            
+            # Get last 20 log events
+            LOGS=$(aws logs get-log-events \
+              --log-group-name "$GROUP" \
+              --log-stream-name "$STREAM" \
+              --limit 20 \
+              --region ${AWS_REGION} \
+              --output json 2>/dev/null || echo "{}")
+            
+            # Check for errors
+            ERROR_COUNT=$(echo "$LOGS" | jq -r '[.events[]? | select(.message | test("(?i)(error|exception|fatal|failed|panic)"))] | length' || echo "0")
+            
+            if [ "$ERROR_COUNT" -gt 0 ]; then
+              echo "❌ Found $ERROR_COUNT error(s) in recent logs:"
+              echo "$LOGS" | jq -r '.events[]? | select(.message | test("(?i)(error|exception|fatal|failed|panic)")) | "  [\(.timestamp | tonumber / 1000 | strftime("%Y-%m-%d %H:%M:%S"))] \(.message)"' | head -5
+            else
+              echo "✅ No errors in recent logs"
+            fi
+            
+            # Show last 3 log entries
+            echo "Last 3 log entries:"
+            echo "$LOGS" | jq -r '.events[-3:] | .[] | "  [\(.timestamp | tonumber / 1000 | strftime("%Y-%m-%d %H:%M:%S"))] \(.message)"' || echo "  No recent logs"
           done
-          echo "✅ CloudWatch log streams found for all services."
           echo "::endgroup::"
+
+      - name: Rollback to previous image tags on failure
+        if: failure() && steps.apply.outcome == 'success' && steps.save_current_tags.outputs.previous_image_tag != ''
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          echo "::error::Deployment verification failed. Rolling back to previous image tags..."
+          
+          PREVIOUS_TAG="${{ steps.save_current_tags.outputs.previous_image_tag }}"
+          echo "::notice::Reverting to previous image tag: ${PREVIOUS_TAG}"
+          
+          # Create rollback tfvars file
+          cat > ${{ needs.plan.outputs.tf_path }}/ci-service-tags.auto.tfvars <<EOF
+          service_image_tags = {
+            api_single = "${PREVIOUS_TAG}"
+            api        = "${PREVIOUS_TAG}"
+            frontend   = "${PREVIOUS_TAG}"
+          }
+          EOF
+          
+          # Apply rollback
+          EXTRA_ARGS=""
+          if [ -f "${{ needs.plan.outputs.tf_path }}/services.generated.tfvars" ]; then
+            EXTRA_ARGS="$EXTRA_ARGS -var-file=services.generated.tfvars"
+          fi
+          
+          terraform -chdir=${{ needs.plan.outputs.tf_path }} apply \
+            -auto-approve \
+            $EXTRA_ARGS \
+            -var="terraform_backend_bucket_name=devops-project-terraform" \
+            -var="database_url=${DATABASE_URL}"
+          
+          echo "::notice::Rollback completed. Services reverted to previous image tag: ${PREVIOUS_TAG}"
+          
+          # Wait for services to stabilize after rollback
+          CLUSTER_NAME=$(terraform -chdir=${{ needs.plan.outputs.tf_path }} output -raw ecs_cluster_name)
+          SERVICE_NAMES_JSON=$(terraform -chdir=${{ needs.plan.outputs.tf_path }} output -json service_names)
+          SERVICES=$(echo "$SERVICE_NAMES_JSON" | jq -r 'to_entries[] | .value')
+          
+          echo "::notice::Waiting for services to stabilize after rollback..."
+          aws ecs wait services-stable \
+            --region ${AWS_REGION} \
+            --cluster $CLUSTER_NAME \
+            --services $SERVICES || echo "::warning::Services may still be stabilizing after rollback"
+          
+          echo "::error::Deployment failed and rollback completed. Please investigate the issue."
 
       - name: Deployment Summary
         if: always()

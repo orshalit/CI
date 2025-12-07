@@ -172,10 +172,67 @@ jobs:
             echo "::notice::Changes detected. Proceeding with apply."
           fi
 
+      - name: Save Terraform state before apply
+        id: save_state
+        if: inputs.action == 'apply' && steps.plan.outcome == 'success' && steps.plan_changes.outputs.has_changes == 'true'
+        run: |
+          echo "::notice::Saving Terraform state before apply for potential rollback..."
+          # Create a backup of the state file if it exists
+          if [ -f "DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}/.terraform/terraform.tfstate" ]; then
+            cp "DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}/.terraform/terraform.tfstate" \
+               "DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}/.terraform/terraform.tfstate.backup" || true
+            echo "state_backed_up=true" >> $GITHUB_OUTPUT
+          else
+            echo "state_backed_up=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Terraform Apply
+        id: apply
         if: inputs.action == 'apply' && steps.plan.outcome == 'success' && steps.plan_changes.outputs.has_changes == 'true'
         run: |
           terraform -chdir=DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }} apply -auto-approve tfplan
+
+      - name: Cleanup partially created resources on apply failure
+        if: inputs.action == 'apply' && steps.apply.outcome == 'failure' && steps.save_state.outputs.state_backed_up == 'true' && inputs.environment != 'production'
+        continue-on-error: true
+        run: |
+          echo "::error::Terraform apply failed. Attempting to destroy partially created resources..."
+          
+          PLAN_DIR="DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}"
+          
+          # Try to refresh state to see what was actually created
+          echo "::notice::Refreshing Terraform state to identify created resources..."
+          terraform -chdir="$PLAN_DIR" refresh -no-color || echo "::warning::State refresh failed, proceeding with destroy attempt"
+          
+          # Attempt to destroy what was created
+          # Use the same variable files as the apply
+          DESTROY_ARGS="-auto-approve"
+          if [ "${{ steps.check_tfvars.outputs.tfvars_exists }}" == "true" ]; then
+            DESTROY_ARGS="$DESTROY_ARGS -var-file=terraform.tfvars"
+          fi
+          if [ "${{ steps.check_services_tfvars.outputs.services_tfvars_exists }}" == "true" ]; then
+            DESTROY_ARGS="$DESTROY_ARGS -var-file=services.generated.tfvars"
+          fi
+          
+          echo "::notice::Running terraform destroy to clean up partially created resources..."
+          terraform -chdir="$PLAN_DIR" destroy $DESTROY_ARGS || {
+            echo "::error::Destroy failed. Manual cleanup may be required."
+            echo "::error::Please review the Terraform state and manually remove any partially created resources."
+            exit 1
+          }
+          
+          echo "::notice::Cleanup completed. Partially created resources have been destroyed."
+
+      - name: Production apply failure notification
+        if: inputs.action == 'apply' && steps.apply.outcome == 'failure' && inputs.environment == 'production'
+        run: |
+          echo "::error::Terraform apply failed in PRODUCTION environment."
+          echo "::error::Automatic cleanup is disabled for production. Manual intervention required."
+          echo "::error::Please review the Terraform state and decide on appropriate action:"
+          echo "::error::  1. Review what resources were created before the failure"
+          echo "::error::  2. Manually destroy partially created resources if needed"
+          echo "::error::  3. Fix the issue and retry the deployment"
+          exit 1
 
       - name: No Changes Detected
         if: inputs.action == 'apply' && steps.plan.outcome == 'success' && steps.plan_changes.outputs.has_changes == 'false'
