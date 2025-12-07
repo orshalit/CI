@@ -4,9 +4,54 @@
 #
 # This script performs comprehensive diagnostics on ECS deployments to identify
 # issues with services, tasks, target groups, load balancers, and networking.
+#
+# Prerequisites:
+# - AWS CLI installed and configured
+# - jq installed (for JSON parsing)
+#   Install with: sudo apt-get install jq (Ubuntu/Debian)
+#                  or: brew install jq (macOS)
 ################################################################################
 
 set -euo pipefail
+
+# Check prerequisites
+check_prerequisites() {
+    local missing_tools=()
+    
+    if ! command -v aws &> /dev/null; then
+        missing_tools+=("aws-cli")
+    fi
+    
+    if ! command -v jq &> /dev/null; then
+        missing_tools+=("jq")
+    fi
+    
+    if [ ${#missing_tools[@]} -gt 0 ]; then
+        echo -e "${RED}❌ Missing required tools: ${missing_tools[*]}${NC}"
+        echo ""
+        echo "Installation instructions:"
+        for tool in "${missing_tools[@]}"; do
+            case "$tool" in
+                "aws-cli")
+                    echo "  AWS CLI: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html"
+                    ;;
+                "jq")
+                    if command -v apt-get &> /dev/null; then
+                        echo "  jq: sudo apt-get update && sudo apt-get install -y jq"
+                    elif command -v yum &> /dev/null; then
+                        echo "  jq: sudo yum install -y jq"
+                    elif command -v brew &> /dev/null; then
+                        echo "  jq: brew install jq"
+                    else
+                        echo "  jq: https://stedolan.github.io/jq/download/"
+                    fi
+                    ;;
+            esac
+        done
+        echo ""
+        exit 1
+    fi
+}
 
 # Colors for output
 RED='\033[0;31m'
@@ -415,6 +460,9 @@ check_network() {
 # Main Execution
 # ============================================================================
 main() {
+    # Check prerequisites first
+    check_prerequisites
+    
     echo ""
     print_header "ECS Deployment Diagnostic Report"
     echo "Cluster: $CLUSTER_NAME"
