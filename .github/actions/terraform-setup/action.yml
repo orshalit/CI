@@ -40,7 +40,6 @@ runs:
     - name: Checkout DEVOPS repository
       if: inputs.devops_repo != ''
       uses: actions/checkout@v4
-      shell: bash
       with:
         repository: ${{ inputs.devops_repo }}
         path: ${{ inputs.devops_path }}
