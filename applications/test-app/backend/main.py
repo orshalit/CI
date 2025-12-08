@@ -1,4 +1,4 @@
-# Test change to trigger CI pipeline - verifying multi-application support (v3)
+# Test: Backend-only change to verify CI optimization
 import json
 import logging
 import os
