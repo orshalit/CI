@@ -38,11 +38,12 @@ runs:
         
         echo "::notice::Rolling back to previous image tag: ${{ inputs.previous_image_tag }}"
         
-        # Get service names from Terraform outputs
+        # Get service keys (not names) from Terraform outputs
+        # service_image_tags is keyed by service key, not service name
         SERVICE_NAMES_JSON=$(terraform -chdir="${{ inputs.terraform_path }}" output -json service_names 2>/dev/null || echo "{}")
         
         if [ "$SERVICE_NAMES_JSON" = "{}" ] || [ "$SERVICE_NAMES_JSON" = "null" ]; then
-          echo "::error::Could not determine service names from Terraform outputs"
+          echo "::error::Could not determine service keys from Terraform outputs"
           echo "rolled_back=false" >> $GITHUB_OUTPUT
           exit 1
         fi
@@ -54,10 +55,11 @@ runs:
         echo "# Created: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> "$ROLLBACK_FILE"
         echo "" >> "$ROLLBACK_FILE"
         
-        # Build service_image_tags map
+        # Build service_image_tags map using service keys (not names)
+        # service_names output is keyed by service key, so we use the keys
         echo "service_image_tags = {" >> "$ROLLBACK_FILE"
-        for service_name in $(echo "$SERVICE_NAMES_JSON" | jq -r 'to_entries[] | .value'); do
-          echo "  \"$service_name\" = \"${{ inputs.previous_image_tag }}\"" >> "$ROLLBACK_FILE"
+        for service_key in $(echo "$SERVICE_NAMES_JSON" | jq -r 'keys[]'); do
+          echo "  $service_key = \"${{ inputs.previous_image_tag }}\"" >> "$ROLLBACK_FILE"
         done
         echo "}" >> "$ROLLBACK_FILE"
         

@@ -3,10 +3,9 @@
 Generate Terraform 'services' blocks for the ECS Fargate layer in DEVOPS
 from simple YAML specs in the CI repo.
 
-This script is intended to be run from the CI workflow. It:
-- Reads all YAML files in the given services directory.
-- Produces a single services map in services.generated.tfvars for a
-  specific environment / layer in the DEVOPS repo.
+This script supports both old and new directory structures:
+- Old: CI/services/*.yaml (defaults to application="legacy")
+- New: CI/applications/{app}/services/*.yaml (uses app name from directory)
 
 It intentionally focuses on attaching services to existing ALBs. ALB
 definitions and Route 53 records remain managed manually in DEVOPS.
@@ -14,24 +13,137 @@ definitions and Route 53 records remain managed manually in DEVOPS.
 
 import argparse
 import pathlib
+import re
 import textwrap
 
 import yaml
 
 
-def load_service_specs(services_dir: pathlib.Path) -> list[dict]:
+def validate_application_name(app_name: str, file_path: str) -> None:
+    """
+    Validate application name according to naming rules.
+    
+    Rules (enforced):
+    - Lowercase only
+    - Alphanumeric and hyphens only (no underscores, spaces, or special characters)
+    
+    Examples:
+    - Valid: app1, customer-portal, admin-dashboard
+    - Invalid: App1 (uppercase), customer_portal (underscore), customer portal (space)
+    """
+    if not app_name:
+        raise ValueError(f"Application name cannot be empty (in {file_path})")
+    
+    # Check for lowercase only
+    if app_name != app_name.lower():
+        raise ValueError(
+            f"Application name '{app_name}' must be lowercase only (in {file_path}). "
+            f"Found uppercase characters."
+        )
+    
+    # Check for valid characters: lowercase letters, numbers, and hyphens only
+    if not re.match(r'^[a-z0-9-]+$', app_name):
+        invalid_chars = set(re.findall(r'[^a-z0-9-]', app_name))
+        raise ValueError(
+            f"Application name '{app_name}' contains invalid characters: {invalid_chars} (in {file_path}). "
+            f"Only lowercase letters, numbers, and hyphens are allowed."
+        )
+    
+    # Check for leading/trailing hyphens
+    if app_name.startswith('-') or app_name.endswith('-'):
+        raise ValueError(
+            f"Application name '{app_name}' cannot start or end with a hyphen (in {file_path})"
+        )
+    
+    # Check for consecutive hyphens
+    if '--' in app_name:
+        raise ValueError(
+            f"Application name '{app_name}' cannot contain consecutive hyphens (in {file_path})"
+        )
+
+
+def load_yaml_file(path: pathlib.Path) -> dict:
+    """Load and parse a YAML file."""
+    with path.open("r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    return data
+
+
+def load_service_specs(base_dir: pathlib.Path) -> list[dict]:
+    """
+    Load service specs from both old and new directory structures.
+    
+    Supports:
+    - Old: services/*.yaml (defaults to application="legacy" if not specified)
+    - New: applications/{app}/services/*.yaml (uses app name from directory)
+    
+    Args:
+        base_dir: Path to CI repository root
+        
+    Returns:
+        List of service spec dictionaries, each with an 'application' field
+    """
     specs: list[dict] = []
-    for path in sorted(services_dir.glob("*.y*ml")):
-        with path.open("r", encoding="utf-8") as f:
-            data = yaml.safe_load(f) or {}
-        if not data.get("name"):
-            raise ValueError(f"Service spec {path} is missing required 'name'")
-        data["_file"] = str(path)
-        specs.append(data)
+    
+    # Load from old structure (services/)
+    services_dir = base_dir / "services"
+    if services_dir.exists():
+        for path in sorted(services_dir.glob("*.y*ml")):
+            spec = load_yaml_file(path)
+            if not spec.get("name"):
+                raise ValueError(f"Service spec {path} is missing required 'name'")
+            
+            # Get application from spec or default to "legacy"
+            app_name = spec.get("application", "legacy")
+            
+            # Validate application name
+            validate_application_name(app_name, str(path))
+            
+            spec["application"] = app_name
+            spec["_file"] = str(path)
+            specs.append(spec)
+    
+    # Load from new structure (applications/{app}/services/)
+    applications_dir = base_dir / "applications"
+    if applications_dir.exists():
+        for app_dir in sorted(applications_dir.iterdir()):
+            if not app_dir.is_dir():
+                continue
+            
+            app_name = app_dir.name
+            
+            # Validate directory name (application name)
+            validate_application_name(app_name, str(app_dir))
+            
+            services_dir = app_dir / "services"
+            if services_dir.exists():
+                for path in sorted(services_dir.glob("*.y*ml")):
+                    spec = load_yaml_file(path)
+                    if not spec.get("name"):
+                        raise ValueError(f"Service spec {path} is missing required 'name'")
+                    
+                    # Get application from spec or use directory name
+                    spec_app_name = spec.get("application", app_name)
+                    
+                    # Validate application name
+                    validate_application_name(spec_app_name, str(path))
+                    
+                    # Ensure application matches directory name (enforce consistency)
+                    if spec_app_name != app_name:
+                        raise ValueError(
+                            f"Service spec {path} has application='{spec_app_name}' but is in "
+                            f"directory 'applications/{app_name}/'. Application name must match directory name."
+                        )
+                    
+                    spec["application"] = app_name
+                    spec["_file"] = str(path)
+                    specs.append(spec)
+    
     return specs
 
 
 def hcl_string(value: str) -> str:
+    """Escape a string for HCL output."""
     return '"' + value.replace('"', '\\"') + '"'
 
 
@@ -40,23 +152,31 @@ def render_services_map(specs: list[dict]) -> str:
     Render the Terraform 'services' map expected by the ecs-fargate module.
     
     Args:
-        specs: List of service specs from CI/services/*.yaml
+        specs: List of service specs, each with an 'application' field
     """
     lines: list[str] = []
-    lines.append("# Generated by CI from CI/services/*.yaml")
+    lines.append("# Generated by CI from CI/services/*.yaml or CI/applications/*/services/*.yaml")
     lines.append("# DO NOT EDIT MANUALLY; changes will be overwritten.")
     lines.append("#")
     lines.append("# To add or modify services:")
-    lines.append("# 1. Edit CI/services/*.yaml")
+    lines.append("# 1. Edit CI/services/*.yaml (old structure) or CI/applications/{app}/services/*.yaml (new structure)")
     lines.append("# 2. Run the 'Create / Update ECS Service' workflow in the CI repository")
     lines.append("#")
     lines.append("# Services can attach to any ALB defined in terraform.tfvars by")
     lines.append("# referencing the ALB's key in the 'alb_id' field.")
+    lines.append("#")
+    lines.append("# Each service includes an 'application' field for multi-application support.")
     lines.append("")
     lines.append("services = {")
 
     for spec in specs:
         name = spec["name"]
+        application = spec.get("application", "legacy")  # Should always be present after load_service_specs
+        
+        # Validate that application field is present (required)
+        if not application:
+            raise ValueError(f"Service '{name}' is missing required 'application' field")
+        
         image_repo = spec.get("image_repo")
         if not image_repo:
             raise ValueError(f"Service '{name}' is missing required 'image_repo'")
@@ -79,6 +199,8 @@ def render_services_map(specs: list[dict]) -> str:
         lines.append(f"    cpu             = {cpu}")
         lines.append(f"    memory          = {memory}")
         lines.append(f"    desired_count   = {desired_count}")
+        # Store application for future use in Terraform (Phase 2)
+        lines.append(f"    application     = {hcl_string(application)}")
         lines.append("")
 
         # Environment variables
@@ -176,14 +298,47 @@ def render_services_map(specs: list[dict]) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Generate ECS services.generated.tfvars for DEVOPS from CI service specs"
+        description="Generate ECS services.generated.tfvars for DEVOPS from CI service specs",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent("""
+            Examples:
+              # Generate from CI repository root (supports both old and new structures)
+              python generate_ecs_services_tfvars.py \\
+                --base-dir . \\
+                --devops-dir ../DEVOPS \\
+                --environment dev
+              
+              # Filter by application
+              python generate_ecs_services_tfvars.py \\
+                --base-dir . \\
+                --devops-dir ../DEVOPS \\
+                --environment dev \\
+                --application legacy
+              
+              # Legacy: Use old services-dir argument (backward compatibility)
+              python generate_ecs_services_tfvars.py \\
+                --services-dir services \\
+                --devops-dir ../DEVOPS \\
+                --environment dev
+        """)
     )
+    
+    # New primary argument: base directory
+    parser.add_argument(
+        "--base-dir",
+        type=pathlib.Path,
+        help="Path to CI repository root (default: current directory). "
+             "Script will look for services/ and applications/ directories.",
+    )
+    
+    # Legacy argument: services directory (for backward compatibility)
     parser.add_argument(
         "--services-dir",
         type=pathlib.Path,
-        required=True,
-        help="Path to CI services spec directory (e.g. ./services)",
+        help="[DEPRECATED] Path to CI services spec directory (e.g. ./services). "
+             "Use --base-dir instead. This option is kept for backward compatibility.",
     )
+    
     parser.add_argument(
         "--devops-dir",
         type=pathlib.Path,
@@ -202,18 +357,74 @@ def main() -> None:
         default="04-ecs-fargate",
         help="Terraform module path under live/<env> (default: 04-ecs-fargate)",
     )
+    parser.add_argument(
+        "--application",
+        type=str,
+        help="Filter services by application name (omit to include all applications)",
+    )
 
     args = parser.parse_args()
 
-    specs = load_service_specs(args.services_dir)
+    # Determine base directory
+    if args.services_dir:
+        # Legacy mode: use services-dir (backward compatibility)
+        import warnings
+        warnings.warn(
+            "--services-dir is deprecated. Use --base-dir instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        base_dir = args.services_dir.parent
+        # Load only from services directory
+        specs = []
+        for path in sorted(args.services_dir.glob("*.y*ml")):
+            spec = load_yaml_file(path)
+            if not spec.get("name"):
+                raise ValueError(f"Service spec {path} is missing required 'name'")
+            app_name = spec.get("application", "legacy")
+            validate_application_name(app_name, str(path))
+            spec["application"] = app_name
+            spec["_file"] = str(path)
+            specs.append(spec)
+    else:
+        # New mode: use base-dir
+        base_dir = args.base_dir or pathlib.Path(".")
+        if not base_dir.exists():
+            raise SystemExit(f"Base directory does not exist: {base_dir}")
+        specs = load_service_specs(base_dir)
+    
     if not specs:
         raise SystemExit(
-            f"No service specs found in {args.services_dir}. "
-            "At least one *.yaml spec is required."
+            f"No service specs found. "
+            "At least one *.yaml spec is required in services/ or applications/*/services/."
         )
-
-    ci_service_names = {spec["name"] for spec in specs}
-
+    
+    # Filter by application if specified
+    if args.application:
+        validate_application_name(args.application, "command-line")
+        specs = [s for s in specs if s.get("application") == args.application]
+        if not specs:
+            raise SystemExit(
+                f"No services found for application '{args.application}'. "
+                f"Available applications: {', '.join(sorted(set(s.get('application', 'legacy') for s in specs)))}"
+            )
+    
+    # Validate all services have application field
+    for spec in specs:
+        if not spec.get("application"):
+            raise ValueError(
+                f"Service '{spec.get('name', 'unknown')}' is missing required 'application' field. "
+                f"This is required for multi-application support."
+            )
+    
+    # Group by application for summary
+    apps = {}
+    for spec in specs:
+        app = spec.get("application", "legacy")
+        if app not in apps:
+            apps[app] = []
+        apps[app].append(spec["name"])
+    
     content = render_services_map(specs)
 
     target_dir = (
@@ -224,13 +435,18 @@ def main() -> None:
 
     target_file.write_text(content, encoding="utf-8")
 
+    # Print summary
+    total_services = len(specs)
+    app_summary = ", ".join(f"{app} ({len(services)} service(s))" for app, services in sorted(apps.items()))
+    
     print(
         textwrap.dedent(
             f"""
-            Wrote services map for environment '{args.environment}' to:
+            ✓ Wrote services map for environment '{args.environment}' to:
               {target_file}
             
-            Generated {len(ci_service_names)} service(s): {', '.join(sorted(ci_service_names))}
+            Generated {total_services} service(s) across {len(apps)} application(s):
+              {app_summary}
             """
         ).strip()
     )
@@ -238,5 +454,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-

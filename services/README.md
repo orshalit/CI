@@ -4,10 +4,15 @@ This directory defines **logical ECS services** in a simple YAML format.
 The `create-ecs-service` workflow reads these specs and generates the
 corresponding Terraform `services` blocks in the `DEVOPS` repo.
 
+> **Note**: This is the legacy directory structure. New applications should use
+> the `applications/{app}/services/` structure. See `applications/README.md`
+> for details.
+
 Each file describes one service, for example:
 
 ```yaml
 name: api
+application: legacy  # REQUIRED - Application namespace (lowercase, alphanumeric, hyphens only)
 image_repo: ghcr.io/orshalit/ci-backend
 container_port: 8000
 
@@ -29,6 +34,17 @@ alb:
 ```
 
 ## Service Configuration
+
+### Required Fields
+
+- `name`: Service name (unique within application)
+- `application`: **REQUIRED** - Application namespace identifier
+  - Must be lowercase, alphanumeric, and hyphens only
+  - Examples: `legacy`, `customer-portal`, `admin-dashboard`
+  - Invalid: `App1` (uppercase), `customer_portal` (underscore), `customer portal` (space)
+- `image_repo`: Base image name (without tag)
+
+### Optional Fields
 
 - `image_repo` is the base image name; the actual tag is normally supplied
   at deploy time via `service_image_tags` from the CI pipeline.

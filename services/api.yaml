@@ -1,4 +1,5 @@
 name: api
+application: legacy
 
 # Base container image without tag; tag is provided at deploy time
 # via service_image_tags from the CI pipeline.

@@ -63,7 +63,9 @@ NC='\033[0m' # No Color
 # Configuration
 CLUSTER_NAME="${CLUSTER_NAME:-dev-ecs-cluster}"
 REGION="${AWS_REGION:-us-east-1}"
-SERVICES=("dev-api-service" "dev-api_single-service" "dev-frontend-service")
+# Service names now include application: {env}-{app}-{service}-service
+# Default application is "legacy" for backward compatibility
+SERVICES=("dev-legacy-api-service" "dev-legacy-api_single-service" "dev-legacy-frontend-service")
 
 print_header() {
     echo ""
@@ -349,20 +351,18 @@ check_cloudwatch_logs() {
     
     for service in "${SERVICES[@]}"; do
         # Map service name to log group
-        case "$service" in
-            "dev-api-service")
-                LOG_GROUP="/ecs/dev/api"
-                ;;
-            "dev-api_single-service")
-                LOG_GROUP="/ecs/dev/api_single"
-                ;;
-            "dev-frontend-service")
-                LOG_GROUP="/ecs/dev/frontend"
-                ;;
-            *)
-                LOG_GROUP="/ecs/dev/${service#dev-}"
-                ;;
-        esac
+        # Log groups now include application: /ecs/{env}/{app}/{service}
+        # Extract application and service from service name: {env}-{app}-{service}-service
+        if [[ "$service" =~ ^dev-([^-]+)-([^-]+)-service$ ]]; then
+            APP="${BASH_REMATCH[1]}"
+            SVC="${BASH_REMATCH[2]}"
+            LOG_GROUP="/ecs/dev/${APP}/${SVC}"
+        else
+            # Fallback for old naming (backward compatibility)
+            LOG_GROUP="/ecs/dev/${service#dev-}"
+            # Remove -service suffix if present
+            LOG_GROUP="${LOG_GROUP%-service}"
+        fi
         
         echo ""
         print_info "Service: $service (Log Group: $LOG_GROUP)"

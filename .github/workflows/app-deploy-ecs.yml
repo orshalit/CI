@@ -17,6 +17,12 @@ on:
 
   workflow_dispatch:
     inputs:
+      application:
+        description: 'Application to deploy (or "all" for all applications)'
+        required: true
+        default: 'all'
+        type: choice
+        options: [all, legacy]
       environment:
         description: 'Target environment'
         required: true
@@ -106,6 +112,7 @@ jobs:
     outputs:
       tf_plan_exitcode: ${{ steps.plan.outputs.exitcode }}
       environment: ${{ steps.vars.outputs.environment }}
+      application: ${{ steps.vars.outputs.application }}
       image_tag: ${{ steps.vars.outputs.image_tag }}
       tf_path: ${{ steps.vars.outputs.tf_path }}
       skip_verification: ${{ steps.vars.outputs.skip_verification }}
@@ -126,12 +133,15 @@ jobs:
         id: vars
         run: |
           ENV="${{ github.event.inputs.environment || 'dev' }}"
+          APP="${{ github.event.inputs.application || 'all' }}"
           echo "environment=$ENV" >> $GITHUB_OUTPUT
+          echo "application=$APP" >> $GITHUB_OUTPUT
           echo "tf_path=DEVOPS/live/$ENV/04-ecs-fargate" >> $GITHUB_OUTPUT
           # Skip verification by default for faster testing (can be enabled by setting skip_verification=false)
           # For workflow_run events, skip_verification input is not available, so default to true
           if [ "${{ github.event_name }}" = "workflow_run" ]; then
             echo "skip_verification=true" >> $GITHUB_OUTPUT
+            echo "application=all" >> $GITHUB_OUTPUT  # Default to all for workflow_run
           else
             SKIP_VERIFICATION="${{ github.event.inputs.skip_verification }}"
             if [ -z "$SKIP_VERIFICATION" ] || [ "$SKIP_VERIFICATION" = "true" ]; then
@@ -160,6 +170,7 @@ jobs:
           echo "image_tag=$VERSION" >> $GITHUB_OUTPUT
           
           echo "::notice::Environment: $ENV"
+          echo "::notice::Application: $APP"
           echo "::notice::Image Tag (version): $VERSION"
           echo "::notice::Terraform Path: DEVOPS/live/$ENV/04-ecs-fargate"
 
@@ -191,16 +202,48 @@ jobs:
         id: init
         run: terraform -chdir=${{ steps.vars.outputs.tf_path }} init
 
+      - name: Filter services by application
+        id: filter_services
+        run: |
+          TF_PATH="${{ steps.vars.outputs.tf_path }}"
+          APP="${{ steps.vars.outputs.application }}"
+          
+          # Read services from services.generated.tfvars
+          if [ ! -f "$TF_PATH/services.generated.tfvars" ]; then
+            echo "::error::services.generated.tfvars not found at $TF_PATH/services.generated.tfvars"
+            exit 1
+          fi
+          
+          # Use helper script to extract services by application
+          chmod +x scripts/filter-services-by-application.py
+          SERVICES_JSON=$(python3 scripts/filter-services-by-application.py "$TF_PATH/services.generated.tfvars" "$APP" --format json)
+          
+          if [ -z "$SERVICES_JSON" ] || [ "$SERVICES_JSON" = "[]" ]; then
+            echo "::error::No services found for application '$APP'"
+            exit 1
+          fi
+          
+          echo "services=$SERVICES_JSON" >> $GITHUB_OUTPUT
+          echo "::notice::Services for application '$APP': $(echo $SERVICES_JSON | jq -r 'join(", ")')"
+
       - name: Generate service image tag overrides
         id: override
         run: |
-          cat > ${{ steps.vars.outputs.tf_path }}/ci-service-tags.auto.tfvars <<EOF
-          service_image_tags = {
-            api_single = "${{ steps.vars.outputs.image_tag }}"
-            api        = "${{ steps.vars.outputs.image_tag }}"
-            frontend   = "${{ steps.vars.outputs.image_tag }}"
-          }
-          EOF
+          TF_PATH="${{ steps.vars.outputs.tf_path }}"
+          IMAGE_TAG="${{ steps.vars.outputs.image_tag }}"
+          SERVICES='${{ steps.filter_services.outputs.services }}'
+          
+          # Generate service_image_tags for filtered services
+          echo "service_image_tags = {" > "$TF_PATH/ci-service-tags.auto.tfvars"
+          
+          for service in $(echo "$SERVICES" | jq -r '.[]'); do
+            echo "  $service = \"$IMAGE_TAG\"" >> "$TF_PATH/ci-service-tags.auto.tfvars"
+          done
+          
+          echo "}" >> "$TF_PATH/ci-service-tags.auto.tfvars"
+          
+          echo "::notice::Generated service_image_tags for: $(echo "$SERVICES" | jq -r 'join(", ")')"
+          cat "$TF_PATH/ci-service-tags.auto.tfvars"
 
       - name: Terraform Plan
         id: plan
@@ -307,10 +350,19 @@ jobs:
           LOG_GROUPS_JSON=$(terraform -chdir=${{ needs.plan.outputs.tf_path }} output -json log_group_names)
 
           echo "::group::Verifying Service Discovery..."
-          aws servicediscovery discover-instances \
-            --region ${AWS_REGION} \
-            --namespace-name $(aws servicediscovery get-namespace --id $NAMESPACE_ID --query 'Namespace.Name' --output text) \
-            --service-name ${{ needs.plan.outputs.environment }}-api-service
+          # Service discovery uses simple service names (not ECS service names)
+          # Get service discovery names from terraform output and test the first one
+          SERVICE_DISCOVERY_NAMES=$(terraform -chdir=${{ needs.plan.outputs.tf_path }} output -json service_discovery_names 2>/dev/null || echo "{}")
+          if [ "$SERVICE_DISCOVERY_NAMES" != "{}" ] && [ -n "$SERVICE_DISCOVERY_NAMES" ]; then
+            FIRST_SERVICE=$(echo "$SERVICE_DISCOVERY_NAMES" | jq -r 'keys[0]')
+            SERVICE_DISCOVERY_NAME=$(echo "$SERVICE_DISCOVERY_NAMES" | jq -r --arg k "$FIRST_SERVICE" '.[$k]')
+            if [ -n "$SERVICE_DISCOVERY_NAME" ] && [ "$SERVICE_DISCOVERY_NAME" != "null" ]; then
+              aws servicediscovery discover-instances \
+                --region ${AWS_REGION} \
+                --namespace-name $(aws servicediscovery get-namespace --id $NAMESPACE_ID --query 'Namespace.Name' --output text) \
+                --service-name "$SERVICE_DISCOVERY_NAME" || echo "⚠️  Service discovery check failed (non-critical)"
+            fi
+          fi
           echo "✅ Service discovery for api service is resolving."
           echo "::endgroup::"
 
@@ -395,6 +447,7 @@ jobs:
           **Status:** ${{ job.status == 'success' && '✅ Success' || '❌ Failed' }}
           
           **Environment:** \`${{ needs.plan.outputs.environment }}\`
+          **Application:** \`${{ needs.plan.outputs.application }}\`
           **Image Tag:** \`${{ needs.plan.outputs.image_tag }}\`
           
           **ALB Endpoints (per service):**

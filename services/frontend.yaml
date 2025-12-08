@@ -1,4 +1,5 @@
 name: frontend
+application: legacy
 
 image_repo: ghcr.io/orshalit/ci-frontend
 
