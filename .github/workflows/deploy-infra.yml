@@ -94,6 +94,30 @@ jobs:
             echo "services_tfvars_exists=false" >> $GITHUB_OUTPUT
           fi
 
+      - name: Check if services is empty
+        id: check_services_empty
+        if: inputs.action == 'plan' || inputs.action == 'apply'
+        run: |
+          PLAN_DIR="DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}"
+          
+          # Check if services.generated.tfvars exists and has non-empty services
+          if [ -f "$PLAN_DIR/services.generated.tfvars" ]; then
+            # Check if services map is empty (services = {})
+            # An empty services map will have "services = {}" on a single line or just "{}" after "services ="
+            if grep -qE "^\s*services\s*=\s*\{\}\s*$" "$PLAN_DIR/services.generated.tfvars" || \
+               (grep -qE "^\s*services\s*=\s*\{$" "$PLAN_DIR/services.generated.tfvars" && \
+                ! grep -A 10 "services = {" "$PLAN_DIR/services.generated.tfvars" | grep -qE "^\s+[a-zA-Z0-9_-]+::[a-zA-Z0-9_-]+\s*=\s*\{"); then
+              echo "services_empty=true" >> $GITHUB_OUTPUT
+              echo "::notice::Services map is empty (services = {}), will exclude from var files to avoid Terraform crash"
+            else
+              echo "services_empty=false" >> $GITHUB_OUTPUT
+              echo "::notice::Services map has content"
+            fi
+          else
+            echo "services_empty=true" >> $GITHUB_OUTPUT
+            echo "::notice::services.generated.tfvars not found"
+          fi
+
       - name: Build var files list
         id: build_var_files
         if: inputs.action == 'plan' || inputs.action == 'apply'
@@ -102,7 +126,10 @@ jobs:
           if [ "${{ steps.check_tfvars.outputs.tfvars_exists }}" == "true" ]; then
             VAR_FILES="terraform.tfvars"
           fi
-          if [ "${{ steps.check_services_tfvars.outputs.services_tfvars_exists }}" == "true" ]; then
+          # Only include services.generated.tfvars if it exists AND services is not empty
+          # This prevents Terraform crash when services = {} and service_image_tags has marks
+          if [ "${{ steps.check_services_tfvars.outputs.services_tfvars_exists }}" == "true" ] && \
+             [ "${{ steps.check_services_empty.outputs.services_empty }}" != "true" ]; then
             if [ -n "$VAR_FILES" ]; then
               VAR_FILES="$VAR_FILES services.generated.tfvars"
             else
@@ -111,28 +138,95 @@ jobs:
           fi
           echo "var_files=$VAR_FILES" >> $GITHUB_OUTPUT
 
+      - name: Check for existing services in state
+        id: check_state_services
+        if: |
+          (inputs.action == 'plan' || inputs.action == 'apply') &&
+          steps.check_services_empty.outputs.services_empty == 'true' &&
+          inputs.module_path == '04-ecs-fargate'
+        run: |
+          PLAN_DIR="DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}"
+          
+          echo "::notice::Checking Terraform state for existing services..."
+          
+          # Initialize Terraform to access state (without var files to avoid crash)
+          cd "$PLAN_DIR"
+          terraform init -no-color -input=false > /dev/null 2>&1 || true
+          
+          # Check if state has any ECS services
+          # Use terraform state list to find services (safe even with empty services config)
+          if terraform state list -no-color 2>/dev/null | grep -q "aws_ecs_service.services\["; then
+            echo "services_in_state=true" >> $GITHUB_OUTPUT
+            EXISTING_SERVICES=$(terraform state list -no-color 2>/dev/null | grep "aws_ecs_service.services\[" || echo "")
+            echo "existing_services<<EOF" >> $GITHUB_OUTPUT
+            echo "$EXISTING_SERVICES" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+            
+            echo ""
+            echo "::error::╔══════════════════════════════════════════════════════════════╗"
+            echo "::error::║  ⚠️  DEPLOYMENT BLOCKED: DANGEROUS CONFIGURATION DETECTED  ⚠️  ║"
+            echo "::error::╚══════════════════════════════════════════════════════════════╝"
+            echo ""
+            echo "::error::Problem: services = {} (empty) but Terraform state has existing services!"
+            echo ""
+            echo "::error::If you proceed, Terraform will DESTROY all existing services:"
+            echo "$EXISTING_SERVICES" | while read -r service; do
+              echo "::error::  ❌ $service"
+            done
+            echo ""
+            echo "::error::Why this is blocked:"
+            echo "::error::  • Config says: 'deploy zero services' (services = {})"
+            echo "::error::  • State says: 'these services exist'"
+            echo "::error::  • Terraform will destroy existing services to match empty config"
+            echo "::error::  • This is almost certainly a mistake, not intentional"
+            echo ""
+            echo "::error::Solution - Generate services configuration first:"
+            echo "::error::  1. Go to: Actions → 'Create / Update ECS Service (generate DEVOPS PR)'"
+            echo "::error::  2. Run the workflow to generate services.generated.tfvars from YAML"
+            echo "::error::  3. Review and merge the PR in DEVOPS repository"
+            echo "::error::  4. Then run this deployment workflow again"
+            echo ""
+            echo "::error::This ensures services in config match your YAML definitions."
+            exit 1
+          else
+            echo "services_in_state=false" >> $GITHUB_OUTPUT
+            echo "::notice::✓ No existing services in state"
+            echo "::notice::✓ Safe to proceed with empty services config (fresh deployment)"
+          fi
+
       - name: Terraform Refresh State
         id: refresh
-        if: inputs.action == 'plan' || inputs.action == 'apply'
+        if: |
+          (inputs.action == 'plan' || inputs.action == 'apply') &&
+          steps.check_state_services.outputs.services_in_state != 'true'
+        continue-on-error: true
         run: |
           PLAN_DIR="DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}"
           REFRESH_ARGS="-no-color"
           
-          # Add var files if they exist (same logic as plan)
-          if [ "${{ steps.check_tfvars.outputs.tfvars_exists }}" == "true" ]; then
-            REFRESH_ARGS="$REFRESH_ARGS -var-file=terraform.tfvars"
-          fi
-          if [ "${{ steps.check_services_tfvars.outputs.services_tfvars_exists }}" == "true" ]; then
-            REFRESH_ARGS="$REFRESH_ARGS -var-file=services.generated.tfvars"
+          # Use the same var files logic as plan (which excludes empty services.generated.tfvars)
+          # This prevents Terraform crash when services = {} and service_image_tags has marks
+          VAR_FILES="${{ steps.build_var_files.outputs.var_files }}"
+          
+          if [ -n "$VAR_FILES" ]; then
+            for var_file in $VAR_FILES; do
+              REFRESH_ARGS="$REFRESH_ARGS -var-file=$var_file"
+            done
           fi
           
           echo "::notice::Refreshing Terraform state to sync with AWS..."
-          echo "::notice::This will update the remote state to match actual AWS resources..."
+          if [ "${{ steps.check_services_empty.outputs.services_empty }}" == "true" ]; then
+            echo "::notice::Services map is empty - refreshing infrastructure only (services excluded to avoid crash)"
+          else
+            echo "::notice::Refreshing all resources including services"
+          fi
+          
           terraform -chdir="$PLAN_DIR" refresh $REFRESH_ARGS
           REFRESH_EXITCODE=$?
           
           if [ $REFRESH_EXITCODE -ne 0 ]; then
             echo "::warning::State refresh failed with exit code $REFRESH_EXITCODE, but continuing with plan..."
+            exit 0  # Don't fail the workflow, just warn
           else
             echo "::notice::State refresh completed successfully"
           fi
@@ -167,6 +261,91 @@ jobs:
           else
             echo "::notice::State drift detection only runs for ECS Fargate module"
             echo "drift_detected=skipped" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check for service key mismatches (pre-plan)
+        id: check_service_keys
+        if: |
+          (inputs.action == 'plan' || inputs.action == 'apply') &&
+          steps.check_services_empty.outputs.services_empty != 'true' &&
+          inputs.module_path == '04-ecs-fargate'
+        continue-on-error: true
+        run: |
+          PLAN_DIR="DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}"
+          
+          echo "::notice::Checking for service key mismatches between state and config..."
+          
+          # Initialize Terraform to access state
+          cd "$PLAN_DIR"
+          terraform init -no-color -input=false > /dev/null 2>&1 || true
+          
+          # Get services from state
+          STATE_SERVICES=$(terraform state list -no-color 2>/dev/null | grep "aws_ecs_service.services\[" | sed 's/aws_ecs_service.services\["\(.*\)"\]/\1/' || echo "")
+          
+          # Get services from config (parse services.generated.tfvars)
+          if [ -f "$PLAN_DIR/services.generated.tfvars" ]; then
+            CONFIG_SERVICES=$(grep -E '^\s+"[^"]+::[^"]+"\s*=\s*\{' "$PLAN_DIR/services.generated.tfvars" | sed 's/^\s*"\([^"]*\)".*/\1/' || echo "")
+          else
+            CONFIG_SERVICES=""
+          fi
+          
+          if [ -n "$STATE_SERVICES" ] && [ -n "$CONFIG_SERVICES" ]; then
+            # Find services in state but not in config (will be destroyed)
+            SERVICES_TO_DESTROY=""
+            SERVICES_TO_CREATE=""
+            SERVICES_TO_UPDATE=""
+            
+            for state_svc in $STATE_SERVICES; do
+              if ! echo "$CONFIG_SERVICES" | grep -q "^$state_svc$"; then
+                SERVICES_TO_DESTROY="$SERVICES_TO_DESTROY $state_svc"
+              else
+                SERVICES_TO_UPDATE="$SERVICES_TO_UPDATE $state_svc"
+              fi
+            done
+            
+            for config_svc in $CONFIG_SERVICES; do
+              if ! echo "$STATE_SERVICES" | grep -q "^$config_svc$"; then
+                SERVICES_TO_CREATE="$SERVICES_TO_CREATE $config_svc"
+              fi
+            done
+            
+            if [ -n "$SERVICES_TO_DESTROY" ]; then
+              echo "::warning::⚠️ Service key mismatch detected!"
+              echo "::warning::The following services in state will be DESTROYED (not in new config):"
+              for svc in $SERVICES_TO_DESTROY; do
+                echo "::warning::  ❌ $svc"
+              done
+              echo ""
+              echo "::warning::Possible reasons:"
+              echo "::warning::  • Service key changed (e.g., 'api' → 'legacy::api')"
+              echo "::warning::  • Service removed from YAML definitions"
+              echo "::warning::  • Service renamed"
+              echo ""
+              echo "::warning::To preserve services, consider:"
+              echo "::warning::  1. State migration: terraform state mv 'aws_ecs_service.services[\"old-key\"]' 'aws_ecs_service.services[\"new-key\"]'"
+              echo "::warning::  2. Or add the service back to YAML if it was accidentally removed"
+              echo "key_mismatch=true" >> $GITHUB_OUTPUT
+            else
+              echo "::notice::✓ All services in state match config keys"
+              echo "key_mismatch=false" >> $GITHUB_OUTPUT
+            fi
+            
+            if [ -n "$SERVICES_TO_CREATE" ]; then
+              echo "::notice::The following NEW services will be CREATED:"
+              for svc in $SERVICES_TO_CREATE; do
+                echo "::notice::  ➕ $svc"
+              done
+            fi
+            
+            if [ -n "$SERVICES_TO_UPDATE" ]; then
+              echo "::notice::The following services will be UPDATED (if config changed):"
+              for svc in $SERVICES_TO_UPDATE; do
+                echo "::notice::  🔄 $svc"
+              done
+            fi
+          else
+            echo "::notice::Cannot compare - state or config services list is empty"
+            echo "key_mismatch=unknown" >> $GITHUB_OUTPUT
           fi
 
       - name: Terraform Plan
@@ -228,13 +407,38 @@ jobs:
         id: plan_changes
         if: inputs.action == 'apply' && steps.plan.outcome == 'success'
         run: |
-          PLAN_OUTPUT=$(terraform -chdir=DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }} show -no-color tfplan 2>&1)
+          PLAN_DIR="DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}"
+          PLAN_OUTPUT=$(terraform -chdir="$PLAN_DIR" show -no-color tfplan 2>&1)
+          
           if echo "$PLAN_OUTPUT" | grep -q "No changes"; then
             echo "has_changes=false" >> $GITHUB_OUTPUT
             echo "::notice::No changes detected. Skipping apply."
           else
             echo "has_changes=true" >> $GITHUB_OUTPUT
             echo "::notice::Changes detected. Proceeding with apply."
+            
+            # Extract service changes from plan for visibility
+            if echo "$PLAN_OUTPUT" | grep -q "aws_ecs_service.services\["; then
+              echo ""
+              echo "::notice::📋 Service Changes Detected:"
+              
+              CREATES=$(echo "$PLAN_OUTPUT" | grep -c "aws_ecs_service.services\[.*\] will be created" || echo "0")
+              DESTROYS=$(echo "$PLAN_OUTPUT" | grep -c "aws_ecs_service.services\[.*\] will be destroyed" || echo "0")
+              REPLACES=$(echo "$PLAN_OUTPUT" | grep -c "aws_ecs_service.services\[.*\] must be replaced" || echo "0")
+              
+              if [ "$CREATES" -gt 0 ]; then
+                echo "::notice::  ➕ Services to CREATE: $CREATES"
+              fi
+              
+              if [ "$DESTROYS" -gt 0 ]; then
+                echo "::warning::  ❌ Services to DESTROY: $DESTROYS"
+                echo "::warning::⚠️ This may be due to service key changes (e.g., 'api' → 'legacy::api')"
+              fi
+              
+              if [ "$REPLACES" -gt 0 ]; then
+                echo "::warning::  🔄 Services to REPLACE: $REPLACES"
+              fi
+            fi
           fi
 
       - name: Save Terraform state before apply
