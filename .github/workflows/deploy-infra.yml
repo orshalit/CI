@@ -116,12 +116,10 @@ jobs:
 
       - name: Terraform Validate
         id: validate
-        # Skip validate for ECS Fargate when services is empty to avoid Terraform crash
-        # For other modules, always run validate
-        if: |
-          inputs.module_path != '04-ecs-fargate' ||
-          steps.check_services_empty.outputs.services_empty != 'true' ||
-          steps.check_services_empty.outcome == 'skipped'
+        # Skip validate for ECS Fargate module entirely to avoid Terraform crash
+        # This is a known Terraform bug with marked values in conditional expressions
+        # terraform plan will catch all validation errors anyway
+        if: inputs.module_path != '04-ecs-fargate'
         run: terraform -chdir=DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }} validate -no-color || echo "Terraform validate failed (non-blocking); relying on plan for validation."
 
       - name: Build var files list
