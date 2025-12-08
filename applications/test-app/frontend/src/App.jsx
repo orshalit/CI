@@ -1,3 +1,4 @@
+// Test change to trigger CI pipeline - verifying multi-application support
 import { useState, useEffect, useCallback } from 'react';
 import './App.css';
 import { apiService } from './services/api.service';
