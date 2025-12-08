@@ -100,9 +100,10 @@ jobs:
           if [ -f "$PLAN_DIR/services.generated.tfvars" ]; then
             # Check if services map is empty (services = {})
             # An empty services map will have "services = {}" on a single line or just "{}" after "services ="
+            # Service keys may be quoted (e.g., "legacy::api") or unquoted (e.g., legacy::api)
             if grep -qE "^\s*services\s*=\s*\{\}\s*$" "$PLAN_DIR/services.generated.tfvars" || \
                (grep -qE "^\s*services\s*=\s*\{$" "$PLAN_DIR/services.generated.tfvars" && \
-                ! grep -A 10 "services = {" "$PLAN_DIR/services.generated.tfvars" | grep -qE "^\s+[a-zA-Z0-9_-]+::[a-zA-Z0-9_-]+\s*=\s*\{"); then
+                ! grep -A 10 "services = {" "$PLAN_DIR/services.generated.tfvars" | grep -qE "^\s+(\"[^\"]+::[^\"]+\"|[a-zA-Z0-9_-]+::[a-zA-Z0-9_-]+)\s*=\s*\{"); then
               echo "services_empty=true" >> $GITHUB_OUTPUT
               echo "::notice::Services map is empty (services = {}), will exclude from var files to avoid Terraform crash"
             else
@@ -204,9 +205,18 @@ jobs:
           (inputs.action == 'plan' || inputs.action == 'apply') &&
           steps.check_state_services.outputs.services_in_state != 'true'
         continue-on-error: true
+        timeout-minutes: 5
         run: |
           PLAN_DIR="DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}"
           REFRESH_ARGS="-no-color"
+          
+          # Check if state exists - if not, skip refresh (fresh deployment)
+          cd "$PLAN_DIR"
+          if ! terraform state list -no-color >/dev/null 2>&1; then
+            echo "::notice::No Terraform state found - skipping refresh (fresh deployment)"
+            echo "::notice::This is expected when starting with a new/empty state"
+            exit 0
+          fi
           
           # Use the same var files logic as plan (which excludes empty services.generated.tfvars)
           # This prevents Terraform crash when services = {} and service_image_tags has marks
@@ -225,15 +235,18 @@ jobs:
             echo "::notice::Refreshing all resources including services"
           fi
           
-          terraform -chdir="$PLAN_DIR" refresh $REFRESH_ARGS
-          REFRESH_EXITCODE=$?
-          
-          if [ $REFRESH_EXITCODE -ne 0 ]; then
-            echo "::warning::State refresh failed with exit code $REFRESH_EXITCODE, but continuing with plan..."
+          # Use timeout to prevent hanging (5 minutes should be enough)
+          timeout 300 terraform -chdir="$PLAN_DIR" refresh $REFRESH_ARGS || {
+            REFRESH_EXITCODE=$?
+            if [ $REFRESH_EXITCODE -eq 124 ]; then
+              echo "::warning::State refresh timed out after 5 minutes, but continuing with plan..."
+            else
+              echo "::warning::State refresh failed with exit code $REFRESH_EXITCODE, but continuing with plan..."
+            fi
             exit 0  # Don't fail the workflow, just warn
-          else
-            echo "::notice::State refresh completed successfully"
-          fi
+          }
+          
+          echo "::notice::State refresh completed successfully"
 
       - name: Detect State Drift (Target Groups)
         id: detect_drift
