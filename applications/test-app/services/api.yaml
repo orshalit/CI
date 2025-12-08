@@ -1,0 +1,34 @@
+name: api
+application: test-app
+
+# Base container image without tag; tag is provided at deploy time
+# via service_image_tags from the CI pipeline.
+image_repo: ghcr.io/orshalit/ci-backend
+container_port: 8000
+
+cpu: 256
+memory: 512
+desired_count: 2
+
+env:
+  LOG_LEVEL: INFO
+  # DATABASE_URL is optional - leave empty if database is not deployed
+  # When database is deployed, update this with the connection string
+  DATABASE_URL: ""
+
+alb:
+  alb_id: app_shared
+  # listener_protocol: HTTPS in YAML, but will fall back to HTTP if HTTPS disabled on ALB
+  listener_protocol: HTTPS
+  listener_port: 443
+  path_patterns:
+    - "/test-api/*"
+  # host_patterns: Optional - remove to allow access via ALB DNS name directly
+  # In dev: Can be removed or use ALB DNS name
+  # In prod: Set to actual domain
+  host_patterns:
+    - "app.dev.example.com"  # ⚠️ Replace with actual domain or remove
+  # Health check configuration
+  health_check_path: "/health"  # Backend API health endpoint
+
+

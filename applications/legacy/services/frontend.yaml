@@ -15,14 +15,14 @@ env:
   # BACKEND_API_URL: Use HTTP in dev (HTTPS disabled), HTTPS in prod
   # For dev: Use ALB DNS name or HTTP URL
   # For prod: Use HTTPS URL with proper domain
-  BACKEND_API_URL: "http://app.dev.example.com/api"  # ⚠️ Update with actual ALB DNS or domain
+  BACKEND_API_URL: "http://app.dev.example.com/legacy-api"  # ⚠️ Update with actual ALB DNS or domain
 
 alb:
   alb_id: app_shared
   listener_protocol: HTTPS
   listener_port: 443
   path_patterns:
-    - "/"
+    - "/legacy/*"
   host_patterns:
     - "app.dev.example.com"
 

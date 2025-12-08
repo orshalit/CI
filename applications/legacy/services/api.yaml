@@ -21,7 +21,7 @@ alb:
   listener_protocol: HTTPS
   listener_port: 443
   path_patterns:
-    - "/api/*"
+    - "/legacy-api/*"
   host_patterns:
     - "app.dev.example.com"  # ⚠️ Replace with actual domain or remove for ALB DNS access
   health_check_path: "/health"

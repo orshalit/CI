@@ -1,0 +1,27 @@
+name: frontend
+application: test-app
+
+image_repo: ghcr.io/orshalit/ci-frontend
+
+container_port: 3000
+cpu: 256
+memory: 512
+desired_count: 2
+
+env:
+  LOG_LEVEL: INFO
+  # BACKEND_API_URL: Use HTTP in dev (HTTPS disabled), HTTPS in prod
+  # For dev: Use ALB DNS name or HTTP URL
+  # For prod: Use HTTPS URL with proper domain
+  BACKEND_API_URL: "http://app.dev.example.com/test-api"  # ⚠️ Update with actual ALB DNS or domain
+
+alb:
+  alb_id: app_shared
+  listener_protocol: HTTPS
+  listener_port: 443
+  path_patterns:
+    - "/test/*"
+  host_patterns:
+    - "app.dev.example.com"
+
+

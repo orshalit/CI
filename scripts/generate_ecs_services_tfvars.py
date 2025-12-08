@@ -69,6 +69,119 @@ def load_yaml_file(path: pathlib.Path) -> dict:
     return data
 
 
+def validate_alb_routing_conflicts(specs: list[dict]) -> None:
+    """
+    Validate that services using the same ALB don't have duplicate routing rules.
+    
+    ALB listener rules are matched by host pattern (if specified) and path pattern.
+    If two services on the same ALB have the same host+path combination, they will
+    conflict and cause unpredictable routing behavior.
+    
+    This validation checks:
+    1. Duplicate path patterns on the same ALB (when no host patterns specified)
+    2. Duplicate host+path combinations on the same ALB (when host patterns specified)
+    
+    Args:
+        specs: List of service spec dictionaries
+        
+    Raises:
+        ValueError: If duplicate routing rules are found for the same ALB
+    """
+    # Group services by ALB ID
+    alb_services: dict[str, list[dict]] = {}
+    
+    for spec in specs:
+        alb_config = spec.get("alb")
+        if not alb_config:
+            # Service without ALB - skip validation
+            continue
+        
+        alb_id = alb_config.get("alb_id")
+        if not alb_id:
+            continue
+        
+        if alb_id not in alb_services:
+            alb_services[alb_id] = []
+        alb_services[alb_id].append(spec)
+    
+    # Check for conflicts within each ALB group
+    for alb_id, services in alb_services.items():
+        if len(services) < 2:
+            # Only one service using this ALB - no conflicts possible
+            continue
+        
+        # Track routing rule combinations (host + path)
+        # Key: (host_pattern or None, normalized_path_pattern)
+        # Value: list of services using this combination
+        routing_rules: dict[tuple[str | None, str], list[dict]] = {}
+        
+        for service in services:
+            service_name = service.get("name", "unknown")
+            application = service.get("application", "unknown")
+            alb_config = service.get("alb", {})
+            
+            path_patterns = alb_config.get("path_patterns") or []
+            host_patterns = alb_config.get("host_patterns") or []
+            
+            # If no path patterns specified, skip (service won't have ALB routing)
+            if not path_patterns:
+                continue
+            
+            # Normalize host patterns (lowercase, strip)
+            normalized_hosts = [h.lower().strip() if h else None for h in host_patterns] if host_patterns else [None]
+            
+            # Create routing rule combinations
+            for path_pattern in path_patterns:
+                # Normalize path pattern (handle trailing slashes for comparison)
+                # Note: We keep the original for display, but normalize for comparison
+                normalized_path = path_pattern.rstrip("/") or "/"
+                
+                # If host patterns are specified, each host+path combo must be unique
+                # If no host patterns, just path must be unique
+                for host_pattern in normalized_hosts:
+                    rule_key = (host_pattern, normalized_path)
+                    
+                    if rule_key not in routing_rules:
+                        routing_rules[rule_key] = []
+                    
+                    routing_rules[rule_key].append({
+                        "name": service_name,
+                        "application": application,
+                        "path": path_pattern,
+                        "host": host_pattern
+                    })
+        
+        # Report conflicts
+        conflicts = []
+        for (host_pattern, path_pattern), conflicting_services in routing_rules.items():
+            if len(conflicting_services) > 1:
+                service_list = ", ".join(
+                    f"{s['application']}::{s['name']}" 
+                    for s in conflicting_services
+                )
+                
+                if host_pattern:
+                    conflicts.append(
+                        f"  Host pattern '{host_pattern}' with path pattern '{path_pattern}' "
+                        f"is used by multiple services on ALB '{alb_id}':\n"
+                        f"    - {service_list}"
+                    )
+                else:
+                    conflicts.append(
+                        f"  Path pattern '{path_pattern}' is used by multiple services on ALB '{alb_id}':\n"
+                        f"    - {service_list}"
+                    )
+        
+        if conflicts:
+            conflict_msg = "\n".join(conflicts)
+            raise ValueError(
+                f"ALB routing conflicts detected for ALB '{alb_id}':\n"
+                f"{conflict_msg}\n\n"
+                f"Each service on the same ALB must have unique routing rules (host + path combinations).\n"
+                f"Please update the service definitions to use different path patterns or host patterns."
+            )
+
+
 def load_service_specs(base_dir: pathlib.Path) -> list[dict]:
     """
     Load service specs from both old and new directory structures.
@@ -416,6 +529,12 @@ def main() -> None:
                 f"Service '{spec.get('name', 'unknown')}' is missing required 'application' field. "
                 f"This is required for multi-application support."
             )
+    
+    # Validate ALB routing conflicts (duplicate path/host patterns)
+    try:
+        validate_alb_routing_conflicts(specs)
+    except ValueError as e:
+        raise SystemExit(str(e))
     
     # Group by application for summary
     apps = {}

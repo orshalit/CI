@@ -66,6 +66,55 @@ jobs:
           docker build -t backend:pr ./backend
           docker build -t frontend:pr ./frontend
       
+      - name: Check for service spec changes
+        id: check_service_changes
+        run: |
+          # Fetch base branch for comparison
+          git fetch origin ${{ github.base_ref }}:${{ github.base_ref }} || true
+          
+          # Check if any service spec files were changed
+          if git diff --name-only ${{ github.base_ref }}...HEAD | grep -E '^(services/|applications/)'; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Validate service specs
+        if: steps.check_service_changes.outputs.changed == 'true'
+        run: |
+          echo "Validating service definitions..."
+          
+          # Install pyyaml for validation script
+          pip install pyyaml
+          
+          # Check if we have any service specs
+          if [ ! -d "services" ] && [ ! -d "applications" ]; then
+            echo "::warning::No service directories found. Skipping validation."
+            exit 0
+          fi
+          
+          # Run validation for dev environment (most common)
+          # We use a dummy DEVOPS dir since we're only validating, not generating
+          mkdir -p /tmp/dummy-devops/live/dev/04-ecs-fargate
+          
+          echo "::notice::Validating service specs for dev environment..."
+          
+          if python scripts/generate_ecs_services_tfvars.py \
+            --base-dir . \
+            --devops-dir /tmp/dummy-devops \
+            --environment dev 2>&1; then
+            echo "✓ Service spec validation passed"
+          else
+            echo "::error::Service spec validation failed!"
+            echo ""
+            echo "Common issues:"
+            echo "  - Duplicate path patterns on the same ALB"
+            echo "  - Missing required fields (name, application)"
+            echo "  - Invalid application names (must be lowercase, alphanumeric, hyphens only)"
+            echo "  - Application name mismatch with directory name"
+            exit 1
+          fi
+      
       - name: PR feedback
         if: always()
         run: |
