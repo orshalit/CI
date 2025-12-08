@@ -48,6 +48,30 @@ jobs:
             --devops-dir DEVOPS \
             --environment "${{ github.event.inputs.environment || 'dev' }}"
 
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.6.0'
+
+      - name: Format Terraform files
+        run: |
+          TERRAFORM_DIR="DEVOPS/live/${{ github.event.inputs.environment || 'dev' }}/04-ecs-fargate"
+          
+          echo "::notice::Formatting Terraform files in $TERRAFORM_DIR..."
+          
+          # Format all Terraform files in the directory
+          terraform fmt -recursive "$TERRAFORM_DIR"
+          
+          # Check if any files were modified
+          cd DEVOPS
+          if git diff --quiet "live/${{ github.event.inputs.environment || 'dev' }}/04-ecs-fargate"; then
+            echo "::notice::✓ All Terraform files are properly formatted"
+          else
+            echo "::notice::Formatted Terraform files:"
+            git diff --name-only "live/${{ github.event.inputs.environment || 'dev' }}/04-ecs-fargate"
+            echo "::notice::Files have been automatically formatted and will be included in the PR"
+          fi
+
       - name: Check for changes
         id: check_changes
         run: |
