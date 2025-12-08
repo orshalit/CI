@@ -1,4 +1,4 @@
-# Test: Backend-only change to verify CI optimization
+# Test: Both backend and frontend changed - full pipeline test
 import json
 import logging
 import os

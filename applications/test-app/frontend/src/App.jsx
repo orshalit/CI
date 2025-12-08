@@ -1,5 +1,5 @@
 // Test change to trigger CI pipeline - verifying multi-application support (v3)
-// Test: Frontend-only change to verify CI optimization
+// Test: Both backend and frontend changed - full pipeline test
 import { useState, useEffect, useCallback } from 'react';
 import './App.css';
 import { apiService } from './services/api.service';
