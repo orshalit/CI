@@ -1,12 +1,9 @@
-# ECS Service Specs (CI-driven)
+# ECS Service Specs (Legacy - Deprecated)
 
-This directory defines **logical ECS services** in a simple YAML format.
-The `create-ecs-service` workflow reads these specs and generates the
-corresponding Terraform `services` blocks in the `DEVOPS` repo.
-
-> **Note**: This is the legacy directory structure. New applications should use
-> the `applications/{app}/services/` structure. See `applications/README.md`
-> for details.
+> **⚠️ DEPRECATED**: This directory is no longer used. All services have been moved to
+> `applications/{app}/services/` structure. See `applications/README.md` for details.
+>
+> Legacy services are now in `applications/legacy/services/`.
 
 Each file describes one service, for example:
 
