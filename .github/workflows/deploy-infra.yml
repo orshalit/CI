@@ -427,7 +427,7 @@ jobs:
             echo "::endgroup::"
             
             echo "::group::Debug: Detailed Plan Output"
-            terraform -chdir="$PLAN_DIR" show -no-color -detailed-exitcode tfplan || true
+            terraform -chdir="$PLAN_DIR" show -no-color tfplan || true
             echo "::endgroup::"
           else
             echo "::notice::Plan file not available for debugging"
