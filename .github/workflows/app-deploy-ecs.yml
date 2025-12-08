@@ -119,6 +119,11 @@ jobs:
       skip_verification: ${{ steps.vars.outputs.skip_verification }}
 
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Need full history for scripts and actions
+
       - name: Download build version from CI workflow
         if: |
           github.event_name == 'workflow_run' &&

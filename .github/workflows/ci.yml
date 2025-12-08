@@ -1109,7 +1109,7 @@ jobs:
   summary:
     name: Build Summary
     runs-on: ubuntu-latest
-    needs: [e2e-tests, prepare-build, detect-changes, build-images, code-quality, backend-tests, frontend-tests, app-backend-tests, app-frontend-tests, detect-app-images]
+    needs: [e2e-tests, prepare-build, detect-changes, build-images, code-quality, backend-tests, frontend-tests, app-backend-tests, app-frontend-tests, detect-app-images, filter-build-matrix]
     if: always()
     
     steps:
@@ -1132,10 +1132,21 @@ jobs:
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "### 📦 Images Built" >> $GITHUB_STEP_SUMMARY
             
-            # Get all images from build matrix
-            BUILD_MATRIX='${{ needs.detect-app-images.outputs.matrix }}'
+            # Get images from filtered build matrix (what was actually built)
+            # Use filtered matrix if available, otherwise fall back to full matrix
+            FILTERED_MATRIX='${{ needs.filter-build-matrix.outputs.matrix }}'
+            FULL_MATRIX='${{ needs.detect-app-images.outputs.matrix }}'
             VERSION='${{ needs.prepare-build.outputs.version }}'
             OWNER='${{ github.repository_owner }}'
+            
+            # Prefer filtered matrix (what was actually built), fall back to full matrix
+            if [ -n "$FILTERED_MATRIX" ] && [ "$FILTERED_MATRIX" != "null" ] && [ "$FILTERED_MATRIX" != "{\"include\": []}" ]; then
+              BUILD_MATRIX="$FILTERED_MATRIX"
+            elif [ -n "$FULL_MATRIX" ] && [ "$FULL_MATRIX" != "null" ]; then
+              BUILD_MATRIX="$FULL_MATRIX"
+            else
+              BUILD_MATRIX=""
+            fi
             
             if [ -n "$BUILD_MATRIX" ] && [ "$BUILD_MATRIX" != "null" ]; then
               # Use jq to extract data, then construct markdown in bash to avoid escaping issues
