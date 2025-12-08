@@ -47,57 +47,130 @@ jobs:
           pip install bandit==1.7.6
           pip install safety
       
-      # Bandit - Python security scanner
-      - name: Run Bandit security scan
+      # Bandit - Python security scanner (shared backend)
+      - name: Run Bandit security scan (shared backend)
         working-directory: ./backend
+        if: exists('./backend')
         continue-on-error: true
         run: |
           bandit -r . -f json -o bandit-report.json
           bandit -r . -f screen
       
-      - name: Upload Bandit report
-        if: always()
+      - name: Upload Bandit report (shared)
+        if: always() && exists('./backend')
         uses: actions/upload-artifact@v4
         with:
-          name: bandit-security-report
+          name: bandit-security-report-shared
           path: backend/bandit-report.json
           retention-days: 30
       
-      # Safety - Python dependency vulnerability scanner
-      - name: Check Python dependencies for vulnerabilities
+      # Bandit - Scan app-specific backends
+      - name: Run Bandit security scan (app-specific backends)
+        continue-on-error: true
+        run: |
+          for app_dir in applications/*/backend; do
+            if [ -d "$app_dir" ]; then
+              app_name=$(basename $(dirname "$app_dir"))
+              echo "Scanning $app_name backend..."
+              bandit -r "$app_dir" -f json -o "$app_dir/bandit-report.json" || true
+              bandit -r "$app_dir" -f screen || true
+            fi
+          done
+      
+      - name: Upload Bandit reports (app-specific)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandit-security-report-apps
+          path: applications/*/backend/bandit-report.json
+          if-no-files-found: ignore
+          retention-days: 30
+      
+      # Safety - Python dependency vulnerability scanner (shared)
+      - name: Check Python dependencies for vulnerabilities (shared)
         working-directory: ./backend
+        if: exists('./backend')
         continue-on-error: true
         run: |
           safety check --json --output safety-report.json || true
           safety check || true
       
-      - name: Upload Safety report
-        if: always()
+      - name: Upload Safety report (shared)
+        if: always() && exists('./backend')
         uses: actions/upload-artifact@v4
         with:
-          name: safety-security-report
+          name: safety-security-report-shared
           path: backend/safety-report.json
           retention-days: 30
       
-      # NPM Audit - JavaScript dependency scanner
+      # Safety - Scan app-specific backends
+      - name: Check Python dependencies for vulnerabilities (app-specific)
+        continue-on-error: true
+        run: |
+          for app_dir in applications/*/backend; do
+            if [ -d "$app_dir" ] && [ -f "$app_dir/requirements.txt" ]; then
+              app_name=$(basename $(dirname "$app_dir"))
+              echo "Checking $app_name dependencies..."
+              cd "$app_dir"
+              safety check --json --output safety-report.json || true
+              safety check || true
+              cd - > /dev/null
+            fi
+          done
+      
+      - name: Upload Safety reports (app-specific)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: safety-security-report-apps
+          path: applications/*/backend/safety-report.json
+          if-no-files-found: ignore
+          retention-days: 30
+      
+      # NPM Audit - JavaScript dependency scanner (shared)
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
       
-      - name: Check JavaScript dependencies for vulnerabilities
+      - name: Check JavaScript dependencies for vulnerabilities (shared)
         working-directory: ./frontend
+        if: exists('./frontend')
         continue-on-error: true
         run: |
           npm audit --json > npm-audit-report.json || true
           npm audit || true
       
-      - name: Upload NPM audit report
+      - name: Upload NPM audit report (shared)
+        if: always() && exists('./frontend')
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-audit-report-shared
+          path: frontend/npm-audit-report.json
+          retention-days: 30
+      
+      # NPM Audit - Scan app-specific frontends
+      - name: Check JavaScript dependencies for vulnerabilities (app-specific)
+        continue-on-error: true
+        run: |
+          for app_dir in applications/*/frontend; do
+            if [ -d "$app_dir" ] && [ -f "$app_dir/package.json" ]; then
+              app_name=$(basename $(dirname "$app_dir"))
+              echo "Auditing $app_name frontend..."
+              cd "$app_dir"
+              npm audit --json > npm-audit-report.json || true
+              npm audit || true
+              cd - > /dev/null
+            fi
+          done
+      
+      - name: Upload NPM audit reports (app-specific)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: npm-audit-report
-          path: frontend/npm-audit-report.json
+          name: npm-audit-report-apps
+          path: applications/*/frontend/npm-audit-report.json
+          if-no-files-found: ignore
           retention-days: 30
       
       # Summary

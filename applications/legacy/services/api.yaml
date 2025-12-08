@@ -1,8 +1,9 @@
 name: api
 application: legacy
 
-# Base container image without tag; tag is provided at deploy time
-# via service_image_tags from the CI pipeline.
+# Docker image repository (without tag)
+# Tag is provided at deploy time via service_image_tags from the CI pipeline.
+# Using shared backend image - all apps use the same backend codebase
 image_repo: ghcr.io/orshalit/ci-backend
 container_port: 8000
 

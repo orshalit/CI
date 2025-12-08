@@ -1,9 +1,10 @@
-name: api
+name: test-app-api
 application: test-app
 
-# Base container image without tag; tag is provided at deploy time
-# via service_image_tags from the CI pipeline.
-image_repo: ghcr.io/orshalit/ci-backend
+# Docker image repository (without tag)
+# Tag is provided at deploy time via service_image_tags from the CI pipeline.
+# Using app-specific backend image - code is in applications/test-app/backend/
+image_repo: ghcr.io/orshalit/test-app-backend
 container_port: 8000
 
 cpu: 256

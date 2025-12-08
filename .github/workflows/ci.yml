@@ -21,6 +21,7 @@ on:
     paths:
       - 'backend/**'
       - 'frontend/**'
+      - 'applications/**'  # Include app-specific code directories
       - 'scripts/**'
       - 'docker-compose*.yml'
       - 'Dockerfile*'
@@ -30,6 +31,7 @@ on:
     paths:
       - 'backend/**'
       - 'frontend/**'
+      - 'applications/**'  # Include app-specific code directories
       - 'scripts/**'
       - 'docker-compose*.yml'
       - 'Dockerfile*'
@@ -391,10 +393,34 @@ jobs:
   # Docker Image Building
   # ===========================================================================
   
+  detect-app-images:
+    name: Detect Application Images to Build
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      
+      - name: Detect images to build
+        id: set-matrix
+        run: |
+          python scripts/detect-app-images.py --format matrix > matrix.json
+          echo "matrix<<EOF" >> $GITHUB_OUTPUT
+          cat matrix.json >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          echo "::notice::Build matrix:"
+          cat matrix.json | jq -r '.include[] | "  - \(.image_name) (\(.type))"'
+    
   build-images:
     name: Build Docker Images
     runs-on: ubuntu-latest
-    needs: [code-quality, backend-tests, frontend-tests, prepare-build, detect-changes]
+    needs: [code-quality, backend-tests, frontend-tests, prepare-build, detect-changes, detect-app-images]
     # Only build images if app code changed, or on version tags, or manual dispatch
     # Also check that prerequisite jobs succeeded (or were skipped)
     if: |
@@ -405,8 +431,7 @@ jobs:
       (needs.backend-tests.result == 'success' || needs.backend-tests.result == 'skipped') &&
       (needs.frontend-tests.result == 'success' || needs.frontend-tests.result == 'skipped')
     strategy:
-      matrix:
-        service: [backend, frontend]
+      matrix: ${{ fromJson(needs.detect-app-images.outputs.matrix) }}
     
     steps:
       - name: Checkout code
@@ -427,7 +452,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/ci-${{ matrix.service }}
+          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.image_name }}
           tags: |
             type=ref,event=branch
             type=ref,event=pr
@@ -441,8 +466,8 @@ jobs:
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
-          context: ./${{ matrix.service }}
-          file: ./${{ matrix.service }}/Dockerfile
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -451,23 +476,23 @@ jobs:
             GIT_COMMIT=${{ needs.prepare-build.outputs.commit }}
             GIT_BRANCH=${{ needs.prepare-build.outputs.branch }}
             BUILD_DATE=${{ needs.prepare-build.outputs.build_date }}
-          cache-from: type=gha,scope=${{ matrix.service }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+          cache-from: type=gha,scope=${{ matrix.image_name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image_name }}
           platforms: linux/amd64
       
       - name: Export image for testing
         if: github.event_name == 'pull_request'
         uses: docker/build-push-action@v5
         with:
-          context: ./${{ matrix.service }}
-          file: ./${{ matrix.service }}/Dockerfile
-          tags: ci-${{ matrix.service }}:test
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          tags: ${{ matrix.image_name }}:test
           build-args: |
             BUILD_VERSION=${{ needs.prepare-build.outputs.version }}
             GIT_COMMIT=${{ needs.prepare-build.outputs.commit }}
             GIT_BRANCH=${{ needs.prepare-build.outputs.branch }}
             BUILD_DATE=${{ needs.prepare-build.outputs.build_date }}
-          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-from: type=gha,scope=${{ matrix.image_name }}
           load: true
 
   # ===========================================================================

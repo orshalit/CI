@@ -18,11 +18,10 @@ on:
   workflow_dispatch:
     inputs:
       application:
-        description: 'Application to deploy (or "all" for all applications)'
+        description: 'Application to deploy (e.g., "legacy", "test-app", "customer-portal", or "all" for all applications)'
         required: true
         default: 'all'
-        type: choice
-        options: [all, legacy]
+        type: string
       environment:
         description: 'Target environment'
         required: true
@@ -82,8 +81,10 @@ jobs:
           filters: |
             backend:
               - 'backend/**'
+              - 'applications/**/backend/**'
             frontend:
               - 'frontend/**'
+              - 'applications/**/frontend/**'
       
       - name: Set should_deploy output
         id: set-output

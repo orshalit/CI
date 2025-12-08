@@ -12,12 +12,14 @@ on:
     paths:
       - 'backend/**'
       - 'frontend/**'
+      - 'applications/**'
       - 'scripts/**'
   pull_request:
     branches: [main]
     paths:
       - 'backend/**'
       - 'frontend/**'
+      - 'applications/**'
       - 'scripts/**'
   schedule:
     - cron: '0 6 * * 1'  # Weekly on Monday at 6 AM UTC - always runs for comprehensive analysis

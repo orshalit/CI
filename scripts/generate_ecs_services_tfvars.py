@@ -282,6 +282,29 @@ def render_services_map(specs: list[dict]) -> str:
     lines.append("")
     lines.append("services = {")
 
+    # Check for service name collisions across applications
+    service_keys: dict[str, list[dict]] = {}  # service_name -> [specs with that name]
+    for spec in specs:
+        name = spec["name"]
+        if name not in service_keys:
+            service_keys[name] = []
+        service_keys[name].append(spec)
+    
+    # Detect collisions
+    collisions = []
+    for name, specs_with_name in service_keys.items():
+        if len(specs_with_name) > 1:
+            apps = [s.get("application", "unknown") for s in specs_with_name]
+            collisions.append(f"Service name '{name}' is used by multiple applications: {', '.join(apps)}")
+    
+    if collisions:
+        collision_msg = "\n".join(f"  - {c}" for c in collisions)
+        raise ValueError(
+            f"Service name collisions detected:\n{collision_msg}\n\n"
+            f"Each service must have a unique name across all applications.\n"
+            f"Consider renaming services to include application prefix (e.g., 'legacy-api', 'test-app-api')."
+        )
+
     for spec in specs:
         name = spec["name"]
         application = spec.get("application", "legacy")  # Should always be present after load_service_specs
@@ -290,9 +313,28 @@ def render_services_map(specs: list[dict]) -> str:
         if not application:
             raise ValueError(f"Service '{name}' is missing required 'application' field")
         
+        # Get image_repo - required field, but provide helpful error if missing
         image_repo = spec.get("image_repo")
         if not image_repo:
-            raise ValueError(f"Service '{name}' is missing required 'image_repo'")
+            # Try to infer service type from name for better error message
+            service_type = "backend"  # Default assumption
+            if "frontend" in name.lower() or "ui" in name.lower() or "web" in name.lower():
+                service_type = "frontend"
+            
+            # Provide helpful error with suggestions
+            raise ValueError(
+                f"Service '{name}' (application: {application}) is missing required 'image_repo' field.\n"
+                f"  For shared images, use: ghcr.io/orshalit/ci-{service_type}\n"
+                f"  For app-specific images, use: ghcr.io/orshalit/{application}-{service_type}\n"
+                f"  Add 'image_repo' field to the service definition."
+            )
+        
+        # Validate image_repo format (basic validation)
+        if not image_repo or "/" not in image_repo:
+            raise ValueError(
+                f"Service '{name}' has invalid 'image_repo': '{image_repo}'. "
+                f"Expected format: 'registry.io/owner/image-name'"
+            )
 
         container_port = int(spec.get("container_port", 80))
         cpu = int(spec.get("cpu", 256))

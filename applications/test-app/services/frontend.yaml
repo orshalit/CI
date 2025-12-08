@@ -1,7 +1,10 @@
-name: frontend
+name: test-app-frontend
 application: test-app
 
-image_repo: ghcr.io/orshalit/ci-frontend
+# Docker image repository (without tag)
+# Tag is provided at deploy time via service_image_tags from the CI pipeline.
+# Using app-specific frontend image - code is in applications/test-app/frontend/
+image_repo: ghcr.io/orshalit/test-app-frontend
 
 container_port: 3000
 cpu: 256
