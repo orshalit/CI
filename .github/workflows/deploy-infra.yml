@@ -63,10 +63,51 @@ jobs:
           aws_region: ${{ secrets.AWS_REGION }}
           terraform_version: '1.6.0'
 
-      - name: Terraform Format Check
+      - name: Terraform Format
         id: fmt
-        run: terraform fmt -check -recursive DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}
-        continue-on-error: true
+        run: |
+          TERRAFORM_DIR="DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}"
+          
+          echo "::notice::Formatting Terraform files in $TERRAFORM_DIR..."
+          
+          # Format all Terraform files
+          terraform fmt -recursive "$TERRAFORM_DIR"
+          
+          # Check if any files were modified by comparing before/after
+          cd DEVOPS
+          # Get list of files that would be formatted (all .tf and .tfvars files)
+          FORMATTED_FILES=$(find "live/${{ inputs.environment }}/${{ inputs.module_path }}" -type f \( -name "*.tf" -o -name "*.tfvars" \) 2>/dev/null || true)
+          
+          if [ -z "$FORMATTED_FILES" ]; then
+            echo "::notice::No Terraform files found to format"
+            exit 0
+          fi
+          
+          # Check git status for changes in the terraform directory
+          if git diff --quiet "live/${{ inputs.environment }}/${{ inputs.module_path }}"; then
+            echo "::notice::✓ All Terraform files are properly formatted"
+          else
+            echo "::error::╔══════════════════════════════════════════════════════════════╗"
+            echo "::error::║  ⚠️  TERRAFORM FORMATTING ISSUES DETECTED  ⚠️  ║"
+            echo "::error::╚══════════════════════════════════════════════════════════════╝"
+            echo ""
+            echo "::error::The following files need formatting:"
+            git status --short "live/${{ inputs.environment }}/${{ inputs.module_path }}" | while read -r line; do
+              echo "::error::  • $line"
+            done
+            echo ""
+            echo "::error::Files have been automatically formatted in this workflow run."
+            echo "::error::"
+            echo "::error::To fix this:"
+            echo "::error::  1. Run 'terraform fmt -recursive' locally in: $TERRAFORM_DIR"
+            echo "::error::  2. Commit the formatted files"
+            echo "::error::  3. Push and re-run this workflow"
+            echo ""
+            echo "::group::Show formatted changes"
+            git diff "live/${{ inputs.environment }}/${{ inputs.module_path }}"
+            echo "::endgroup::"
+            exit 1
+          fi
 
       - name: Terraform Init
         id: init
