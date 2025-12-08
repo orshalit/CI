@@ -6,10 +6,11 @@ application: test-app
 # Using app-specific frontend image - code is in applications/test-app/frontend/
 image_repo: ghcr.io/orshalit/test-app-frontend
 
-container_port: 3000
-cpu: 256
-memory: 512
-desired_count: 2
+# Required fields (no defaults - must be explicitly defined)
+container_port: 3000  # Container port (1-65535)
+cpu: 256              # CPU units (256-4096, must be multiple of 256 for Fargate)
+memory: 512            # Memory in MB (512-30720, must match valid Fargate CPU/memory combination)
+desired_count: 2       # Desired task count (0-1000)
 
 env:
   LOG_LEVEL: INFO
