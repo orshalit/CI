@@ -173,7 +173,7 @@ jobs:
             VAR_FILES="terraform.tfvars"
           fi
           # Only include services.generated.tfvars if it exists AND services is not empty
-          # This prevents Terraform crash when services = {} and service_image_tags has marks
+          # This prevents Terraform crash when services = {} (empty services map)
           if [ "${{ steps.check_services_tfvars.outputs.services_tfvars_exists }}" == "true" ] && \
              [ "${{ steps.check_services_empty.outputs.services_empty }}" != "true" ]; then
             if [ -n "$VAR_FILES" ]; then
@@ -260,7 +260,7 @@ jobs:
           fi
           
           # Use the same var files logic as plan (which excludes empty services.generated.tfvars)
-          # This prevents Terraform crash when services = {} and service_image_tags has marks
+          # This prevents Terraform crash when services = {} (empty services map)
           VAR_FILES="${{ steps.build_var_files.outputs.var_files }}"
           
           if [ -n "$VAR_FILES" ]; then

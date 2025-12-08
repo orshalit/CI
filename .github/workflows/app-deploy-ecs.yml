@@ -234,24 +234,36 @@ jobs:
           echo "services=$SERVICES_JSON" >> $GITHUB_OUTPUT
           echo "::notice::Services for application '$APP': $(echo $SERVICES_JSON | jq -r 'join(", ")')"
 
-      - name: Generate service image tag overrides
-        id: override
+      - name: Update image tags in services.generated.tfvars
+        id: update_tags
         run: |
           TF_PATH="${{ steps.vars.outputs.tf_path }}"
           IMAGE_TAG="${{ steps.vars.outputs.image_tag }}"
           SERVICES='${{ steps.filter_services.outputs.services }}'
           
-          # Generate service_image_tags for filtered services
-          echo "service_image_tags = {" > "$TF_PATH/ci-service-tags.auto.tfvars"
-          
+          # Build service_tags JSON object
+          SERVICE_TAGS_JSON="{"
+          FIRST=true
           for service in $(echo "$SERVICES" | jq -r '.[]'); do
-            echo "  $service = \"$IMAGE_TAG\"" >> "$TF_PATH/ci-service-tags.auto.tfvars"
+            if [ "$FIRST" = true ]; then
+              FIRST=false
+            else
+              SERVICE_TAGS_JSON="$SERVICE_TAGS_JSON,"
+            fi
+            SERVICE_TAGS_JSON="$SERVICE_TAGS_JSON\"$service\":\"$IMAGE_TAG\""
           done
+          SERVICE_TAGS_JSON="$SERVICE_TAGS_JSON}"
           
-          echo "}" >> "$TF_PATH/ci-service-tags.auto.tfvars"
+          echo "::notice::Updating image tags in services.generated.tfvars"
+          echo "::notice::Services: $(echo "$SERVICES" | jq -r 'join(", ")')"
+          echo "::notice::Image tag: $IMAGE_TAG"
           
-          echo "::notice::Generated service_image_tags for: $(echo "$SERVICES" | jq -r 'join(", ")')"
-          cat "$TF_PATH/ci-service-tags.auto.tfvars"
+          # Update image tags directly in services.generated.tfvars
+          python scripts/update_service_image_tags.py \
+            --tfvars-file "$TF_PATH/services.generated.tfvars" \
+            --service-tags "$SERVICE_TAGS_JSON"
+          
+          echo "::notice::✓ Updated services.generated.tfvars with new image tags"
 
       - name: Terraform Plan
         id: plan

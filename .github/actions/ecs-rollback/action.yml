@@ -39,7 +39,6 @@ runs:
         echo "::notice::Rolling back to previous image tag: ${{ inputs.previous_image_tag }}"
         
         # Get service keys (not names) from Terraform outputs
-        # service_image_tags is keyed by service key, not service name
         SERVICE_NAMES_JSON=$(terraform -chdir="${{ inputs.terraform_path }}" output -json service_names 2>/dev/null || echo "{}")
         
         if [ "$SERVICE_NAMES_JSON" = "{}" ] || [ "$SERVICE_NAMES_JSON" = "null" ]; then
@@ -48,25 +47,28 @@ runs:
           exit 1
         fi
         
-        # Create rollback tfvars file
-        ROLLBACK_FILE="${{ inputs.terraform_path }}/ci-service-tags.auto.tfvars"
-        
-        echo "# Auto-generated rollback file" > "$ROLLBACK_FILE"
-        echo "# Created: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> "$ROLLBACK_FILE"
-        echo "" >> "$ROLLBACK_FILE"
-        
-        # Build service_image_tags map using service keys (not names)
-        # service_names output is keyed by service key, so we use the keys
-        echo "service_image_tags = {" >> "$ROLLBACK_FILE"
+        # Build service_tags JSON object for update script
+        SERVICE_TAGS_JSON="{"
+        FIRST=true
         for service_key in $(echo "$SERVICE_NAMES_JSON" | jq -r 'keys[]'); do
-          echo "  $service_key = \"${{ inputs.previous_image_tag }}\"" >> "$ROLLBACK_FILE"
+          if [ "$FIRST" = true ]; then
+            FIRST=false
+          else
+            SERVICE_TAGS_JSON="$SERVICE_TAGS_JSON,"
+          fi
+          SERVICE_TAGS_JSON="$SERVICE_TAGS_JSON\"$service_key\":\"${{ inputs.previous_image_tag }}\""
         done
-        echo "}" >> "$ROLLBACK_FILE"
+        SERVICE_TAGS_JSON="$SERVICE_TAGS_JSON}"
         
-        echo "::notice::Created rollback file: $ROLLBACK_FILE"
-        echo "::group::Rollback Configuration"
-        cat "$ROLLBACK_FILE"
-        echo "::endgroup::"
+        echo "::notice::Rolling back image tags in services.generated.tfvars"
+        echo "::notice::Previous image tag: ${{ inputs.previous_image_tag }}"
+        
+        # Update image tags directly in services.generated.tfvars
+        python scripts/update_service_image_tags.py \
+          --tfvars-file "${{ inputs.terraform_path }}/services.generated.tfvars" \
+          --service-tags "$SERVICE_TAGS_JSON"
+        
+        echo "::notice::✓ Updated services.generated.tfvars with rollback image tags"
         
         # Apply rollback
         cd "${{ inputs.terraform_path }}"
@@ -81,9 +83,6 @@ runs:
             fi
           done
         fi
-        
-        # Add the rollback file
-        APPLY_ARGS="$APPLY_ARGS -var-file=ci-service-tags.auto.tfvars"
         
         echo "::notice::Applying rollback configuration..."
         terraform apply $APPLY_ARGS
