@@ -50,14 +50,14 @@ jobs:
       # Bandit - Python security scanner (shared backend)
       - name: Run Bandit security scan (shared backend)
         working-directory: ./backend
-        if: exists('./backend')
+        if: ${{ hashFiles('backend/**') != '' }}
         continue-on-error: true
         run: |
           bandit -r . -f json -o bandit-report.json
           bandit -r . -f screen
       
       - name: Upload Bandit report (shared)
-        if: always() && exists('./backend')
+        if: always() && hashFiles('backend/**') != ''
         uses: actions/upload-artifact@v4
         with:
           name: bandit-security-report-shared
@@ -89,14 +89,14 @@ jobs:
       # Safety - Python dependency vulnerability scanner (shared)
       - name: Check Python dependencies for vulnerabilities (shared)
         working-directory: ./backend
-        if: exists('./backend')
+        if: hashFiles('backend/requirements.txt') != ''
         continue-on-error: true
         run: |
           safety check --json --output safety-report.json || true
           safety check || true
       
       - name: Upload Safety report (shared)
-        if: always() && exists('./backend')
+        if: always() && hashFiles('backend/requirements.txt') != ''
         uses: actions/upload-artifact@v4
         with:
           name: safety-security-report-shared
@@ -135,14 +135,14 @@ jobs:
       
       - name: Check JavaScript dependencies for vulnerabilities (shared)
         working-directory: ./frontend
-        if: exists('./frontend')
+        if: hashFiles('frontend/package.json') != ''
         continue-on-error: true
         run: |
           npm audit --json > npm-audit-report.json || true
           npm audit || true
       
       - name: Upload NPM audit report (shared)
-        if: always() && exists('./frontend')
+        if: always() && hashFiles('frontend/package.json') != ''
         uses: actions/upload-artifact@v4
         with:
           name: npm-audit-report-shared

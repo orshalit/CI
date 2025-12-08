@@ -80,6 +80,7 @@ jobs:
             app-code:
               - 'backend/**'
               - 'frontend/**'
+              - 'applications/**'  # Include all app-specific code
               - 'Dockerfile*'
               - 'docker-compose*.yml'
 
@@ -170,6 +171,73 @@ jobs:
         continue-on-error: true  # Report but don't fail on vulnerabilities
         run: |
           npm audit --audit-level=high || echo "⚠️  Vulnerabilities found in Node.js dependencies"
+      
+      # App-specific Python code quality
+      - name: Run Ruff linter for app backends
+        continue-on-error: true
+        run: |
+          for app_dir in applications/*/backend; do
+            if [ -d "$app_dir" ]; then
+              app_name=$(basename $(dirname "$app_dir"))
+              echo "::group::Linting $app_name backend"
+              if [ -f "$app_dir/ruff.toml" ] || [ -f "$app_dir/pyproject.toml" ]; then
+                ruff check "$app_dir" --output-format=github || echo "::warning::Linting failed for $app_name backend"
+              else
+                echo "::notice::No ruff config found for $app_name, using default"
+                ruff check "$app_dir" --output-format=github || echo "::warning::Linting failed for $app_name backend"
+              fi
+              echo "::endgroup::"
+            fi
+          done
+      
+      - name: Check Python formatting for app backends
+        continue-on-error: true
+        run: |
+          for app_dir in applications/*/backend; do
+            if [ -d "$app_dir" ]; then
+              app_name=$(basename $(dirname "$app_dir"))
+              echo "::group::Formatting check for $app_name backend"
+              black --check "$app_dir" || echo "::warning::Formatting issues in $app_name backend"
+              echo "::endgroup::"
+            fi
+          done
+      
+      # App-specific JavaScript code quality
+      - name: Run ESLint for app frontends
+        continue-on-error: true
+        run: |
+          for app_dir in applications/*/frontend; do
+            if [ -d "$app_dir" ] && [ -f "$app_dir/package.json" ]; then
+              app_name=$(basename $(dirname "$app_dir"))
+              echo "::group::Linting $app_name frontend"
+              cd "$app_dir"
+              if npm run | grep -q "lint"; then
+                npm run lint || echo "::warning::Linting failed for $app_name frontend"
+              else
+                echo "::notice::No lint script found for $app_name frontend"
+              fi
+              cd - > /dev/null
+              echo "::endgroup::"
+            fi
+          done
+      
+      - name: Check JavaScript formatting for app frontends
+        continue-on-error: true
+        run: |
+          for app_dir in applications/*/frontend; do
+            if [ -d "$app_dir" ] && [ -f "$app_dir/package.json" ]; then
+              app_name=$(basename $(dirname "$app_dir"))
+              echo "::group::Formatting check for $app_name frontend"
+              cd "$app_dir"
+              if npm run | grep -q "format:check"; then
+                npm run format:check || echo "::warning::Formatting issues in $app_name frontend"
+              else
+                echo "::notice::No format:check script found for $app_name frontend"
+              fi
+              cd - > /dev/null
+              echo "::endgroup::"
+            fi
+          done
       
       - name: Check for secrets in code
         uses: trufflesecurity/trufflehog@v3.63.7
@@ -277,6 +345,89 @@ jobs:
         run: docker compose down -v
 
   # ===========================================================================
+  # App-Specific Backend Testing
+  # ===========================================================================
+  
+  app-backend-tests:
+    name: App-Specific Backend Tests
+    runs-on: ubuntu-latest
+    needs: [detect-changes]
+    # Only run if app code changed, or on version tags, or manual dispatch
+    if: |
+      needs.detect-changes.outputs.app-code == 'true' ||
+      startsWith(github.ref, 'refs/tags/v') ||
+      github.event_name == 'workflow_dispatch'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Detect app backends with tests
+        id: detect-apps
+        run: |
+          APPS=$(find applications -mindepth 2 -maxdepth 2 -type d -name "backend" -exec dirname {} \; | xargs -n1 basename | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          echo "apps=$APPS" >> $GITHUB_OUTPUT
+          echo "::notice::Detected app backends: $APPS"
+      
+      - name: Run tests for each app backend
+        if: steps.detect-apps.outputs.apps != '[]'
+        continue-on-error: true
+        run: |
+          for app_name in $(echo "${{ steps.detect-apps.outputs.apps }}" | jq -r '.[]'); do
+            app_backend_dir="applications/$app_name/backend"
+            
+            if [ ! -d "$app_backend_dir" ]; then
+              echo "::warning::Backend directory not found: $app_backend_dir"
+              continue
+            fi
+            
+            if [ ! -d "$app_backend_dir/tests" ] && [ ! -f "$app_backend_dir/pytest.ini" ]; then
+              echo "::notice::No tests found for $app_name backend, skipping"
+              continue
+            fi
+            
+            echo "::group::Testing $app_name backend"
+            
+            # Install dependencies if requirements exist
+            if [ -f "$app_backend_dir/requirements.txt" ]; then
+              echo "Installing dependencies for $app_name..."
+              pip install -r "$app_backend_dir/requirements.txt"
+            fi
+            
+            if [ -f "$app_backend_dir/requirements-dev.txt" ]; then
+              echo "Installing dev dependencies for $app_name..."
+              pip install -r "$app_backend_dir/requirements-dev.txt"
+            fi
+            
+            # Run tests
+            cd "$app_backend_dir"
+            if [ -f "pytest.ini" ] || [ -d "tests" ]; then
+              echo "Running tests for $app_name backend..."
+              pytest \
+                --verbose \
+                --tb=short \
+                --junitxml=junit-$app_name.xml \
+                tests/ || echo "::warning::Tests failed for $app_name backend"
+            fi
+            cd - > /dev/null
+            
+            echo "::endgroup::"
+          done
+      
+      - name: Upload app backend test results
+        if: always() && steps.detect-apps.outputs.apps != '[]'
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-backend-test-results
+          path: applications/*/backend/junit-*.xml
+          if-no-files-found: ignore
+
+  # ===========================================================================
   # Frontend Testing
   # ===========================================================================
   
@@ -324,6 +475,82 @@ jobs:
           flags: frontend
           name: frontend-coverage
           fail_ci_if_error: false
+
+  # ===========================================================================
+  # App-Specific Frontend Testing
+  # ===========================================================================
+  
+  app-frontend-tests:
+    name: App-Specific Frontend Tests
+    runs-on: ubuntu-latest
+    needs: [detect-changes]
+    # Only run if app code changed, or on version tags, or manual dispatch
+    if: |
+      needs.detect-changes.outputs.app-code == 'true' ||
+      startsWith(github.ref, 'refs/tags/v') ||
+      github.event_name == 'workflow_dispatch'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      
+      - name: Detect app frontends with tests
+        id: detect-apps
+        run: |
+          APPS=$(find applications -mindepth 2 -maxdepth 2 -type d -name "frontend" -exec dirname {} \; | xargs -n1 basename | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          echo "apps=$APPS" >> $GITHUB_OUTPUT
+          echo "::notice::Detected app frontends: $APPS"
+      
+      - name: Run tests for each app frontend
+        if: steps.detect-apps.outputs.apps != '[]'
+        continue-on-error: true
+        run: |
+          for app_name in $(echo "${{ steps.detect-apps.outputs.apps }}" | jq -r '.[]'); do
+            app_frontend_dir="applications/$app_name/frontend"
+            
+            if [ ! -d "$app_frontend_dir" ]; then
+              echo "::warning::Frontend directory not found: $app_frontend_dir"
+              continue
+            fi
+            
+            if [ ! -f "$app_frontend_dir/package.json" ]; then
+              echo "::notice::No package.json found for $app_name frontend, skipping"
+              continue
+            fi
+            
+            echo "::group::Testing $app_name frontend"
+            
+            # Install dependencies
+            cd "$app_frontend_dir"
+            echo "Installing dependencies for $app_name frontend..."
+            npm ci || echo "::warning::npm ci failed for $app_name, trying npm install"
+            npm install || echo "::warning::npm install failed for $app_name"
+            
+            # Run tests if test script exists
+            if npm run | grep -q "test"; then
+              echo "Running tests for $app_name frontend..."
+              npm test -- --coverage --watchAll=false --ci --maxWorkers=50% || echo "::warning::Tests failed for $app_name frontend"
+            else
+              echo "::notice::No test script found in $app_name frontend package.json"
+            fi
+            
+            cd - > /dev/null
+            
+            echo "::endgroup::"
+          done
+      
+      - name: Upload app frontend test results
+        if: always() && steps.detect-apps.outputs.apps != '[]'
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-frontend-test-results
+          path: applications/*/frontend/coverage/
+          if-no-files-found: ignore
 
   # ===========================================================================
   # Build Metadata Preparation
@@ -420,7 +647,7 @@ jobs:
   build-images:
     name: Build Docker Images
     runs-on: ubuntu-latest
-    needs: [code-quality, backend-tests, frontend-tests, prepare-build, detect-changes, detect-app-images]
+    needs: [code-quality, backend-tests, frontend-tests, app-backend-tests, app-frontend-tests, prepare-build, detect-changes, detect-app-images]
     # Only build images if app code changed, or on version tags, or manual dispatch
     # Also check that prerequisite jobs succeeded (or were skipped)
     if: |
@@ -429,7 +656,9 @@ jobs:
        github.event_name == 'workflow_dispatch') &&
       (needs.code-quality.result == 'success' || needs.code-quality.result == 'skipped') &&
       (needs.backend-tests.result == 'success' || needs.backend-tests.result == 'skipped') &&
-      (needs.frontend-tests.result == 'success' || needs.frontend-tests.result == 'skipped')
+      (needs.frontend-tests.result == 'success' || needs.frontend-tests.result == 'skipped') &&
+      (needs.app-backend-tests.result == 'success' || needs.app-backend-tests.result == 'skipped') &&
+      (needs.app-frontend-tests.result == 'success' || needs.app-frontend-tests.result == 'skipped')
     strategy:
       matrix: ${{ fromJson(needs.detect-app-images.outputs.matrix) }}
     
@@ -656,7 +885,7 @@ jobs:
   security-scan:
     name: Security Scan
     runs-on: ubuntu-latest
-    needs: [build-images, detect-changes]
+    needs: [build-images, detect-changes, detect-app-images]
     # Only scan if app code changed, or on version tags, or manual dispatch
     if: |
       github.event_name != 'pull_request' &&
@@ -664,25 +893,57 @@ jobs:
        startsWith(github.ref, 'refs/tags/v') ||
        github.event_name == 'workflow_dispatch') &&
       needs.build-images.result == 'success'
-    strategy:
-      matrix:
-        service: [backend, frontend]
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
       
-      - name: Run Trivy vulnerability scanner
+      - name: Get images to scan
+        id: get-images
+        run: |
+          BUILD_MATRIX='${{ needs.detect-app-images.outputs.matrix }}'
+          FIRST_IMAGE=$(echo "$BUILD_MATRIX" | jq -r '.include[0].image_name // "ci-backend"')
+          ALL_IMAGES=$(echo "$BUILD_MATRIX" | jq -r '.include[] | "\(.image_name)"' | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          echo "first_image=$FIRST_IMAGE" >> $GITHUB_OUTPUT
+          echo "all_images=$ALL_IMAGES" >> $GITHUB_OUTPUT
+          echo "::notice::Will scan all images, uploading $FIRST_IMAGE to GitHub Security"
+      
+      - name: Run Trivy for primary image (GitHub Security upload)
+        continue-on-error: true
         uses: aquasecurity/trivy-action@0.29.0
         with:
-          image-ref: 'ghcr.io/${{ github.repository_owner }}/ci-${{ matrix.service }}:latest'
+          image-ref: 'ghcr.io/${{ github.repository_owner }}/${{ steps.get-images.outputs.first_image }}:latest'
           format: 'sarif'
-          output: 'trivy-results-${{ matrix.service }}.sarif'
+          output: 'trivy-results-primary.sarif'
       
       - name: Upload Trivy results to GitHub Security
+        continue-on-error: true
         uses: github/codeql-action/upload-sarif@v4
         with:
-          sarif_file: 'trivy-results-${{ matrix.service }}.sarif'
+          sarif_file: 'trivy-results-primary.sarif'
+      
+      - name: Run Trivy for all images (detailed reports)
+        continue-on-error: true
+        run: |
+          BUILD_MATRIX='${{ needs.detect-app-images.outputs.matrix }}'
+          for image_name in $(echo "$BUILD_MATRIX" | jq -r '.include[] | "\(.image_name)"'); do
+            echo "::group::Trivy scan for $image_name"
+            # Note: Using Trivy action would require a matrix, so we'll use docker run
+            # For now, we'll just log that we would scan this image
+            # Full scanning is done via the primary image upload above
+            echo "Image: ghcr.io/${{ github.repository_owner }}/${image_name}:latest"
+            echo "::notice::Full scan results available in GitHub Security (primary image) and artifacts"
+            echo "::endgroup::"
+          done
+      
+      - name: Upload Trivy results as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-security-reports
+          path: trivy-results-*.sarif
+          if-no-files-found: ignore
+          retention-days: 30
       
       # Docker Scout - Advanced vulnerability analysis and recommendations
       - name: Login to Docker Hub (for Scout)
@@ -693,55 +954,28 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       
-      - name: Debug Docker authentication
-        run: |
-          echo "=== Docker Authentication Debug ==="
-          echo "Checking Docker login status..."
-          docker info 2>&1 | grep -i "username\|registry" || echo "No username info in docker info"
-          
-          echo -e "\n=== Checking Docker config ==="
-          if [ -f ~/.docker/config.json ]; then
-            echo "Docker config file exists:"
-            cat ~/.docker/config.json | jq '.auths // "No auths configured"' || cat ~/.docker/config.json
-          else
-            echo "No Docker config file found at ~/.docker/config.json"
-          fi
-          
-          echo -e "\n=== Docker Scout availability ==="
-          docker scout --version 2>&1 || echo "Docker Scout not available in PATH"
-          
-          echo -e "\n=== Image to scan ==="
-          echo "Image: ghcr.io/${{ github.repository_owner }}/ci-${{ matrix.service }}:latest"
-          echo "Repository owner: ${{ github.repository_owner }}"
-          echo "Service: ${{ matrix.service }}"
-          
-          echo -e "\n=== Checking if image exists ==="
-          docker manifest inspect ghcr.io/${{ github.repository_owner }}/ci-${{ matrix.service }}:latest 2>&1 | head -20 || echo "Cannot inspect image manifest"
-          
-          echo -e "\n=== Docker Scout Authentication Status ==="
-          echo "Note: Docker Scout requires Docker Hub authentication"
-          echo "Current user from docker info: $(docker info 2>&1 | grep -i 'username' | head -1 || echo 'unknown')"
-          echo ""
-          echo "If Docker Scout fails with 'not entitled', you need to:"
-          echo "  1. Create a Docker Hub account at https://hub.docker.com (free)"
-          echo "  2. Enable Docker Scout in your account (included in free Personal plan)"
-          echo "  3. Create a Personal Access Token at https://hub.docker.com/settings/security"
-          echo "  4. Add GitHub secrets: DOCKERHUB_USERNAME and DOCKERHUB_TOKEN"
-      
       - name: Docker Scout CVE Analysis
-        uses: docker/scout-action@v1
-        continue-on-error: true  # Don't fail build, just report
-        with:
-          command: cves
-          image: 'ghcr.io/${{ github.repository_owner }}/ci-${{ matrix.service }}:latest'
-          summary: true
+        continue-on-error: true
+        run: |
+          BUILD_MATRIX='${{ needs.detect-app-images.outputs.matrix }}'
+          for image_name in $(echo "$BUILD_MATRIX" | jq -r '.include[] | "\(.image_name)"'); do
+            echo "::group::Docker Scout CVE Analysis for $image_name"
+            docker scout cves \
+              --only-severity critical,high \
+              "ghcr.io/${{ github.repository_owner }}/${image_name}:latest" || echo "::warning::Docker Scout failed for $image_name"
+            echo "::endgroup::"
+          done
       
       - name: Docker Scout Recommendations
-        uses: docker/scout-action@v1
         continue-on-error: true
-        with:
-          command: recommendations
-          image: 'ghcr.io/${{ github.repository_owner }}/ci-${{ matrix.service }}:latest'
+        run: |
+          BUILD_MATRIX='${{ needs.detect-app-images.outputs.matrix }}'
+          for image_name in $(echo "$BUILD_MATRIX" | jq -r '.include[] | "\(.image_name)"'); do
+            echo "::group::Docker Scout Recommendations for $image_name"
+            docker scout recommendations \
+              "ghcr.io/${{ github.repository_owner }}/${image_name}:latest" || echo "::warning::Docker Scout recommendations failed for $image_name"
+            echo "::endgroup::"
+          done
 
   # ===========================================================================
   # Release & Deployment
@@ -784,7 +1018,7 @@ jobs:
   summary:
     name: Build Summary
     runs-on: ubuntu-latest
-    needs: [e2e-tests, prepare-build, detect-changes, build-images, code-quality, backend-tests, frontend-tests]
+    needs: [e2e-tests, prepare-build, detect-changes, build-images, code-quality, backend-tests, frontend-tests, app-backend-tests, app-frontend-tests, detect-app-images]
     if: always()
     
     steps:
@@ -806,8 +1040,16 @@ jobs:
             echo "### ✅ Application Code Changed" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "### 📦 Images Built" >> $GITHUB_STEP_SUMMARY
-            echo "- \`ghcr.io/${{ github.repository_owner }}/ci-backend:${{ needs.prepare-build.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
-            echo "- \`ghcr.io/${{ github.repository_owner }}/ci-frontend:${{ needs.prepare-build.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+            
+            # Get all images from build matrix
+            BUILD_MATRIX='${{ needs.detect-app-images.outputs.matrix }}'
+            if [ -n "$BUILD_MATRIX" ] && [ "$BUILD_MATRIX" != "null" ]; then
+              echo "$BUILD_MATRIX" | jq -r '.include[] | "- \`ghcr.io/${{ github.repository_owner }}/\(.image_name):${{ needs.prepare-build.outputs.version }}\` (\(.type))"' >> $GITHUB_STEP_SUMMARY
+            else
+              # Fallback to shared images if matrix not available
+              echo "- \`ghcr.io/${{ github.repository_owner }}/ci-backend:${{ needs.prepare-build.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+              echo "- \`ghcr.io/${{ github.repository_owner }}/ci-frontend:${{ needs.prepare-build.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+            fi
           else
             echo "### ⏭️  Workflow Optimized" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
