@@ -134,6 +134,8 @@ jobs:
           name: build-version
           path: build-metadata
           run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
 
       - name: Set up environment variables
         id: vars

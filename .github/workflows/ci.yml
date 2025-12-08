@@ -633,6 +633,8 @@ jobs:
         with:
           name: build-version
           path: build-version.txt
+          retention-days: 7  # Keep artifact for 7 days for deployment workflows
+          if-no-files-found: error  # Fail if file doesn't exist
 
   # ===========================================================================
   # Docker Image Building
