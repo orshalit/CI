@@ -44,6 +44,7 @@ runs:
         repository: ${{ inputs.devops_repo }}
         path: ${{ inputs.devops_path }}
         ssh-key: ${{ inputs.devops_repo_key }}
+        ref: main  # Ensure we use latest code
 
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v4
