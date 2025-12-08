@@ -1,3 +1,4 @@
+# Test change to trigger CI pipeline - verifying multi-application support
 import json
 import logging
 import os
