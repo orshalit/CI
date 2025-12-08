@@ -35,10 +35,12 @@ def extract_services_by_application(tfvars_path: Path, target_application: str) 
     
     with tfvars_path.open("r", encoding="utf-8") as f:
         for line in f:
-            # Match service name: "service_name = {"
-            service_match = re.match(r'^\s+(\w+)\s*=\s*\{', line)
+            # Match service name: "service_name = {" or '"service_name" = {'
+            # Handle both quoted and unquoted keys (quoted keys may contain ::)
+            service_match = re.match(r'^\s+(?:"([^"]+)"|(\w+))\s*=\s*\{', line)
             if service_match:
-                current_service = service_match.group(1)
+                # Group 1 is quoted key, group 2 is unquoted key
+                current_service = service_match.group(1) or service_match.group(2)
                 in_service_block = True
                 brace_count = 1
                 current_app = None

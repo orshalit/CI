@@ -480,9 +480,10 @@ def render_services_map(specs: list[dict]) -> str:
 
         # Use composite key to prevent collisions across applications
         # Format: "{application}::{name}" (e.g., "legacy::api", "test-app::test-app-api")
+        # Quote the key since it contains special characters (::)
         service_key = f"{application}::{name}"
         
-        lines.append(f"  {service_key} = {{")
+        lines.append(f'  "{service_key}" = {{')
         lines.append(f"    container_image = {hcl_string(image_repo)}")
         # The actual tag normally comes from service_image_tags at deploy time.
         lines.append(f"    image_tag       = \"latest\"")
