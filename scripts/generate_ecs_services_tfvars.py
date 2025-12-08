@@ -7,6 +7,14 @@ This script supports both old and new directory structures:
 - Old: CI/services/*.yaml (defaults to application="legacy")
 - New: CI/applications/{app}/services/*.yaml (uses app name from directory)
 
+Features:
+- Dynamic validation of all required and optional fields
+- ECS Fargate CPU/memory combination validation
+- ALB routing conflict detection
+- Flexible input handling (lists, strings, None values)
+- Comprehensive error messages with helpful suggestions
+- No hardcoded defaults - all fields must be explicitly defined
+
 It intentionally focuses on attaching services to existing ALBs. ALB
 definitions and Route 53 records remain managed manually in DEVOPS.
 """
@@ -336,17 +344,145 @@ def render_services_map(specs: list[dict]) -> str:
                 f"Expected format: 'registry.io/owner/image-name'"
             )
 
-        container_port = int(spec.get("container_port", 80))
-        cpu = int(spec.get("cpu", 256))
-        memory = int(spec.get("memory", 512))
-        desired_count = int(spec.get("desired_count", 1))
+        # Validate and extract required fields (no defaults - all must be explicitly defined)
+        # This ensures developers explicitly configure their services
+        required_fields = {
+            "container_port": {
+                "key": "container_port",
+                "type": int,
+                "min": 1,
+                "max": 65535,
+                "description": "Container port (1-65535)"
+            },
+            "cpu": {
+                "key": "cpu",
+                "type": int,
+                "min": 256,
+                "max": 4096,
+                "description": "CPU units (256-4096, must be multiple of 256 for Fargate)"
+            },
+            "memory": {
+                "key": "memory",
+                "type": int,
+                "min": 512,
+                "max": 30720,
+                "description": "Memory in MB (512-30720)"
+            },
+            "desired_count": {
+                "key": "desired_count",
+                "type": int,
+                "min": 0,
+                "max": 1000,
+                "description": "Desired task count (0-1000)"
+            }
+        }
+        
+        # Extract and validate required fields
+        validated_fields = {}
+        for field_name, field_config in required_fields.items():
+            value = spec.get(field_config["key"])
+            
+            if value is None:
+                raise ValueError(
+                    f"Service '{name}' (application: {application}) is missing required field '{field_config['key']}'.\n"
+                    f"  {field_config['description']}\n"
+                    f"  Add '{field_config['key']}' to the service definition."
+                )
+            
+            # Convert to appropriate type
+            try:
+                if field_config["type"] == int:
+                    value = int(value)
+                elif field_config["type"] == float:
+                    value = float(value)
+            except (ValueError, TypeError) as e:
+                raise ValueError(
+                    f"Service '{name}' has invalid '{field_config['key']}': '{spec.get(field_config['key'])}'. "
+                    f"Expected {field_config['type'].__name__}."
+                ) from e
+            
+            # Validate range
+            if value < field_config["min"]:
+                raise ValueError(
+                    f"Service '{name}' has '{field_config['key']}' = {value}, which is below minimum {field_config['min']}."
+                )
+            if value > field_config["max"]:
+                raise ValueError(
+                    f"Service '{name}' has '{field_config['key']}' = {value}, which exceeds maximum {field_config['max']}."
+                )
+            
+            validated_fields[field_config["key"]] = value
+        
+        container_port = validated_fields["container_port"]
+        cpu = validated_fields["cpu"]
+        memory = validated_fields["memory"]
+        desired_count = validated_fields["desired_count"]
+        
+        # Validate ECS Fargate CPU/memory combinations
+        # Fargate has specific valid CPU/memory combinations
+        valid_combinations = [
+            (256, 512), (256, 1024), (256, 2048),
+            (512, 1024), (512, 2048), (512, 4096),
+            (1024, 2048), (1024, 4096), (1024, 8192),
+            (2048, 4096), (2048, 8192), (2048, 16384),
+            (4096, 8192), (4096, 16384), (4096, 30720)
+        ]
+        
+        if (cpu, memory) not in valid_combinations:
+            # Find closest valid combination for helpful error message
+            closest = min(valid_combinations, key=lambda x: abs(x[0] - cpu) + abs(x[1] - memory))
+            raise ValueError(
+                f"Service '{name}' has invalid CPU/memory combination: {cpu} CPU / {memory} MB.\n"
+                f"  ECS Fargate requires specific CPU/memory combinations.\n"
+                f"  Valid combinations include: {', '.join(f'{c[0]}/{c[1]}' for c in valid_combinations[:5])}...\n"
+                f"  Closest valid combination: {closest[0]} CPU / {closest[1]} MB"
+            )
+        
+        # Validate CPU is multiple of 256 (Fargate requirement)
+        if cpu % 256 != 0:
+            raise ValueError(
+                f"Service '{name}' has CPU = {cpu}, which is not a multiple of 256.\n"
+                f"  ECS Fargate requires CPU to be a multiple of 256."
+            )
 
-        env = spec.get("env", {}) or {}
-        alb = spec.get("alb", {}) or {}
-        autoscaling = spec.get("autoscaling") or None
-        deployment = spec.get("deployment") or None
+        # Extract optional fields with proper type handling
+        # Environment variables - can be dict, None, or missing
+        env = spec.get("env")
+        if env is None:
+            env = {}
+        elif not isinstance(env, dict):
+            raise ValueError(
+                f"Service '{name}' has invalid 'env' field: expected dict, got {type(env).__name__}"
+            )
+        
+        # ALB configuration - can be dict, None, or missing
+        alb = spec.get("alb")
+        if alb is None:
+            alb = {}
+        elif not isinstance(alb, dict):
+            raise ValueError(
+                f"Service '{name}' has invalid 'alb' field: expected dict, got {type(alb).__name__}"
+            )
+        
+        # Autoscaling - optional dict
+        autoscaling = spec.get("autoscaling")
+        if autoscaling is not None and not isinstance(autoscaling, dict):
+            raise ValueError(
+                f"Service '{name}' has invalid 'autoscaling' field: expected dict, got {type(autoscaling).__name__}"
+            )
+        
+        # Deployment - optional dict
+        deployment = spec.get("deployment")
+        if deployment is not None and not isinstance(deployment, dict):
+            raise ValueError(
+                f"Service '{name}' has invalid 'deployment' field: expected dict, got {type(deployment).__name__}"
+            )
 
-        lines.append(f"  {name} = {{")
+        # Use composite key to prevent collisions across applications
+        # Format: "{application}::{name}" (e.g., "legacy::api", "test-app::test-app-api")
+        service_key = f"{application}::{name}"
+        
+        lines.append(f"  {service_key} = {{")
         lines.append(f"    container_image = {hcl_string(image_repo)}")
         # The actual tag normally comes from service_image_tags at deploy time.
         lines.append(f"    image_tag       = \"latest\"")
@@ -356,13 +492,36 @@ def render_services_map(specs: list[dict]) -> str:
         lines.append(f"    desired_count   = {desired_count}")
         # Store application for future use in Terraform (Phase 2)
         lines.append(f"    application     = {hcl_string(application)}")
+        
+        # Optional service_discovery_name
+        service_discovery_name = spec.get("service_discovery_name")
+        if service_discovery_name:
+            if not isinstance(service_discovery_name, str) or not service_discovery_name.strip():
+                raise ValueError(
+                    f"Service '{name}' has invalid 'service_discovery_name': must be non-empty string"
+                )
+            lines.append(f"    service_discovery_name = {hcl_string(service_discovery_name.strip())}")
+            lines.append("")
+        
         lines.append("")
 
-        # Environment variables
+        # Environment variables - validate keys and values
         if env:
             lines.append("    environment_variables = {")
             for k, v in env.items():
-                lines.append(f"      {k} = {hcl_string(str(v))}")
+                # Validate key is a valid string
+                if not isinstance(k, str) or not k.strip():
+                    raise ValueError(
+                        f"Service '{name}' has invalid environment variable key: '{k}'. Must be non-empty string."
+                    )
+                
+                # Convert value to string (handles None, numbers, booleans, etc.)
+                if v is None:
+                    v_str = ""
+                else:
+                    v_str = str(v)
+                
+                lines.append(f"      {k.strip()} = {hcl_string(v_str)}")
             lines.append("    }")
             lines.append("")
 
@@ -377,19 +536,78 @@ def render_services_map(specs: list[dict]) -> str:
 
             lines.append("    alb = {")
             lines.append(f"      alb_id            = {hcl_string(alb['alb_id'])}")
-            lines.append(
-                f"      listener_protocol = {hcl_string(str(alb['listener_protocol']))}"
-            )
-            lines.append(f"      listener_port     = {int(alb['listener_port'])}")
+            
+            # Validate and convert listener_protocol
+            listener_protocol = str(alb.get("listener_protocol", "")).upper()
+            if listener_protocol not in ["HTTP", "HTTPS"]:
+                raise ValueError(
+                    f"Service '{name}' has invalid 'listener_protocol': '{alb.get('listener_protocol')}'. "
+                    f"Must be 'HTTP' or 'HTTPS'."
+                )
+            lines.append(f"      listener_protocol = {hcl_string(listener_protocol)}")
+            
+            # Validate and convert listener_port
+            try:
+                listener_port = int(alb.get("listener_port", 0))
+                if listener_port not in [80, 443, 8080, 8443]:
+                    # Allow other ports but warn
+                    if listener_port < 1 or listener_port > 65535:
+                        raise ValueError(f"listener_port must be 1-65535, got {listener_port}")
+            except (ValueError, TypeError) as e:
+                raise ValueError(
+                    f"Service '{name}' has invalid 'listener_port': '{alb.get('listener_port')}'. "
+                    f"Expected integer (typically 80 or 443)."
+                ) from e
+            lines.append(f"      listener_port     = {listener_port}")
 
-            path_patterns = alb.get("path_patterns") or []
-            host_patterns = alb.get("host_patterns") or []
-
-            if path_patterns:
-                rendered = ", ".join(hcl_string(p) for p in path_patterns)
+            # Handle path_patterns - can be list, single string, or None
+            path_patterns = alb.get("path_patterns")
+            if path_patterns is None:
+                path_patterns = []
+            elif isinstance(path_patterns, str):
+                # Single string converted to list
+                path_patterns = [path_patterns]
+            elif not isinstance(path_patterns, list):
+                raise ValueError(
+                    f"Service '{name}' has invalid 'path_patterns': expected list or string, got {type(path_patterns).__name__}"
+                )
+            
+            # Validate path patterns are non-empty strings
+            validated_paths = []
+            for i, pattern in enumerate(path_patterns):
+                if not isinstance(pattern, str) or not pattern.strip():
+                    raise ValueError(
+                        f"Service '{name}' has invalid path_patterns[{i}]: '{pattern}'. Must be non-empty string."
+                    )
+                validated_paths.append(pattern.strip())
+            
+            if validated_paths:
+                rendered = ", ".join(hcl_string(p) for p in validated_paths)
                 lines.append(f"      path_patterns = [{rendered}]")
-            if host_patterns:
-                rendered = ", ".join(hcl_string(h) for h in host_patterns)
+            
+            # Handle host_patterns - can be list, single string, or None
+            host_patterns = alb.get("host_patterns")
+            if host_patterns is None:
+                host_patterns = []
+            elif isinstance(host_patterns, str):
+                # Single string converted to list
+                host_patterns = [host_patterns]
+            elif not isinstance(host_patterns, list):
+                raise ValueError(
+                    f"Service '{name}' has invalid 'host_patterns': expected list or string, got {type(host_patterns).__name__}"
+                )
+            
+            # Validate host patterns are non-empty strings
+            validated_hosts = []
+            for i, pattern in enumerate(host_patterns):
+                if not isinstance(pattern, str) or not pattern.strip():
+                    raise ValueError(
+                        f"Service '{name}' has invalid host_patterns[{i}]: '{pattern}'. Must be non-empty string."
+                    )
+                validated_hosts.append(pattern.strip())
+            
+            if validated_hosts:
+                rendered = ", ".join(hcl_string(h) for h in validated_hosts)
                 lines.append(f"      host_patterns = [{rendered}]")
 
             # Optional health check overrides
@@ -436,10 +654,30 @@ def render_services_map(specs: list[dict]) -> str:
         # Optional deployment configuration
         if deployment:
             lines.append("    deployment = {")
+            
+            # Validate and convert deployment percentages
             if "minimum_healthy_percent" in deployment:
-                lines.append(f"      minimum_healthy_percent = {int(deployment['minimum_healthy_percent'])}")
+                try:
+                    min_healthy = int(deployment["minimum_healthy_percent"])
+                    if not (0 <= min_healthy <= 100):
+                        raise ValueError(f"minimum_healthy_percent must be 0-100, got {min_healthy}")
+                    lines.append(f"      minimum_healthy_percent = {min_healthy}")
+                except (ValueError, TypeError) as e:
+                    raise ValueError(
+                        f"Service '{name}' deployment has invalid 'minimum_healthy_percent': {deployment['minimum_healthy_percent']}"
+                    ) from e
+            
             if "maximum_percent" in deployment:
-                lines.append(f"      maximum_percent = {int(deployment['maximum_percent'])}")
+                try:
+                    max_percent = int(deployment["maximum_percent"])
+                    if max_percent < 100:
+                        raise ValueError(f"maximum_percent must be >= 100, got {max_percent}")
+                    lines.append(f"      maximum_percent = {max_percent}")
+                except (ValueError, TypeError) as e:
+                    raise ValueError(
+                        f"Service '{name}' deployment has invalid 'maximum_percent': {deployment['maximum_percent']}"
+                    ) from e
+            
             lines.append("    }")
             lines.append("")
 
