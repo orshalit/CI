@@ -32,9 +32,9 @@ COPY package.json package-lock.json* ./
 
 # Install ALL dependencies (including devDependencies for build)
 # Using --ignore-scripts for security, run build separately
-# Use npm ci if package-lock.json exists, otherwise fall back to npm install
-RUN if [ -f package-lock.json ]; then \
-      npm ci --include=dev --ignore-scripts; \
+# Use npm ci if package-lock.json exists and is valid, otherwise fall back to npm install
+RUN if [ -f package-lock.json ] && [ -s package-lock.json ]; then \
+      npm ci --include=dev --ignore-scripts || npm install --include=dev --ignore-scripts; \
     else \
       npm install --include=dev --ignore-scripts; \
     fi
