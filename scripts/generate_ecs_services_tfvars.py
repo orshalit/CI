@@ -22,6 +22,7 @@ definitions and Route 53 records remain managed manually in DEVOPS.
 import argparse
 import pathlib
 import re
+import subprocess
 import textwrap
 
 import yaml
@@ -834,6 +835,26 @@ def main() -> None:
     target_file = target_dir / "services.generated.tfvars"
 
     target_file.write_text(content, encoding="utf-8")
+
+    # Automatically format the generated file with terraform fmt
+    try:
+        print(f"Formatting {target_file} with terraform fmt...")
+        result = subprocess.run(
+            ["terraform", "fmt", str(target_file)],
+            capture_output=True,
+            text=True,
+            check=False,  # Don't fail if terraform fmt returns non-zero
+        )
+        if result.returncode == 0:
+            print(f"✓ Formatted {target_file}")
+        else:
+            print(f"⚠ Warning: terraform fmt returned exit code {result.returncode}")
+            if result.stderr:
+                print(f"  stderr: {result.stderr}")
+    except FileNotFoundError:
+        print(f"⚠ Warning: terraform command not found, skipping formatting")
+    except Exception as e:
+        print(f"⚠ Warning: Failed to format file: {e}")
 
     # Print summary
     total_services = len(specs)
