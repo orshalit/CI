@@ -694,17 +694,35 @@ jobs:
           elif [ "$BACKEND_CHANGED" == "true" ]; then
             # Only backend images
             FILTERED=$(echo "$FULL_MATRIX" | jq '.include | map(select(.service == "backend")) | {include: .}')
-            echo "matrix<<EOF" >> $GITHUB_OUTPUT
-            echo "$FILTERED" >> $GITHUB_OUTPUT
-            echo "EOF" >> $GITHUB_OUTPUT
-            echo "::notice::Building only backend images"
+            COUNT=$(echo "$FILTERED" | jq '.include | length')
+            if [ "$COUNT" -eq 0 ]; then
+              echo "::error::Backend code changed but no backend images found in matrix!"
+              echo "matrix<<EOF" >> $GITHUB_OUTPUT
+              echo "$FULL_MATRIX" >> $GITHUB_OUTPUT
+              echo "EOF" >> $GITHUB_OUTPUT
+              echo "::warning::Using full matrix as fallback"
+            else
+              echo "matrix<<EOF" >> $GITHUB_OUTPUT
+              echo "$FILTERED" >> $GITHUB_OUTPUT
+              echo "EOF" >> $GITHUB_OUTPUT
+              echo "::notice::Building only backend images ($COUNT image(s))"
+            fi
           elif [ "$FRONTEND_CHANGED" == "true" ]; then
             # Only frontend images
             FILTERED=$(echo "$FULL_MATRIX" | jq '.include | map(select(.service == "frontend")) | {include: .}')
-            echo "matrix<<EOF" >> $GITHUB_OUTPUT
-            echo "$FILTERED" >> $GITHUB_OUTPUT
-            echo "EOF" >> $GITHUB_OUTPUT
-            echo "::notice::Building only frontend images"
+            COUNT=$(echo "$FILTERED" | jq '.include | length')
+            if [ "$COUNT" -eq 0 ]; then
+              echo "::error::Frontend code changed but no frontend images found in matrix!"
+              echo "matrix<<EOF" >> $GITHUB_OUTPUT
+              echo "$FULL_MATRIX" >> $GITHUB_OUTPUT
+              echo "EOF" >> $GITHUB_OUTPUT
+              echo "::warning::Using full matrix as fallback"
+            else
+              echo "matrix<<EOF" >> $GITHUB_OUTPUT
+              echo "$FILTERED" >> $GITHUB_OUTPUT
+              echo "EOF" >> $GITHUB_OUTPUT
+              echo "::notice::Building only frontend images ($COUNT image(s))"
+            fi
           else
             echo "matrix={\"include\": []}" >> $GITHUB_OUTPUT
             echo "::warning::No code changes detected, skipping builds"
@@ -799,14 +817,15 @@ jobs:
   e2e-tests:
     name: End-to-End Tests
     runs-on: ubuntu-latest
-    needs: [build-images, prepare-build, detect-changes]
+    needs: [build-images, prepare-build, detect-changes, filter-build-matrix]
     # Only run E2E tests if app code changed (backend OR frontend), or on version tags, or manual dispatch
+    # Check if build-images succeeded OR was skipped (which means matrix was empty/filtered but that's OK)
     if: |
       (needs.detect-changes.outputs.backend-code == 'true' ||
        needs.detect-changes.outputs.frontend-code == 'true' ||
        startsWith(github.ref, 'refs/tags/v') ||
        github.event_name == 'workflow_dispatch') &&
-      needs.build-images.result == 'success'
+      (needs.build-images.result == 'success' || needs.build-images.result == 'skipped')
     
     steps:
       - name: Checkout code
@@ -954,15 +973,17 @@ jobs:
   security-scan:
     name: Security Scan
     runs-on: ubuntu-latest
-    needs: [build-images, detect-changes, detect-app-images]
+    needs: [build-images, detect-changes, detect-app-images, filter-build-matrix]
     # Only scan if app code changed (backend OR frontend), or on version tags, or manual dispatch
+    # Check if build-images succeeded OR was skipped (which means matrix was empty/filtered but that's OK)
+    # Also check that the filtered matrix has at least one image to scan
     if: |
       github.event_name != 'pull_request' &&
       (needs.detect-changes.outputs.backend-code == 'true' ||
        needs.detect-changes.outputs.frontend-code == 'true' ||
        startsWith(github.ref, 'refs/tags/v') ||
        github.event_name == 'workflow_dispatch') &&
-      needs.build-images.result == 'success'
+      (needs.build-images.result == 'success' || needs.build-images.result == 'skipped')
     
     steps:
       - name: Checkout code
