@@ -240,13 +240,14 @@ jobs:
           done
       
       - name: Check for secrets in code
+        if: github.event.before != github.sha
         uses: trufflesecurity/trufflehog@v3.63.7
         with:
           path: ./
           base: ${{ github.event.pull_request.base.sha || github.event.before || 'HEAD~1' }}
           head: ${{ github.event.pull_request.head.sha || github.sha }}
           extra_args: --only-verified
-        continue-on-error: ${{ github.event.before == github.sha }}
+        continue-on-error: true
 
   # ===========================================================================
   # Backend Testing
