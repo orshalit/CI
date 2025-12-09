@@ -673,35 +673,87 @@ jobs:
             exit 0
           fi
           
-          # Get resources that plan wants to create
           PLAN_OUTPUT=$(terraform -chdir="$PLAN_DIR" show -no-color tfplan 2>&1 || echo "")
+          
+          # Get resources that plan wants to create
           RESOURCES_TO_CREATE=$(echo "$PLAN_OUTPUT" | grep "will be created" | \
             sed 's/^[[:space:]]*# //' | sed 's/ will be created$//' || echo "")
           
-          if [ -z "$RESOURCES_TO_CREATE" ]; then
-            echo "::notice::✓ No resources to create - idempotency check passed"
-            exit 0
+          # Get resources that plan wants to replace (critical for Service Discovery)
+          RESOURCES_TO_REPLACE=$(echo "$PLAN_OUTPUT" | grep "must be replaced" | \
+            sed 's/^[[:space:]]*# //' | sed 's/ must be replaced$//' || echo "")
+          
+          CONFLICTS=0
+          
+          # Check resources that will be created
+          if [ -n "$RESOURCES_TO_CREATE" ]; then
+            echo "::notice::Checking resources to be created..."
+            echo "$RESOURCES_TO_CREATE" | while IFS= read -r resource; do
+              [ -z "$resource" ] && continue
+              
+              # Check if resource already exists in state
+              if terraform -chdir="$PLAN_DIR" state show "$resource" >/dev/null 2>&1; then
+                echo "::error::❌ Resource '$resource' is in state but plan wants to create it"
+                echo "::error::This indicates state drift. Resource should be updated, not created."
+                CONFLICTS=$((CONFLICTS + 1))
+              fi
+            done
           fi
           
-          # Check each resource that will be created
-          CONFLICTS=0
-          echo "$RESOURCES_TO_CREATE" | while IFS= read -r resource; do
-            [ -z "$resource" ] && continue
-            
-            # Check if resource already exists in state
-            if terraform -chdir="$PLAN_DIR" state show "$resource" >/dev/null 2>&1; then
-              echo "::error::❌ Resource '$resource' is in state but plan wants to create it"
-              echo "::error::This indicates state drift. Resource should be updated, not created."
-              CONFLICTS=$((CONFLICTS + 1))
-            fi
-          done
+          # Check resources that will be replaced (especially Service Discovery)
+          if [ -n "$RESOURCES_TO_REPLACE" ]; then
+            echo "::notice::Checking resources to be replaced..."
+            echo "$RESOURCES_TO_REPLACE" | while IFS= read -r resource; do
+              [ -z "$resource" ] && continue
+              
+              # For Service Discovery services, check if replacement already exists in AWS
+              if echo "$resource" | grep -q "aws_service_discovery_service"; then
+                # Extract service key from resource path
+                SERVICE_KEY=$(echo "$resource" | sed 's/.*\["\(.*\)"\]/\1/')
+                
+                # Get namespace ID from state
+                NAMESPACE_ID=$(terraform -chdir="$PLAN_DIR" state show 'module.ecs_fargate.aws_service_discovery_private_dns_namespace.this' 2>/dev/null | \
+                  grep -E '^\s+id\s+=' | awk '{print $3}' | tr -d '"' || echo "")
+                
+                if [ -n "$NAMESPACE_ID" ]; then
+                  # Get expected sanitized service name (part after ::)
+                  EXPECTED_NAME=$(echo "$SERVICE_KEY" | sed 's/.*::\(.*\)/\1/' | tr '[:upper:]' '[:lower:]')
+                  
+                  # Check if service with this name already exists in AWS
+                  EXISTING_SERVICE=$(aws servicediscovery list-services \
+                    --filters Name=NAMESPACE_ID,Values="$NAMESPACE_ID" \
+                    --query "Services[?Name=='$EXPECTED_NAME'].[Name,Id]" \
+                    --output text 2>/dev/null || echo "")
+                  
+                  if [ -n "$EXISTING_SERVICE" ]; then
+                    SERVICE_ID=$(echo "$EXISTING_SERVICE" | awk '{print $2}')
+                    echo "::warning::⚠️ Service Discovery service '$SERVICE_KEY' will be replaced"
+                    echo "::warning::   Replacement service '$EXPECTED_NAME' already exists in AWS (ID: $SERVICE_ID)"
+                    echo "::warning::   This will cause 'ServiceAlreadyExists' error during apply"
+                    echo "::warning::   The validation script should have imported this, but it may have failed"
+                    echo "::warning::   Consider running: terraform import '$resource' '$SERVICE_ID'"
+                    CONFLICTS=$((CONFLICTS + 1))
+                  fi
+                fi
+              fi
+            done
+          fi
           
           if [ $CONFLICTS -gt 0 ]; then
             echo "::error::❌ Idempotency check failed: $CONFLICTS conflict(s) detected"
+            echo "::error::Resources that will be created/replaced already exist in AWS"
             echo "::error::State validation should have caught this. Review state and plan."
+            echo "::error::"
+            echo "::error::To fix:"
+            echo "::error::  1. Run the 'Comprehensive State Validation' step again"
+            echo "::error::  2. Or manually import the resources: terraform import 'resource.address' 'aws-id'"
             exit 1
           else
-            echo "::notice::✓ Idempotency check passed - no conflicts detected"
+            if [ -z "$RESOURCES_TO_CREATE" ] && [ -z "$RESOURCES_TO_REPLACE" ]; then
+              echo "::notice::✓ No resources to create or replace - idempotency check passed"
+            else
+              echo "::notice::✓ Idempotency check passed - no conflicts detected"
+            fi
           fi
 
       - name: Terraform Apply
