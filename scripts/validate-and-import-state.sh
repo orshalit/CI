@@ -85,21 +85,54 @@ if [ -n "$NAMESPACE_ID" ] && [ -f "$PLAN_DIR/services.generated.tfvars" ]; then
     for tf_key in $EXPECTED_KEYS; do
       EXPECTED_NAME=$(echo "$tf_key" | sed 's/.*::\(.*\)/\1/' | tr '[:upper:]' '[:lower:]')
       
+      # Check if exists in AWS
+      AWS_SERVICE=$(echo "$AWS_SERVICES" | grep -E "^${EXPECTED_NAME}\t" || echo "")
+      AWS_ID=""
+      if [ -n "$AWS_SERVICE" ]; then
+        AWS_ID=$(echo "$AWS_SERVICE" | awk '{print $2}')
+      fi
+      
       # Check if in state
       if echo "$STATE_SERVICES" | grep -q "^$tf_key$"; then
-        echo "::notice::✓ Service Discovery '$tf_key' is in state"
+        # Service is in state - check if it matches AWS
+        STATE_ID=$(terraform -chdir="$PLAN_DIR" state show "module.ecs_fargate.aws_service_discovery_service.services[\"$tf_key\"]" 2>/dev/null | \
+          grep -E '^\s+id\s+=' | awk '{print $3}' | tr -d '"' || echo "")
+        
+        if [ -n "$AWS_ID" ] && [ -n "$STATE_ID" ] && [ "$AWS_ID" != "$STATE_ID" ]; then
+          # State has different ID than AWS - this indicates a replacement scenario
+          # The service in AWS is the "new" one that Terraform wants to create
+          # We should update state to point to the existing AWS service to avoid replacement
+          echo "::warning::⚠ Service Discovery '$tf_key' state mismatch detected"
+          echo "::warning::   State ID: $STATE_ID"
+          echo "::warning::   AWS ID: $AWS_ID"
+          echo "::warning::   Updating state to match AWS (preventing unnecessary replacement)..."
+          
+          # Remove old state entry and import the correct one
+          if terraform -chdir="$PLAN_DIR" state rm "module.ecs_fargate.aws_service_discovery_service.services[\"$tf_key\"]" 2>&1 && \
+             terraform -chdir="$PLAN_DIR" import $TF_ARGS \
+               "module.ecs_fargate.aws_service_discovery_service.services[\"$tf_key\"]" \
+               "$AWS_ID" 2>&1; then
+            echo "::notice::✓ Successfully updated state for '$tf_key' (ID: $AWS_ID)"
+            IMPORTED_COUNT=$((IMPORTED_COUNT + 1))
+          else
+            echo "::error::❌ Failed to update state for '$tf_key'"
+            ERRORS=$((ERRORS + 1))
+          fi
+        elif [ -n "$AWS_ID" ] && [ "$AWS_ID" = "$STATE_ID" ]; then
+          echo "::notice::✓ Service Discovery '$tf_key' is in state and matches AWS (ID: $AWS_ID)"
+        else
+          echo "::notice::✓ Service Discovery '$tf_key' is in state"
+        fi
         continue
       fi
       
-      # Check if exists in AWS
-      AWS_SERVICE=$(echo "$AWS_SERVICES" | grep -E "^${EXPECTED_NAME}\t" || echo "")
+      # Service not in state
       if [ -z "$AWS_SERVICE" ]; then
         echo "::notice::ℹ Service Discovery '$tf_key' not in AWS (will be created)"
         continue
       fi
       
       # Service exists in AWS but not in state - import it
-      AWS_ID=$(echo "$AWS_SERVICE" | awk '{print $2}')
       echo "::warning::⚠ Service Discovery '$tf_key' exists in AWS but not in state - importing..."
       
       if terraform -chdir="$PLAN_DIR" import $TF_ARGS \
