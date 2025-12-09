@@ -207,7 +207,7 @@ jobs:
           
           # Check if state has any ECS services
           # Use terraform state list to find services (safe even with empty services config)
-            if terraform state list -no-color 2>/dev/null | grep -q "aws_ecs_service.services\["; then
+          if terraform state list -no-color 2>/dev/null | grep -q "aws_ecs_service.services\["; then
             EXISTING_SERVICES=$(terraform state list -no-color 2>/dev/null | grep "aws_ecs_service.services\[" || echo "")
             
             echo ""
@@ -289,7 +289,7 @@ jobs:
           if [ -n "$VAR_FILES" ]; then
             for var_file in $VAR_FILES; do
               if [ -f "$PLAN_DIR/$var_file" ]; then
-                REFRESH_ARGS="$REFRESH_ARGS -var-file=$var_file"
+              REFRESH_ARGS="$REFRESH_ARGS -var-file=$var_file"
               fi
             done
           fi
@@ -311,8 +311,8 @@ jobs:
               # Check if refresh-only failed because there are no changes (exit code 0 from apply -refresh-only)
               if grep -q "No changes" /tmp/refresh_output.txt 2>/dev/null; then
                 echo "::notice::✓ State is already in sync with AWS (no changes needed)"
-              else
-                echo "::warning::State refresh failed with exit code $REFRESH_EXITCODE, but continuing with plan..."
+            else
+              echo "::warning::State refresh failed with exit code $REFRESH_EXITCODE, but continuing with plan..."
                 echo "::warning::Refresh output:"
                 cat /tmp/refresh_output.txt 2>/dev/null || true
               fi
