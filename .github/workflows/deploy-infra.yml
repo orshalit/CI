@@ -761,6 +761,32 @@ jobs:
             fi
           fi
 
+      - name: Comprehensive Pre-Apply Validation
+        id: comprehensive_validation
+        if: inputs.action == 'apply' && steps.plan.outcome == 'success' && steps.plan_changes.outputs.has_changes == 'true'
+        continue-on-error: true
+        run: |
+          PLAN_DIR="DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}"
+          
+          if [ -f "scripts/comprehensive-pre-apply-validation.sh" ]; then
+            chmod +x scripts/comprehensive-pre-apply-validation.sh
+            scripts/comprehensive-pre-apply-validation.sh "$PLAN_DIR" "${{ inputs.environment }}" "${{ inputs.module_path }}" || {
+              EXIT_CODE=$?
+              if [ $EXIT_CODE -eq 1 ]; then
+                echo "::error::Comprehensive validation found critical errors"
+                echo "::error::Please review and fix the errors before proceeding"
+                echo "validation_failed=true" >> $GITHUB_OUTPUT
+              else
+                echo "validation_failed=false" >> $GITHUB_OUTPUT
+              fi
+              exit 0  # Don't fail workflow, but set output
+            }
+            echo "validation_failed=false" >> $GITHUB_OUTPUT
+          else
+            echo "::warning::Comprehensive validation script not found, skipping"
+            echo "validation_failed=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Verify Plan is Still Valid
         id: verify_plan_stale
         if: inputs.action == 'apply' && steps.plan.outcome == 'success' && steps.plan_changes.outputs.has_changes == 'true'
@@ -812,7 +838,8 @@ jobs:
           inputs.action == 'apply' && 
           steps.plan.outcome == 'success' && 
           steps.plan_changes.outputs.has_changes == 'true' &&
-          (steps.verify_plan_stale.outcome == 'success' || steps.verify_plan_stale.outputs.plan_stale != 'true')
+          (steps.verify_plan_stale.outcome == 'success' || steps.verify_plan_stale.outputs.plan_stale != 'true') &&
+          steps.comprehensive_validation.outputs.validation_failed != 'true'
         uses: ./.github/actions/terraform-apply
         with:
           terraform_path: DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}
