@@ -240,6 +240,97 @@ jobs:
             echo "::notice::✓ Safe to proceed with empty services config (fresh deployment)"
           fi
 
+      - name: Import Existing Service Discovery Services
+        id: import_sd_services
+        if: |
+          (inputs.action == 'plan' || inputs.action == 'apply') &&
+          inputs.module_path == '04-ecs-fargate' &&
+          steps.check_services_empty.outputs.services_empty != 'true'
+        continue-on-error: true
+        timeout-minutes: 5
+        run: |
+          PLAN_DIR="DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}"
+          
+          echo "::notice::Checking for existing Service Discovery services to import..."
+          
+          # Initialize Terraform
+          terraform -chdir="$PLAN_DIR" init -no-color >/dev/null 2>&1 || true
+          
+          # Get namespace ID from state or output
+          NAMESPACE_ID=$(terraform -chdir="$PLAN_DIR" state show 'module.ecs_fargate.aws_service_discovery_private_dns_namespace.this' 2>/dev/null | \
+            grep -E '^\s+id\s+=' | awk '{print $3}' | tr -d '"' || echo "")
+          
+          if [ -z "$NAMESPACE_ID" ]; then
+            echo "::notice::Namespace not found in state - skipping import (will be created)"
+            exit 0
+          fi
+          
+          echo "::notice::Found namespace: $NAMESPACE_ID"
+          
+          # List existing services in the namespace
+          EXISTING_SERVICES=$(aws servicediscovery list-services \
+            --filters Name=NAMESPACE_ID,Values="$NAMESPACE_ID" \
+            --query 'Services[*].[Name,Id]' \
+            --output text 2>/dev/null || echo "")
+          
+          if [ -z "$EXISTING_SERVICES" ]; then
+            echo "::notice::No existing Service Discovery services found"
+            exit 0
+          fi
+          
+          # Get expected service keys from services.generated.tfvars
+          if [ ! -f "$PLAN_DIR/services.generated.tfvars" ]; then
+            echo "::notice::services.generated.tfvars not found - skipping import"
+            exit 0
+          fi
+          
+          # Extract service keys from tfvars (format: "key" = {)
+          EXPECTED_KEYS=$(grep -E '^\s+"[^"]+::[^"]+"\s*=\s*\{' "$PLAN_DIR/services.generated.tfvars" | \
+            sed 's/^\s*"\([^"]*\)".*/\1/' || echo "")
+          
+          if [ -z "$EXPECTED_KEYS" ]; then
+            echo "::notice::No service keys found in tfvars - skipping import"
+            exit 0
+          fi
+          
+          echo "::notice::Found existing services in AWS:"
+          echo "$EXISTING_SERVICES" | while read -r name id; do
+            echo "  - $name ($id)"
+          done
+          
+          # Try to import each service
+          IMPORTED=0
+          echo "$EXISTING_SERVICES" | while read -r aws_name aws_id; do
+            # Match AWS service name to Terraform key
+            # AWS names are sanitized (e.g., "api", "frontend", "test-app-api")
+            # Terraform keys are like "legacy::api", "test-app::test-app-api"
+            for tf_key in $EXPECTED_KEYS; do
+              # Get expected sanitized name (part after ::)
+              EXPECTED_NAME=$(echo "$tf_key" | sed 's/.*::\(.*\)/\1/' | tr '[:upper:]' '[:lower:]')
+              
+              # Check if names match (AWS name vs expected sanitized name)
+              if [ "$aws_name" = "$EXPECTED_NAME" ]; then
+                echo "::notice::Importing: $aws_name -> module.ecs_fargate.aws_service_discovery_service.services[\"$tf_key\"]"
+                
+                if terraform -chdir="$PLAN_DIR" import \
+                  "module.ecs_fargate.aws_service_discovery_service.services[\"$tf_key\"]" \
+                  "$aws_id" 2>&1; then
+                  echo "::notice::✓ Successfully imported: $aws_name"
+                  IMPORTED=$((IMPORTED + 1))
+                else
+                  echo "::notice::⚠ Import failed for $aws_name (may already be in state or key mismatch)"
+                fi
+                break
+              fi
+            done
+          done
+          
+          if [ $IMPORTED -gt 0 ]; then
+            echo "::notice::Imported $IMPORTED Service Discovery service(s)"
+          else
+            echo "::notice::No services were imported (may already be in state or name mismatch)"
+          fi
+
       - name: Terraform Refresh State
         id: refresh
         if: |
