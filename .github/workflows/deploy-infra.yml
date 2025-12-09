@@ -307,8 +307,14 @@ jobs:
             done
           fi
           
+          # Check which services are already in state
+          STATE_SERVICES=$(terraform -chdir="$PLAN_DIR" state list 2>/dev/null | \
+            grep 'module.ecs_fargate.aws_service_discovery_service.services\["' | \
+            sed 's/.*\["\(.*\)"\]/\1/' || echo "")
+          
           # Try to import each service (avoid subshell to preserve IMPORTED counter)
           IMPORTED=0
+          SKIPPED=0
           while IFS=$'\t' read -r aws_name aws_id; do
             # Match AWS service name to Terraform key
             # AWS names are sanitized (e.g., "api", "frontend", "test-app-api")
@@ -319,16 +325,22 @@ jobs:
               
               # Check if names match (AWS name vs expected sanitized name)
               if [ "$aws_name" = "$EXPECTED_NAME" ]; then
-                echo "::notice::Importing: $aws_name -> module.ecs_fargate.aws_service_discovery_service.services[\"$tf_key\"]"
-                
-                # Use var files to avoid prompting for var.services
-                if terraform -chdir="$PLAN_DIR" import $IMPORT_ARGS \
-                  "module.ecs_fargate.aws_service_discovery_service.services[\"$tf_key\"]" \
-                  "$aws_id" 2>&1; then
-                  echo "::notice::✓ Successfully imported: $aws_name"
-                  IMPORTED=$((IMPORTED + 1))
+                # Check if already in state
+                if echo "$STATE_SERVICES" | grep -q "^$tf_key$"; then
+                  echo "::notice::⏭ Skipping $aws_name - already in Terraform state as \"$tf_key\""
+                  SKIPPED=$((SKIPPED + 1))
                 else
-                  echo "::notice::⚠ Import failed for $aws_name (may already be in state or key mismatch)"
+                  echo "::notice::Importing: $aws_name -> module.ecs_fargate.aws_service_discovery_service.services[\"$tf_key\"]"
+                  
+                  # Use var files to avoid prompting for var.services
+                  if terraform -chdir="$PLAN_DIR" import $IMPORT_ARGS \
+                    "module.ecs_fargate.aws_service_discovery_service.services[\"$tf_key\"]" \
+                    "$aws_id" 2>&1; then
+                    echo "::notice::✓ Successfully imported: $aws_name"
+                    IMPORTED=$((IMPORTED + 1))
+                  else
+                    echo "::notice::⚠ Import failed for $aws_name (may already be in state or key mismatch)"
+                  fi
                 fi
                 break
               fi
@@ -337,8 +349,19 @@ jobs:
           
           if [ $IMPORTED -gt 0 ]; then
             echo "::notice::Imported $IMPORTED Service Discovery service(s)"
-          else
-            echo "::notice::No services were imported (may already be in state or name mismatch)"
+          fi
+          if [ $SKIPPED -gt 0 ]; then
+            echo "::notice::Skipped $SKIPPED Service Discovery service(s) (already in state)"
+          fi
+          if [ $IMPORTED -eq 0 ] && [ $SKIPPED -eq 0 ]; then
+            echo "::notice::No services were imported (name mismatch or not found in AWS)"
+          fi
+          
+          # If services are in state but Terraform still tries to create them, refresh state
+          if [ $SKIPPED -gt 0 ]; then
+            echo "::notice::Refreshing Terraform state to sync with AWS..."
+            terraform -chdir="$PLAN_DIR" refresh $IMPORT_ARGS -no-color >/dev/null 2>&1 || true
+            echo "::notice::State refresh completed"
           fi
 
       - name: Terraform Refresh State
