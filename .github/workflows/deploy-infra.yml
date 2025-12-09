@@ -480,20 +480,25 @@ jobs:
               echo ""
               echo "::notice::📋 Service Changes Detected:"
               
-              CREATES=$(echo "$PLAN_OUTPUT" | grep -c "aws_ecs_service.services\[.*\] will be created" || echo "0")
-              DESTROYS=$(echo "$PLAN_OUTPUT" | grep -c "aws_ecs_service.services\[.*\] will be destroyed" || echo "0")
-              REPLACES=$(echo "$PLAN_OUTPUT" | grep -c "aws_ecs_service.services\[.*\] must be replaced" || echo "0")
+              CREATES=$(echo "$PLAN_OUTPUT" | grep -c "aws_ecs_service.services\[.*\] will be created" 2>/dev/null || echo "0")
+              DESTROYS=$(echo "$PLAN_OUTPUT" | grep -c "aws_ecs_service.services\[.*\] will be destroyed" 2>/dev/null || echo "0")
+              REPLACES=$(echo "$PLAN_OUTPUT" | grep -c "aws_ecs_service.services\[.*\] must be replaced" 2>/dev/null || echo "0")
               
-              if [ "$CREATES" -gt 0 ]; then
+              # Ensure we have valid integers (strip any whitespace/newlines and default to 0)
+              CREATES=$(echo "$CREATES" | tr -d '[:space:]' || echo "0")
+              DESTROYS=$(echo "$DESTROYS" | tr -d '[:space:]' || echo "0")
+              REPLACES=$(echo "$REPLACES" | tr -d '[:space:]' || echo "0")
+              
+              if [ "${CREATES:-0}" -gt 0 ] 2>/dev/null; then
                 echo "::notice::  ➕ Services to CREATE: $CREATES"
               fi
               
-              if [ "$DESTROYS" -gt 0 ]; then
+              if [ "${DESTROYS:-0}" -gt 0 ] 2>/dev/null; then
                 echo "::warning::  ❌ Services to DESTROY: $DESTROYS"
                 echo "::warning::⚠️ This may be due to service key changes (e.g., 'api' → 'legacy::api')"
               fi
               
-              if [ "$REPLACES" -gt 0 ]; then
+              if [ "${REPLACES:-0}" -gt 0 ] 2>/dev/null; then
                 echo "::warning::  🔄 Services to REPLACE: $REPLACES"
               fi
             fi
