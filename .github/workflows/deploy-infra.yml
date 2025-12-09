@@ -693,7 +693,7 @@ jobs:
           # Check resources that will be created
           if [ -n "$RESOURCES_TO_CREATE" ]; then
             echo "::notice::Checking resources to be created..."
-            echo "$RESOURCES_TO_CREATE" | while IFS= read -r resource; do
+            while IFS= read -r resource; do
               [ -z "$resource" ] && continue
               
               # Check if resource already exists in state
@@ -702,13 +702,13 @@ jobs:
                 echo "::error::This indicates state drift. Resource should be updated, not created."
                 CONFLICTS=$((CONFLICTS + 1))
               fi
-            done
+            done <<< "$RESOURCES_TO_CREATE"
           fi
           
           # Check resources that will be replaced (especially Service Discovery)
           if [ -n "$RESOURCES_TO_REPLACE" ]; then
             echo "::notice::Checking resources to be replaced..."
-            echo "$RESOURCES_TO_REPLACE" | while IFS= read -r resource; do
+            while IFS= read -r resource; do
               [ -z "$resource" ] && continue
               
               # For Service Discovery services, check if replacement already exists in AWS
@@ -732,16 +732,16 @@ jobs:
                   
                   if [ -n "$EXISTING_SERVICE" ]; then
                     SERVICE_ID=$(echo "$EXISTING_SERVICE" | awk '{print $2}')
-                    echo "::warning::⚠️ Service Discovery service '$SERVICE_KEY' will be replaced"
-                    echo "::warning::   Replacement service '$EXPECTED_NAME' already exists in AWS (ID: $SERVICE_ID)"
-                    echo "::warning::   This will cause 'ServiceAlreadyExists' error during apply"
-                    echo "::warning::   The validation script should have imported this, but it may have failed"
-                    echo "::warning::   Consider running: terraform import '$resource' '$SERVICE_ID'"
+                    echo "::error::❌ Service Discovery service '$SERVICE_KEY' will be replaced"
+                    echo "::error::   Replacement service '$EXPECTED_NAME' already exists in AWS (ID: $SERVICE_ID)"
+                    echo "::error::   This will cause 'ServiceAlreadyExists' error during apply"
+                    echo "::error::   The validation script should have imported this, but it may have failed"
+                    echo "::error::   Consider running: terraform import '$resource' '$SERVICE_ID'"
                     CONFLICTS=$((CONFLICTS + 1))
                   fi
                 fi
               fi
-            done
+            done <<< "$RESOURCES_TO_REPLACE"
           fi
           
           if [ $CONFLICTS -gt 0 ]; then
