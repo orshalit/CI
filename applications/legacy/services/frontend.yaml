@@ -14,17 +14,15 @@ desired_count: 2       # Desired task count (0-1000)
 
 env:
   LOG_LEVEL: INFO
-  # BACKEND_API_URL: Use HTTP in dev (HTTPS disabled), HTTPS in prod
-  # For dev: Use ALB DNS name or HTTP URL
-  # For prod: Use HTTPS URL with proper domain
-  BACKEND_API_URL: "http://app.dev.example.com/legacy-api"  # ⚠️ Update with actual ALB DNS or domain
+  # BACKEND_API_URL: Uses HTTPS with host-based routing subdomain
+  BACKEND_API_URL: "https://legacy-api.app.dev.light-solutions.org"
 
 alb:
   alb_id: app_shared
   listener_protocol: HTTPS
   listener_port: 443
   path_patterns:
-    - "/legacy/*"
+    - "/*"  # Host-based routing - matches all paths
   host_patterns:
-    - "app.dev.example.com"
+    - "legacy-frontend.app.dev.light-solutions.org"  # Test subdomain for host-based routing
 

@@ -23,8 +23,8 @@ alb:
   listener_protocol: HTTPS
   listener_port: 443
   path_patterns:
-    - "/legacy-api/*"
+    - "/*"  # Host-based routing - matches all paths
   host_patterns:
-    - "app.dev.example.com"  # ⚠️ Replace with actual domain or remove for ALB DNS access
+    - "legacy-api.app.dev.light-solutions.org"  # Test subdomain for host-based routing
   health_check_path: "/health"
 
