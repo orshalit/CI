@@ -146,6 +146,15 @@ if [ -n "$NAMESPACE_ID" ] && [ -f "$PLAN_DIR/services.generated.tfvars" ]; then
         ERRORS=$((ERRORS + 1))
       fi
     done
+    
+    # After imports/updates, refresh state to sync configuration
+    # This ensures Terraform sees the actual AWS configuration (e.g., health_check_custom_config)
+    # and avoids unnecessary replacements
+    if [ $IMPORTED_COUNT -gt 0 ]; then
+      echo "::notice::Refreshing state to sync configuration with AWS..."
+      terraform -chdir="$PLAN_DIR" apply -refresh-only -auto-approve $TF_ARGS >/dev/null 2>&1 || true
+      echo "::notice::✓ State refreshed"
+    fi
   fi
 fi
 
