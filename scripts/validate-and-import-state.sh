@@ -114,12 +114,19 @@ if [ -n "$NAMESPACE_ID" ] && [ -f "$PLAN_DIR/services.generated.tfvars" ]; then
                "$AWS_ID" 2>&1; then
             echo "::notice::✓ Successfully updated state for '$tf_key' (ID: $AWS_ID)"
             IMPORTED_COUNT=$((IMPORTED_COUNT + 1))
+            # Force refresh on this specific resource to sync configuration attributes
+            echo "::notice::Refreshing '$tf_key' to sync configuration attributes..."
+            terraform -chdir="$PLAN_DIR" apply -refresh-only -target="module.ecs_fargate.aws_service_discovery_service.services[\"$tf_key\"]" -auto-approve $TF_ARGS >/dev/null 2>&1 || true
           else
             echo "::error::❌ Failed to update state for '$tf_key'"
             ERRORS=$((ERRORS + 1))
           fi
         elif [ -n "$AWS_ID" ] && [ "$AWS_ID" = "$STATE_ID" ]; then
+          # Service is in state and ID matches - but we still need to refresh to sync config attributes
+          # This ensures health_check_custom_config {} is properly synced from AWS
           echo "::notice::✓ Service Discovery '$tf_key' is in state and matches AWS (ID: $AWS_ID)"
+          echo "::notice::Refreshing '$tf_key' to sync configuration attributes..."
+          terraform -chdir="$PLAN_DIR" apply -refresh-only -target="module.ecs_fargate.aws_service_discovery_service.services[\"$tf_key\"]" -auto-approve $TF_ARGS >/dev/null 2>&1 || true
         else
           echo "::notice::✓ Service Discovery '$tf_key' is in state"
         fi
@@ -140,6 +147,9 @@ if [ -n "$NAMESPACE_ID" ] && [ -f "$PLAN_DIR/services.generated.tfvars" ]; then
         "$AWS_ID" 2>&1; then
         echo "::notice::✓ Successfully imported '$tf_key'"
         IMPORTED_COUNT=$((IMPORTED_COUNT + 1))
+        # Force refresh on this specific resource to sync configuration attributes
+        echo "::notice::Refreshing '$tf_key' to sync configuration attributes..."
+        terraform -chdir="$PLAN_DIR" apply -refresh-only -target="module.ecs_fargate.aws_service_discovery_service.services[\"$tf_key\"]" -auto-approve $TF_ARGS >/dev/null 2>&1 || true
       else
         echo "::error::❌ Failed to import '$tf_key'"
         MISSING_COUNT=$((MISSING_COUNT + 1))
@@ -147,21 +157,24 @@ if [ -n "$NAMESPACE_ID" ] && [ -f "$PLAN_DIR/services.generated.tfvars" ]; then
       fi
     done
     
-    # Always refresh state to sync configuration attributes (e.g., health_check_custom_config)
-    # This ensures Terraform sees the actual AWS configuration and avoids unnecessary replacements
-    # Even if no imports happened, we need to refresh to sync attributes that might have been
-    # added to AWS services but not reflected in state
+    # Final refresh of all Service Discovery services to ensure all configuration attributes are synced
+    # This is critical for health_check_custom_config {} which might not be properly synced after import
     if [ -n "$EXPECTED_KEYS" ]; then
-      echo "::notice::Refreshing state to sync configuration with AWS..."
+      echo "::notice::Performing final refresh of all Service Discovery services..."
       REFRESH_OUTPUT=$(terraform -chdir="$PLAN_DIR" apply -refresh-only -auto-approve $TF_ARGS 2>&1 || echo "")
       if echo "$REFRESH_OUTPUT" | grep -q "No changes"; then
-        echo "::notice::✓ State is already in sync with AWS"
+        echo "::notice::✓ All Service Discovery services are in sync with AWS"
       else
-        echo "::notice::✓ State refreshed - configuration attributes synced"
+        echo "::notice::✓ Final refresh completed - configuration attributes synced"
         # Show what was updated
         if echo "$REFRESH_OUTPUT" | grep -q "updated in-place"; then
           echo "::notice::Resources updated in state:"
           echo "$REFRESH_OUTPUT" | grep "updated in-place" | head -5 || true
+        fi
+        # Check if any replacements are still planned (this shouldn't happen after refresh)
+        if echo "$REFRESH_OUTPUT" | grep -q "must be replaced"; then
+          echo "::warning::⚠ Some resources still need replacement after refresh"
+          echo "::warning::This may indicate a configuration mismatch"
         fi
       fi
     fi
