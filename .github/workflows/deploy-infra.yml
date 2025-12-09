@@ -364,11 +364,9 @@ jobs:
             echo "::notice::State refresh completed"
           fi
 
-      - name: Terraform Refresh State
+      - name: Terraform Refresh State (Pre-Plan Sync)
         id: refresh
-        if: |
-          (inputs.action == 'plan' || inputs.action == 'apply') &&
-          steps.check_state_services.outputs.services_in_state != 'true'
+        if: inputs.action == 'plan' || inputs.action == 'apply'
         continue-on-error: true
         timeout-minutes: 5
         run: |
@@ -376,7 +374,6 @@ jobs:
           REFRESH_ARGS="-no-color"
           
           # Check if state exists - if not, skip refresh (fresh deployment)
-          # Use -chdir consistently instead of cd to avoid path issues
           if ! terraform -chdir="$PLAN_DIR" state list -no-color >/dev/null 2>&1; then
             echo "::notice::No Terraform state found - skipping refresh (fresh deployment)"
             echo "::notice::This is expected when starting with a new/empty state"
@@ -389,29 +386,51 @@ jobs:
           
           if [ -n "$VAR_FILES" ]; then
             for var_file in $VAR_FILES; do
-              REFRESH_ARGS="$REFRESH_ARGS -var-file=$var_file"
+              if [ -f "$PLAN_DIR/$var_file" ]; then
+                REFRESH_ARGS="$REFRESH_ARGS -var-file=$var_file"
+              fi
             done
           fi
           
-          echo "::notice::Refreshing Terraform state to sync with AWS..."
+          echo "::notice::🔄 Refreshing Terraform state to sync with AWS (preventing state drift)..."
           if [ "${{ steps.check_services_empty.outputs.services_empty }}" == "true" ]; then
             echo "::notice::Services map is empty - refreshing infrastructure only (services excluded to avoid crash)"
           else
             echo "::notice::Refreshing all resources including services"
           fi
           
-          # Use timeout to prevent hanging (5 minutes should be enough)
-          timeout 300 terraform -chdir="$PLAN_DIR" refresh $REFRESH_ARGS || {
+          # Use refresh-only mode to update state without making changes
+          # This syncs state with actual AWS resources
+          timeout 300 terraform -chdir="$PLAN_DIR" apply -refresh-only -auto-approve $REFRESH_ARGS 2>&1 | tee /tmp/refresh_output.txt || {
             REFRESH_EXITCODE=$?
             if [ $REFRESH_EXITCODE -eq 124 ]; then
               echo "::warning::State refresh timed out after 5 minutes, but continuing with plan..."
             else
-              echo "::warning::State refresh failed with exit code $REFRESH_EXITCODE, but continuing with plan..."
+              # Check if refresh-only failed because there are no changes (exit code 0 from apply -refresh-only)
+              if grep -q "No changes" /tmp/refresh_output.txt 2>/dev/null; then
+                echo "::notice::✓ State is already in sync with AWS (no changes needed)"
+              else
+                echo "::warning::State refresh failed with exit code $REFRESH_EXITCODE, but continuing with plan..."
+                echo "::warning::Refresh output:"
+                cat /tmp/refresh_output.txt 2>/dev/null || true
+              fi
             fi
             exit 0  # Don't fail the workflow, just warn
           }
           
-          echo "::notice::State refresh completed successfully"
+          # Check if refresh-only made any changes
+          if grep -q "No changes" /tmp/refresh_output.txt 2>/dev/null; then
+            echo "::notice::✓ State is already in sync with AWS"
+          else
+            echo "::notice::✓ State refreshed - updated to match AWS resources"
+            # Show what was updated
+            if grep -q "updated in-place" /tmp/refresh_output.txt 2>/dev/null; then
+              echo "::notice::Resources updated in state:"
+              grep "updated in-place" /tmp/refresh_output.txt | head -5 || true
+            fi
+          fi
+          
+          rm -f /tmp/refresh_output.txt
 
       - name: Detect State Drift (Target Groups)
         id: detect_drift
