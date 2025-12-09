@@ -247,7 +247,7 @@ jobs:
           inputs.module_path == '04-ecs-fargate' &&
           steps.check_services_empty.outputs.services_empty != 'true'
         continue-on-error: true
-        timeout-minutes: 5
+        timeout-minutes: 3
         run: |
           PLAN_DIR="DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}"
           
@@ -256,7 +256,7 @@ jobs:
           # Initialize Terraform
           terraform -chdir="$PLAN_DIR" init -no-color >/dev/null 2>&1 || true
           
-          # Get namespace ID from state or output
+          # Get namespace ID from state
           NAMESPACE_ID=$(terraform -chdir="$PLAN_DIR" state show 'module.ecs_fargate.aws_service_discovery_private_dns_namespace.this' 2>/dev/null | \
             grep -E '^\s+id\s+=' | awk '{print $3}' | tr -d '"' || echo "")
           
@@ -294,13 +294,22 @@ jobs:
           fi
           
           echo "::notice::Found existing services in AWS:"
-          echo "$EXISTING_SERVICES" | while read -r name id; do
-            echo "  - $name ($id)"
-          done
+          echo "$EXISTING_SERVICES"
           
-          # Try to import each service
+          # Build var files for import command
+          IMPORT_ARGS=""
+          VAR_FILES="${{ steps.build_var_files.outputs.var_files }}"
+          if [ -n "$VAR_FILES" ]; then
+            for var_file in $VAR_FILES; do
+              if [ -f "$PLAN_DIR/$var_file" ]; then
+                IMPORT_ARGS="$IMPORT_ARGS -var-file=$var_file"
+              fi
+            done
+          fi
+          
+          # Try to import each service (avoid subshell to preserve IMPORTED counter)
           IMPORTED=0
-          echo "$EXISTING_SERVICES" | while read -r aws_name aws_id; do
+          while IFS=$'\t' read -r aws_name aws_id; do
             # Match AWS service name to Terraform key
             # AWS names are sanitized (e.g., "api", "frontend", "test-app-api")
             # Terraform keys are like "legacy::api", "test-app::test-app-api"
@@ -312,7 +321,8 @@ jobs:
               if [ "$aws_name" = "$EXPECTED_NAME" ]; then
                 echo "::notice::Importing: $aws_name -> module.ecs_fargate.aws_service_discovery_service.services[\"$tf_key\"]"
                 
-                if terraform -chdir="$PLAN_DIR" import \
+                # Use var files to avoid prompting for var.services
+                if terraform -chdir="$PLAN_DIR" import $IMPORT_ARGS \
                   "module.ecs_fargate.aws_service_discovery_service.services[\"$tf_key\"]" \
                   "$aws_id" 2>&1; then
                   echo "::notice::✓ Successfully imported: $aws_name"
@@ -323,7 +333,7 @@ jobs:
                 break
               fi
             done
-          done
+          done <<< "$EXISTING_SERVICES"
           
           if [ $IMPORTED -gt 0 ]; then
             echo "::notice::Imported $IMPORTED Service Discovery service(s)"
