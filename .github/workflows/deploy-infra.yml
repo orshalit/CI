@@ -312,9 +312,19 @@ jobs:
             grep 'module.ecs_fargate.aws_service_discovery_service.services\["' | \
             sed 's/.*\["\(.*\)"\]/\1/' || echo "")
           
+          echo "::notice::Service Discovery services currently in state:"
+          if [ -n "$STATE_SERVICES" ]; then
+            echo "$STATE_SERVICES" | while read -r svc; do
+              echo "  - $svc"
+            done
+          else
+            echo "  (none)"
+          fi
+          
           # Try to import each service (avoid subshell to preserve IMPORTED counter)
           IMPORTED=0
           SKIPPED=0
+          FAILED=0
           while IFS=$'\t' read -r aws_name aws_id; do
             # Match AWS service name to Terraform key
             # AWS names are sanitized (e.g., "api", "frontend", "test-app-api")
@@ -333,13 +343,30 @@ jobs:
                   echo "::notice::Importing: $aws_name -> module.ecs_fargate.aws_service_discovery_service.services[\"$tf_key\"]"
                   
                   # Use var files to avoid prompting for var.services
-                  if terraform -chdir="$PLAN_DIR" import $IMPORT_ARGS \
+                  IMPORT_OUTPUT=$(terraform -chdir="$PLAN_DIR" import $IMPORT_ARGS \
                     "module.ecs_fargate.aws_service_discovery_service.services[\"$tf_key\"]" \
-                    "$aws_id" 2>&1; then
+                    "$aws_id" 2>&1)
+                  IMPORT_EXIT=$?
+                  
+                  if [ $IMPORT_EXIT -eq 0 ]; then
                     echo "::notice::✓ Successfully imported: $aws_name"
                     IMPORTED=$((IMPORTED + 1))
+                  elif echo "$IMPORT_OUTPUT" | grep -q "Resource already managed by Terraform"; then
+                    echo "::notice::⚠ $aws_name already in state (but with different key or state issue)"
+                    echo "::warning::This may indicate state corruption. Attempting to verify..."
+                    # Check if service exists in state with any key
+                    STATE_CHECK=$(terraform -chdir="$PLAN_DIR" state list 2>/dev/null | grep "$aws_id" || echo "")
+                    if [ -n "$STATE_CHECK" ]; then
+                      echo "::notice::Found in state as: $STATE_CHECK"
+                      SKIPPED=$((SKIPPED + 1))
+                    else
+                      echo "::error::Service exists in AWS but not properly in state. Manual intervention may be needed."
+                      FAILED=$((FAILED + 1))
+                    fi
                   else
-                    echo "::notice::⚠ Import failed for $aws_name (may already be in state or key mismatch)"
+                    echo "::notice::⚠ Import failed for $aws_name:"
+                    echo "$IMPORT_OUTPUT" | head -5
+                    FAILED=$((FAILED + 1))
                   fi
                 fi
                 break
@@ -353,12 +380,15 @@ jobs:
           if [ $SKIPPED -gt 0 ]; then
             echo "::notice::Skipped $SKIPPED Service Discovery service(s) (already in state)"
           fi
-          if [ $IMPORTED -eq 0 ] && [ $SKIPPED -eq 0 ]; then
+          if [ $FAILED -gt 0 ]; then
+            echo "::warning::Failed to import $FAILED Service Discovery service(s)"
+          fi
+          if [ $IMPORTED -eq 0 ] && [ $SKIPPED -eq 0 ] && [ $FAILED -eq 0 ]; then
             echo "::notice::No services were imported (name mismatch or not found in AWS)"
           fi
           
-          # If services are in state but Terraform still tries to create them, refresh state
-          if [ $SKIPPED -gt 0 ]; then
+          # Always refresh state after import attempts to ensure sync
+          if [ $IMPORTED -gt 0 ] || [ $SKIPPED -gt 0 ]; then
             echo "::notice::Refreshing Terraform state to sync with AWS..."
             terraform -chdir="$PLAN_DIR" refresh $IMPORT_ARGS -no-color >/dev/null 2>&1 || true
             echo "::notice::State refresh completed"
@@ -419,15 +449,33 @@ jobs:
           }
           
           # Check if refresh-only made any changes
+          STATE_UPDATED=false
           if grep -q "No changes" /tmp/refresh_output.txt 2>/dev/null; then
             echo "::notice::✓ State is already in sync with AWS"
           else
             echo "::notice::✓ State refreshed - updated to match AWS resources"
+            STATE_UPDATED=true
             # Show what was updated
             if grep -q "updated in-place" /tmp/refresh_output.txt 2>/dev/null; then
               echo "::notice::Resources updated in state:"
               grep "updated in-place" /tmp/refresh_output.txt | head -5 || true
             fi
+            # Check if any resources were added to state (imported via refresh)
+            if grep -q "has been imported" /tmp/refresh_output.txt 2>/dev/null; then
+              echo "::notice::Resources imported during refresh:"
+              grep "has been imported" /tmp/refresh_output.txt | head -5 || true
+            fi
+          fi
+          
+          # If state was updated, invalidate any existing plan file
+          # This ensures plan is recreated with fresh state
+          if [ "$STATE_UPDATED" = "true" ] && [ -f "$PLAN_DIR/tfplan" ]; then
+            echo "::notice::⚠ State was updated - existing plan file will be invalidated"
+            echo "::notice::Plan will be recreated with fresh state"
+            rm -f "$PLAN_DIR/tfplan" || true
+            echo "state_updated=true" >> $GITHUB_OUTPUT
+          else
+            echo "state_updated=false" >> $GITHUB_OUTPUT
           fi
           
           rm -f /tmp/refresh_output.txt
