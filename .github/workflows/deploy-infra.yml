@@ -5,6 +5,11 @@ name: Deploy Infrastructure (deploy-infra)
 
 on:
   workflow_dispatch:
+
+# Prevent concurrent runs on the same environment/module to avoid state corruption
+concurrency:
+  group: deploy-${{ github.event.inputs.environment }}-${{ github.event.inputs.module_path }}
+  cancel-in-progress: false  # Wait for current run to finish (safer than canceling)
     inputs:
       environment:
         description: 'Target Environment'
