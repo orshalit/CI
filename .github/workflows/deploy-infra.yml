@@ -252,8 +252,8 @@ jobs:
           REFRESH_ARGS="-no-color"
           
           # Check if state exists - if not, skip refresh (fresh deployment)
-          cd "$PLAN_DIR"
-          if ! terraform state list -no-color >/dev/null 2>&1; then
+          # Use -chdir consistently instead of cd to avoid path issues
+          if ! terraform -chdir="$PLAN_DIR" state list -no-color >/dev/null 2>&1; then
             echo "::notice::No Terraform state found - skipping refresh (fresh deployment)"
             echo "::notice::This is expected when starting with a new/empty state"
             exit 0
