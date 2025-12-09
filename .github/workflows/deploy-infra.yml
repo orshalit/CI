@@ -839,7 +839,8 @@ jobs:
           steps.plan.outcome == 'success' && 
           steps.plan_changes.outputs.has_changes == 'true' &&
           (steps.verify_plan_stale.outcome == 'success' || steps.verify_plan_stale.outputs.plan_stale != 'true') &&
-          steps.comprehensive_validation.outputs.validation_failed != 'true'
+          steps.comprehensive_validation.outputs.validation_failed != 'true' &&
+          steps.idempotency_check.outcome == 'success'
         uses: ./.github/actions/terraform-apply
         with:
           terraform_path: DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}

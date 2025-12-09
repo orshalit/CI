@@ -147,13 +147,23 @@ if [ -n "$NAMESPACE_ID" ] && [ -f "$PLAN_DIR/services.generated.tfvars" ]; then
       fi
     done
     
-    # After imports/updates, refresh state to sync configuration
-    # This ensures Terraform sees the actual AWS configuration (e.g., health_check_custom_config)
-    # and avoids unnecessary replacements
-    if [ $IMPORTED_COUNT -gt 0 ]; then
+    # Always refresh state to sync configuration attributes (e.g., health_check_custom_config)
+    # This ensures Terraform sees the actual AWS configuration and avoids unnecessary replacements
+    # Even if no imports happened, we need to refresh to sync attributes that might have been
+    # added to AWS services but not reflected in state
+    if [ -n "$EXPECTED_KEYS" ]; then
       echo "::notice::Refreshing state to sync configuration with AWS..."
-      terraform -chdir="$PLAN_DIR" apply -refresh-only -auto-approve $TF_ARGS >/dev/null 2>&1 || true
-      echo "::notice::✓ State refreshed"
+      REFRESH_OUTPUT=$(terraform -chdir="$PLAN_DIR" apply -refresh-only -auto-approve $TF_ARGS 2>&1 || echo "")
+      if echo "$REFRESH_OUTPUT" | grep -q "No changes"; then
+        echo "::notice::✓ State is already in sync with AWS"
+      else
+        echo "::notice::✓ State refreshed - configuration attributes synced"
+        # Show what was updated
+        if echo "$REFRESH_OUTPUT" | grep -q "updated in-place"; then
+          echo "::notice::Resources updated in state:"
+          echo "$REFRESH_OUTPUT" | grep "updated in-place" | head -5 || true
+        fi
+      fi
     fi
   fi
 fi
