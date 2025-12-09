@@ -597,6 +597,56 @@ jobs:
             echo "key_mismatch=unknown" >> $GITHUB_OUTPUT
           fi
 
+      - name: Verify Service Discovery State Before Plan
+        id: verify_sd_state
+        if: |
+          (inputs.action == 'plan' || inputs.action == 'apply') &&
+          inputs.module_path == '04-ecs-fargate' &&
+          steps.check_services_empty.outputs.services_empty != 'true'
+        continue-on-error: true
+        run: |
+          PLAN_DIR="DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}"
+          
+          echo "::notice::Verifying Service Discovery services are in state..."
+          
+          # Get expected service keys
+          if [ ! -f "$PLAN_DIR/services.generated.tfvars" ]; then
+            exit 0
+          fi
+          
+          EXPECTED_KEYS=$(grep -E '^\s+"[^"]+::[^"]+"\s*=\s*\{' "$PLAN_DIR/services.generated.tfvars" | \
+            sed 's/^\s*"\([^"]*\)".*/\1/' || echo "")
+          
+          if [ -z "$EXPECTED_KEYS" ]; then
+            exit 0
+          fi
+          
+          # Check which services are in state
+          STATE_SERVICES=$(terraform -chdir="$PLAN_DIR" state list 2>/dev/null | \
+            grep 'module.ecs_fargate.aws_service_discovery_service.services\["' | \
+            sed 's/.*\["\(.*\)"\]/\1/' || echo "")
+          
+          MISSING_IN_STATE=""
+          for tf_key in $EXPECTED_KEYS; do
+            if ! echo "$STATE_SERVICES" | grep -q "^$tf_key$"; then
+              MISSING_IN_STATE="$MISSING_IN_STATE $tf_key"
+            fi
+          done
+          
+          if [ -n "$MISSING_IN_STATE" ]; then
+            echo "::error::⚠️ Service Discovery services NOT in state (will cause 'Service already exists' errors):"
+            for svc in $MISSING_IN_STATE; do
+              echo "::error::  - $svc"
+            done
+            echo "::error::These services exist in AWS but not in Terraform state."
+            echo "::error::The import step should have added them, but it may have failed."
+            echo "::error::Plan will try to create them, which will fail."
+            echo "services_missing_in_state=true" >> $GITHUB_OUTPUT
+          else
+            echo "::notice::✓ All Service Discovery services are in state"
+            echo "services_missing_in_state=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Terraform Plan
         id: plan
         if: inputs.action == 'plan' || inputs.action == 'apply'
