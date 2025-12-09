@@ -44,20 +44,21 @@ jobs:
       - name: Checkout CI repository
         uses: actions/checkout@v4
 
-      - name: Debug GitHub context
-        run: |
-          echo "repository: $GITHUB_REPOSITORY"
-          echo "ref:        $GITHUB_REF"
-          echo "event_name: $GITHUB_EVENT_NAME"
-
-      - name: Debug AWS role and region
-        run: |
-          echo "Has AWS_ROLE_ARN: $([ -n \"$AWS_ROLE_ARN\" ] && echo yes || echo no)"
-          echo "AWS_ROLE_ARN length: ${#AWS_ROLE_ARN}"
-          echo "AWS_REGION: $AWS_REGION"
-        env:
-          AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
-          AWS_REGION: ${{ secrets.AWS_REGION }}
+      # Debug steps removed - uncomment if needed for troubleshooting
+      # - name: Debug GitHub context
+      #   run: |
+      #     echo "repository: $GITHUB_REPOSITORY"
+      #     echo "ref:        $GITHUB_REF"
+      #     echo "event_name: $GITHUB_EVENT_NAME"
+      #
+      # - name: Debug AWS role and region
+      #   run: |
+      #     echo "Has AWS_ROLE_ARN: $([ -n \"$AWS_ROLE_ARN\" ] && echo yes || echo no)"
+      #     echo "AWS_ROLE_ARN length: ${#AWS_ROLE_ARN}"
+      #     echo "AWS_REGION: $AWS_REGION"
+      #   env:
+      #     AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+      #     AWS_REGION: ${{ secrets.AWS_REGION }}
 
       - name: Terraform Setup
         uses: ./.github/actions/terraform-setup
@@ -206,12 +207,8 @@ jobs:
           
           # Check if state has any ECS services
           # Use terraform state list to find services (safe even with empty services config)
-          if terraform state list -no-color 2>/dev/null | grep -q "aws_ecs_service.services\["; then
-            echo "services_in_state=true" >> $GITHUB_OUTPUT
+            if terraform state list -no-color 2>/dev/null | grep -q "aws_ecs_service.services\["; then
             EXISTING_SERVICES=$(terraform state list -no-color 2>/dev/null | grep "aws_ecs_service.services\[" || echo "")
-            echo "existing_services<<EOF" >> $GITHUB_OUTPUT
-            echo "$EXISTING_SERVICES" >> $GITHUB_OUTPUT
-            echo "EOF" >> $GITHUB_OUTPUT
             
             echo ""
             echo "::error::╔══════════════════════════════════════════════════════════════╗"
@@ -240,7 +237,6 @@ jobs:
             echo "::error::This ensures services in config match your YAML definitions."
             exit 1
           else
-            echo "services_in_state=false" >> $GITHUB_OUTPUT
             echo "::notice::✓ No existing services in state"
             echo "::notice::✓ Safe to proceed with empty services config (fresh deployment)"
           fi
@@ -349,9 +345,6 @@ jobs:
             echo "::notice::⚠ State was updated - existing plan file will be invalidated"
             echo "::notice::Plan will be recreated with fresh state"
             rm -f "$PLAN_DIR/tfplan" || true
-            echo "state_updated=true" >> $GITHUB_OUTPUT
-          else
-            echo "state_updated=false" >> $GITHUB_OUTPUT
           fi
           
           rm -f /tmp/refresh_output.txt
@@ -373,19 +366,15 @@ jobs:
               export ENVIRONMENT="${{ inputs.environment }}"
               
               if scripts/verify-target-group-health-checks.sh; then
-                echo "drift_detected=false" >> $GITHUB_OUTPUT
                 echo "::notice::No state drift detected"
               else
-                echo "drift_detected=true" >> $GITHUB_OUTPUT
                 echo "::warning::State drift detected! Consider running terraform refresh manually."
               fi
             else
               echo "::notice::State drift detection script not found, skipping..."
-              echo "drift_detected=unknown" >> $GITHUB_OUTPUT
             fi
           else
             echo "::notice::State drift detection only runs for ECS Fargate module"
-            echo "drift_detected=skipped" >> $GITHUB_OUTPUT
           fi
 
       - name: Check for service key mismatches (pre-plan)
@@ -449,10 +438,8 @@ jobs:
               echo "::warning::To preserve services, consider:"
               echo "::warning::  1. State migration: terraform state mv 'aws_ecs_service.services[\"old-key\"]' 'aws_ecs_service.services[\"new-key\"]'"
               echo "::warning::  2. Or add the service back to YAML if it was accidentally removed"
-              echo "key_mismatch=true" >> $GITHUB_OUTPUT
             else
               echo "::notice::✓ All services in state match config keys"
-              echo "key_mismatch=false" >> $GITHUB_OUTPUT
             fi
             
             if [ -n "$SERVICES_TO_CREATE" ]; then
@@ -470,7 +457,6 @@ jobs:
             fi
           else
             echo "::notice::Cannot compare - state or config services list is empty"
-            echo "key_mismatch=unknown" >> $GITHUB_OUTPUT
           fi
 
       - name: Pre-Plan State Validation Summary
@@ -533,10 +519,8 @@ jobs:
                 echo "::notice::  - $svc"
               done
             fi
-            echo "resources_missing_in_state=true" >> $GITHUB_OUTPUT
           else
             echo "::notice::✓ All expected resources are in state"
-            echo "resources_missing_in_state=false" >> $GITHUB_OUTPUT
           fi
 
       - name: Terraform Plan
@@ -661,8 +645,6 @@ jobs:
             
             echo "$CREATED_RESOURCES" > /tmp/resources_to_create.txt || true
           fi
-          
-          echo "state_snapshot_created=true" >> $GITHUB_OUTPUT
 
       - name: Idempotency Check Before Apply
         id: idempotency_check
@@ -863,14 +845,11 @@ jobs:
             
             if scripts/verify-target-group-health-checks.sh; then
               echo "::notice::✓ All target group health check paths verified successfully"
-              echo "verification_passed=true" >> $GITHUB_OUTPUT
             else
               echo "::warning::⚠ State drift detected after apply. Target groups may not match configuration."
-              echo "verification_passed=false" >> $GITHUB_OUTPUT
             fi
           else
             echo "::notice::Verification script not found, skipping..."
-            echo "verification_passed=skipped" >> $GITHUB_OUTPUT
           fi
 
       - name: Targeted Cleanup on Apply Failure
