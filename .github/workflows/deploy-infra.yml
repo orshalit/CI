@@ -649,7 +649,6 @@ jobs:
       - name: Idempotency Check Before Apply
         id: idempotency_check
         if: inputs.action == 'apply' && steps.plan.outcome == 'success' && steps.plan_changes.outputs.has_changes == 'true'
-        continue-on-error: true
         run: |
           PLAN_DIR="DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}"
           
