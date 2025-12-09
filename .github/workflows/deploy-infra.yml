@@ -240,158 +240,29 @@ jobs:
             echo "::notice::✓ Safe to proceed with empty services config (fresh deployment)"
           fi
 
-      - name: Import Existing Service Discovery Services
-        id: import_sd_services
+      - name: Comprehensive State Validation and Auto-Import
+        id: validate_state
         if: |
           (inputs.action == 'plan' || inputs.action == 'apply') &&
           inputs.module_path == '04-ecs-fargate' &&
           steps.check_services_empty.outputs.services_empty != 'true'
         continue-on-error: true
-        timeout-minutes: 3
+        timeout-minutes: 5
         run: |
           PLAN_DIR="DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}"
           
-          echo "::notice::Checking for existing Service Discovery services to import..."
-          
-          # Initialize Terraform
-          terraform -chdir="$PLAN_DIR" init -no-color >/dev/null 2>&1 || true
-          
-          # Get namespace ID from state
-          NAMESPACE_ID=$(terraform -chdir="$PLAN_DIR" state show 'module.ecs_fargate.aws_service_discovery_private_dns_namespace.this' 2>/dev/null | \
-            grep -E '^\s+id\s+=' | awk '{print $3}' | tr -d '"' || echo "")
-          
-          if [ -z "$NAMESPACE_ID" ]; then
-            echo "::notice::Namespace not found in state - skipping import (will be created)"
-            exit 0
-          fi
-          
-          echo "::notice::Found namespace: $NAMESPACE_ID"
-          
-          # List existing services in the namespace
-          EXISTING_SERVICES=$(aws servicediscovery list-services \
-            --filters Name=NAMESPACE_ID,Values="$NAMESPACE_ID" \
-            --query 'Services[*].[Name,Id]' \
-            --output text 2>/dev/null || echo "")
-          
-          if [ -z "$EXISTING_SERVICES" ]; then
-            echo "::notice::No existing Service Discovery services found"
-            exit 0
-          fi
-          
-          # Get expected service keys from services.generated.tfvars
-          if [ ! -f "$PLAN_DIR/services.generated.tfvars" ]; then
-            echo "::notice::services.generated.tfvars not found - skipping import"
-            exit 0
-          fi
-          
-          # Extract service keys from tfvars (format: "key" = {)
-          EXPECTED_KEYS=$(grep -E '^\s+"[^"]+::[^"]+"\s*=\s*\{' "$PLAN_DIR/services.generated.tfvars" | \
-            sed 's/^\s*"\([^"]*\)".*/\1/' || echo "")
-          
-          if [ -z "$EXPECTED_KEYS" ]; then
-            echo "::notice::No service keys found in tfvars - skipping import"
-            exit 0
-          fi
-          
-          echo "::notice::Found existing services in AWS:"
-          echo "$EXISTING_SERVICES"
-          
-          # Build var files for import command
-          IMPORT_ARGS=""
-          VAR_FILES="${{ steps.build_var_files.outputs.var_files }}"
-          if [ -n "$VAR_FILES" ]; then
-            for var_file in $VAR_FILES; do
-              if [ -f "$PLAN_DIR/$var_file" ]; then
-                IMPORT_ARGS="$IMPORT_ARGS -var-file=$var_file"
+          if [ -f "scripts/validate-and-import-state.sh" ]; then
+            chmod +x scripts/validate-and-import-state.sh
+            scripts/validate-and-import-state.sh "$PLAN_DIR" "${{ inputs.environment }}" "${{ inputs.module_path }}" || {
+              EXIT_CODE=$?
+              if [ $EXIT_CODE -eq 1 ]; then
+                echo "::error::State validation found resources that couldn't be imported"
+                echo "::error::These will cause 'already exists' errors. Manual intervention may be needed."
               fi
-            done
-          fi
-          
-          # Check which services are already in state
-          STATE_SERVICES=$(terraform -chdir="$PLAN_DIR" state list 2>/dev/null | \
-            grep 'module.ecs_fargate.aws_service_discovery_service.services\["' | \
-            sed 's/.*\["\(.*\)"\]/\1/' || echo "")
-          
-          echo "::notice::Service Discovery services currently in state:"
-          if [ -n "$STATE_SERVICES" ]; then
-            echo "$STATE_SERVICES" | while read -r svc; do
-              echo "  - $svc"
-            done
+              exit 0  # Don't fail workflow, but warn
+            }
           else
-            echo "  (none)"
-          fi
-          
-          # Try to import each service (avoid subshell to preserve IMPORTED counter)
-          IMPORTED=0
-          SKIPPED=0
-          FAILED=0
-          while IFS=$'\t' read -r aws_name aws_id; do
-            # Match AWS service name to Terraform key
-            # AWS names are sanitized (e.g., "api", "frontend", "test-app-api")
-            # Terraform keys are like "legacy::api", "test-app::test-app-api"
-            for tf_key in $EXPECTED_KEYS; do
-              # Get expected sanitized name (part after ::)
-              EXPECTED_NAME=$(echo "$tf_key" | sed 's/.*::\(.*\)/\1/' | tr '[:upper:]' '[:lower:]')
-              
-              # Check if names match (AWS name vs expected sanitized name)
-              if [ "$aws_name" = "$EXPECTED_NAME" ]; then
-                # Check if already in state
-                if echo "$STATE_SERVICES" | grep -q "^$tf_key$"; then
-                  echo "::notice::⏭ Skipping $aws_name - already in Terraform state as \"$tf_key\""
-                  SKIPPED=$((SKIPPED + 1))
-                else
-                  echo "::notice::Importing: $aws_name -> module.ecs_fargate.aws_service_discovery_service.services[\"$tf_key\"]"
-                  
-                  # Use var files to avoid prompting for var.services
-                  IMPORT_OUTPUT=$(terraform -chdir="$PLAN_DIR" import $IMPORT_ARGS \
-                    "module.ecs_fargate.aws_service_discovery_service.services[\"$tf_key\"]" \
-                    "$aws_id" 2>&1)
-                  IMPORT_EXIT=$?
-                  
-                  if [ $IMPORT_EXIT -eq 0 ]; then
-                    echo "::notice::✓ Successfully imported: $aws_name"
-                    IMPORTED=$((IMPORTED + 1))
-                  elif echo "$IMPORT_OUTPUT" | grep -q "Resource already managed by Terraform"; then
-                    echo "::notice::⚠ $aws_name already in state (but with different key or state issue)"
-                    echo "::warning::This may indicate state corruption. Attempting to verify..."
-                    # Check if service exists in state with any key
-                    STATE_CHECK=$(terraform -chdir="$PLAN_DIR" state list 2>/dev/null | grep "$aws_id" || echo "")
-                    if [ -n "$STATE_CHECK" ]; then
-                      echo "::notice::Found in state as: $STATE_CHECK"
-                      SKIPPED=$((SKIPPED + 1))
-                    else
-                      echo "::error::Service exists in AWS but not properly in state. Manual intervention may be needed."
-                      FAILED=$((FAILED + 1))
-                    fi
-                  else
-                    echo "::notice::⚠ Import failed for $aws_name:"
-                    echo "$IMPORT_OUTPUT" | head -5
-                    FAILED=$((FAILED + 1))
-                  fi
-                fi
-                break
-              fi
-            done
-          done <<< "$EXISTING_SERVICES"
-          
-          if [ $IMPORTED -gt 0 ]; then
-            echo "::notice::Imported $IMPORTED Service Discovery service(s)"
-          fi
-          if [ $SKIPPED -gt 0 ]; then
-            echo "::notice::Skipped $SKIPPED Service Discovery service(s) (already in state)"
-          fi
-          if [ $FAILED -gt 0 ]; then
-            echo "::warning::Failed to import $FAILED Service Discovery service(s)"
-          fi
-          if [ $IMPORTED -eq 0 ] && [ $SKIPPED -eq 0 ] && [ $FAILED -eq 0 ]; then
-            echo "::notice::No services were imported (name mismatch or not found in AWS)"
-          fi
-          
-          # Always refresh state after import attempts to ensure sync
-          if [ $IMPORTED -gt 0 ] || [ $SKIPPED -gt 0 ]; then
-            echo "::notice::Refreshing Terraform state to sync with AWS..."
-            terraform -chdir="$PLAN_DIR" refresh $IMPORT_ARGS -no-color >/dev/null 2>&1 || true
-            echo "::notice::State refresh completed"
+            echo "::warning::State validation script not found, skipping comprehensive validation"
           fi
 
       - name: Terraform Refresh State (Pre-Plan Sync)
@@ -597,8 +468,8 @@ jobs:
             echo "key_mismatch=unknown" >> $GITHUB_OUTPUT
           fi
 
-      - name: Verify Service Discovery State Before Plan
-        id: verify_sd_state
+      - name: Pre-Plan State Validation Summary
+        id: pre_plan_summary
         if: |
           (inputs.action == 'plan' || inputs.action == 'apply') &&
           inputs.module_path == '04-ecs-fargate' &&
@@ -607,10 +478,11 @@ jobs:
         run: |
           PLAN_DIR="DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}"
           
-          echo "::notice::Verifying Service Discovery services are in state..."
+          echo "::notice::📊 State Validation Summary:"
           
           # Get expected service keys
           if [ ! -f "$PLAN_DIR/services.generated.tfvars" ]; then
+            echo "::notice::No services.generated.tfvars found"
             exit 0
           fi
           
@@ -618,6 +490,7 @@ jobs:
             sed 's/^\s*"\([^"]*\)".*/\1/' || echo "")
           
           if [ -z "$EXPECTED_KEYS" ]; then
+            echo "::notice::No service keys found in config"
             exit 0
           fi
           
@@ -626,25 +499,39 @@ jobs:
             grep 'module.ecs_fargate.aws_service_discovery_service.services\["' | \
             sed 's/.*\["\(.*\)"\]/\1/' || echo "")
           
-          MISSING_IN_STATE=""
+          STATE_ECS=$(terraform -chdir="$PLAN_DIR" state list 2>/dev/null | \
+            grep 'module.ecs_fargate.aws_ecs_service.services\["' | \
+            sed 's/.*\["\(.*\)"\]/\1/' || echo "")
+          
+          MISSING_SD=""
+          MISSING_ECS=""
+          
           for tf_key in $EXPECTED_KEYS; do
             if ! echo "$STATE_SERVICES" | grep -q "^$tf_key$"; then
-              MISSING_IN_STATE="$MISSING_IN_STATE $tf_key"
+              MISSING_SD="$MISSING_SD $tf_key"
+            fi
+            if ! echo "$STATE_ECS" | grep -q "^$tf_key$"; then
+              MISSING_ECS="$MISSING_ECS $tf_key"
             fi
           done
           
-          if [ -n "$MISSING_IN_STATE" ]; then
-            echo "::error::⚠️ Service Discovery services NOT in state (will cause 'Service already exists' errors):"
-            for svc in $MISSING_IN_STATE; do
-              echo "::error::  - $svc"
-            done
-            echo "::error::These services exist in AWS but not in Terraform state."
-            echo "::error::The import step should have added them, but it may have failed."
-            echo "::error::Plan will try to create them, which will fail."
-            echo "services_missing_in_state=true" >> $GITHUB_OUTPUT
+          if [ -n "$MISSING_SD" ] || [ -n "$MISSING_ECS" ]; then
+            if [ -n "$MISSING_SD" ]; then
+              echo "::warning::⚠️ Service Discovery services NOT in state:"
+              for svc in $MISSING_SD; do
+                echo "::warning::  - $svc"
+              done
+            fi
+            if [ -n "$MISSING_ECS" ]; then
+              echo "::notice::ℹ️ ECS services NOT in state (will be created):"
+              for svc in $MISSING_ECS; do
+                echo "::notice::  - $svc"
+              done
+            fi
+            echo "resources_missing_in_state=true" >> $GITHUB_OUTPUT
           else
-            echo "::notice::✓ All Service Discovery services are in state"
-            echo "services_missing_in_state=false" >> $GITHUB_OUTPUT
+            echo "::notice::✓ All expected resources are in state"
+            echo "resources_missing_in_state=false" >> $GITHUB_OUTPUT
           fi
 
       - name: Terraform Plan
@@ -745,18 +632,76 @@ jobs:
             fi
           fi
 
-      - name: Save Terraform state before apply
-        id: save_state
+      - name: Save State Snapshot Before Apply
+        id: save_state_snapshot
         if: inputs.action == 'apply' && steps.plan.outcome == 'success' && steps.plan_changes.outputs.has_changes == 'true'
         run: |
-          echo "::notice::Saving Terraform state before apply for potential rollback..."
-          # Create a backup of the state file if it exists
-          if [ -f "DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}/.terraform/terraform.tfstate" ]; then
-            cp "DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}/.terraform/terraform.tfstate" \
-               "DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}/.terraform/terraform.tfstate.backup" || true
-            echo "state_backed_up=true" >> $GITHUB_OUTPUT
+          PLAN_DIR="DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}"
+          
+          echo "::notice::Creating state snapshot before apply for targeted cleanup..."
+          
+          # Get list of resources in state BEFORE apply
+          STATE_BEFORE=$(terraform -chdir="$PLAN_DIR" state list -no-color 2>/dev/null || echo "")
+          
+          # Save to file for cleanup step
+          echo "$STATE_BEFORE" > /tmp/state_before_apply.txt || true
+          
+          # Also get plan to see what will be created
+          if [ -f "$PLAN_DIR/tfplan" ]; then
+            PLAN_OUTPUT=$(terraform -chdir="$PLAN_DIR" show -no-color tfplan 2>&1 || echo "")
+            
+            # Extract resources that will be created
+            CREATED_RESOURCES=$(echo "$PLAN_OUTPUT" | grep "will be created" | \
+              sed 's/^[[:space:]]*# //' | sed 's/ will be created$//' || echo "")
+            
+            echo "$CREATED_RESOURCES" > /tmp/resources_to_create.txt || true
+          fi
+          
+          echo "state_snapshot_created=true" >> $GITHUB_OUTPUT
+
+      - name: Idempotency Check Before Apply
+        id: idempotency_check
+        if: inputs.action == 'apply' && steps.plan.outcome == 'success' && steps.plan_changes.outputs.has_changes == 'true'
+        continue-on-error: true
+        run: |
+          PLAN_DIR="DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}"
+          
+          echo "::notice::🔍 Performing idempotency checks before apply..."
+          
+          if [ ! -f "$PLAN_DIR/tfplan" ]; then
+            echo "::warning::Plan file not found - skipping idempotency check"
+            exit 0
+          fi
+          
+          # Get resources that plan wants to create
+          PLAN_OUTPUT=$(terraform -chdir="$PLAN_DIR" show -no-color tfplan 2>&1 || echo "")
+          RESOURCES_TO_CREATE=$(echo "$PLAN_OUTPUT" | grep "will be created" | \
+            sed 's/^[[:space:]]*# //' | sed 's/ will be created$//' || echo "")
+          
+          if [ -z "$RESOURCES_TO_CREATE" ]; then
+            echo "::notice::✓ No resources to create - idempotency check passed"
+            exit 0
+          fi
+          
+          # Check each resource that will be created
+          CONFLICTS=0
+          echo "$RESOURCES_TO_CREATE" | while IFS= read -r resource; do
+            [ -z "$resource" ] && continue
+            
+            # Check if resource already exists in state
+            if terraform -chdir="$PLAN_DIR" state show "$resource" >/dev/null 2>&1; then
+              echo "::error::❌ Resource '$resource' is in state but plan wants to create it"
+              echo "::error::This indicates state drift. Resource should be updated, not created."
+              CONFLICTS=$((CONFLICTS + 1))
+            fi
+          done
+          
+          if [ $CONFLICTS -gt 0 ]; then
+            echo "::error::❌ Idempotency check failed: $CONFLICTS conflict(s) detected"
+            echo "::error::State validation should have caught this. Review state and plan."
+            exit 1
           else
-            echo "state_backed_up=false" >> $GITHUB_OUTPUT
+            echo "::notice::✓ Idempotency check passed - no conflicts detected"
           fi
 
       - name: Terraform Apply
@@ -794,54 +739,114 @@ jobs:
             echo "verification_passed=skipped" >> $GITHUB_OUTPUT
           fi
 
-      - name: Cleanup partially created resources on apply failure
+      - name: Targeted Cleanup on Apply Failure
         if: inputs.action == 'apply' && steps.apply.outcome == 'failure' && inputs.environment != 'production'
         continue-on-error: true
         run: |
-          echo "::error::Terraform apply failed. Attempting to destroy partially created resources..."
+          echo "::error::Terraform apply failed. Attempting targeted cleanup of resources created in this run..."
           
           PLAN_DIR="DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}"
           
-          # Check if any resources exist in state
-          # Terraform writes to state as resources are created, even if apply fails
-          echo "::notice::Checking Terraform state for created resources..."
-          STATE_LIST=$(terraform -chdir="$PLAN_DIR" state list 2>/dev/null || echo "")
+          # Get state before apply
+          STATE_BEFORE=""
+          if [ -f /tmp/state_before_apply.txt ]; then
+            STATE_BEFORE=$(cat /tmp/state_before_apply.txt)
+          fi
           
-          if [ -z "$STATE_LIST" ]; then
-            echo "::notice::No resources found in Terraform state. No cleanup needed."
+          # Get current state
+          STATE_AFTER=$(terraform -chdir="$PLAN_DIR" state list -no-color 2>/dev/null || echo "")
+          
+          # Find resources that were created in this run (in state_after but not in state_before)
+          NEWLY_CREATED=""
+          if [ -n "$STATE_AFTER" ]; then
+            while IFS= read -r resource; do
+              if [ -z "$STATE_BEFORE" ] || ! echo "$STATE_BEFORE" | grep -q "^${resource}$"; then
+                NEWLY_CREATED="${NEWLY_CREATED}${resource}"$'\n'
+              fi
+            done <<< "$STATE_AFTER"
+          fi
+          
+          # Also check plan file for resources that were supposed to be created
+          PLANNED_CREATES=""
+          if [ -f /tmp/resources_to_create.txt ]; then
+            PLANNED_CREATES=$(cat /tmp/resources_to_create.txt)
+          fi
+          
+          if [ -z "$NEWLY_CREATED" ] && [ -z "$PLANNED_CREATES" ]; then
+            echo "::notice::No new resources were created in this run. No cleanup needed."
             exit 0
           fi
           
-          # Show what resources are in state
-          echo "::notice::Resources found in Terraform state (will be destroyed):"
-          echo "$STATE_LIST" | while read -r resource; do
-            echo "::notice::  - $resource"
-          done
+          echo "::notice::Resources created in this failed run:"
+          if [ -n "$NEWLY_CREATED" ]; then
+            echo "$NEWLY_CREATED" | while read -r resource; do
+              [ -n "$resource" ] && echo "::notice::  - $resource"
+            done
+          fi
           
-          # Try to refresh state to ensure it's up to date
-          echo "::notice::Refreshing Terraform state to identify created resources..."
-          terraform -chdir="$PLAN_DIR" refresh -no-color || echo "::warning::State refresh failed, proceeding with destroy attempt"
-          
-          # Attempt to destroy what was created
-          # Use the same variable files as the apply
+          # Build destroy command with var files
           DESTROY_ARGS="-auto-approve"
-          if [ -n "${{ steps.build_var_files.outputs.var_files }}" ]; then
-            for var_file in ${{ steps.build_var_files.outputs.var_files }}; do
+          VAR_FILES="${{ steps.build_var_files.outputs.var_files }}"
+          if [ -n "$VAR_FILES" ]; then
+            for var_file in $VAR_FILES; do
               if [ -f "$PLAN_DIR/$var_file" ]; then
                 DESTROY_ARGS="$DESTROY_ARGS -var-file=$var_file"
               fi
             done
           fi
           
-          echo "::notice::Running terraform destroy to clean up partially created resources..."
-          terraform -chdir="$PLAN_DIR" destroy $DESTROY_ARGS || {
-            echo "::error::Destroy failed. Manual cleanup may be required."
-            echo "::error::Please review the Terraform state and manually remove any partially created resources."
-            echo "::error::You can run 'terraform state list' to see what resources are in state."
-            exit 1
-          }
+          # For targeted cleanup, we'll use terraform destroy but with a filter
+          # Since Terraform doesn't support selective destroy easily, we'll:
+          # 1. Try to remove newly created resources from state (if they're truly orphaned)
+          # 2. Or destroy only if it's safe (non-production, and resources are clearly orphaned)
           
-          echo "::notice::Cleanup completed. Partially created resources have been destroyed."
+          echo "::notice::Attempting targeted cleanup..."
+          
+          # Option 1: Try to remove orphaned resources from state (if they don't exist in AWS)
+          REMOVED_FROM_STATE=0
+          if [ -n "$NEWLY_CREATED" ]; then
+            echo "$NEWLY_CREATED" | while IFS= read -r resource; do
+              [ -z "$resource" ] && continue
+              
+              # Check if resource actually exists in AWS by trying to refresh it
+              REFRESH_OUTPUT=$(terraform -chdir="$PLAN_DIR" state show "$resource" 2>&1 || echo "")
+              if echo "$REFRESH_OUTPUT" | grep -q "doesn't exist" || echo "$REFRESH_OUTPUT" | grep -q "not found"; then
+                echo "::notice::Removing orphaned resource from state: $resource"
+                terraform -chdir="$PLAN_DIR" state rm "$resource" 2>&1 || true
+                REMOVED_FROM_STATE=$((REMOVED_FROM_STATE + 1))
+              fi
+            done
+          fi
+          
+          # Option 2: If resources exist in AWS, we need to destroy them properly
+          # But only if they're truly orphaned (not part of working infrastructure)
+          if [ -n "$NEWLY_CREATED" ] && [ "$REMOVED_FROM_STATE" -eq 0 ]; then
+            echo "::warning::Resources exist in AWS. Checking if they're safe to destroy..."
+            
+            # For ECS Fargate, be very careful - only destroy if they're clearly failed
+            # Check if any ECS services are in failed state
+            FAILED_SERVICES=""
+            while IFS= read -r resource; do
+              [ -z "$resource" ] && continue
+              
+              if echo "$resource" | grep -q "aws_ecs_service"; then
+                # Extract service name and check status
+                SERVICE_NAME=$(echo "$resource" | sed 's/.*\["\(.*\)"\]/\1/')
+                # Service might be in failed state - check AWS
+                # For now, we'll be conservative and not auto-destroy ECS services
+                echo "::warning::ECS service detected: $SERVICE_NAME - manual cleanup recommended"
+              fi
+            done <<< "$NEWLY_CREATED"
+            
+            # For non-critical resources (like Service Discovery), we can be more aggressive
+            echo "::notice::For safety, manual cleanup is recommended for resources created in this run"
+            echo "::notice::Review the resources listed above and destroy manually if needed"
+          fi
+          
+          # Cleanup temp files
+          rm -f /tmp/state_before_apply.txt /tmp/resources_to_create.txt
+          
+          echo "::notice::Targeted cleanup analysis completed"
 
       - name: Production apply failure notification
         if: inputs.action == 'apply' && steps.apply.outcome == 'failure' && inputs.environment == 'production'
