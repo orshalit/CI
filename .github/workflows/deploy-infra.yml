@@ -761,9 +761,58 @@ jobs:
             fi
           fi
 
+      - name: Verify Plan is Still Valid
+        id: verify_plan_stale
+        if: inputs.action == 'apply' && steps.plan.outcome == 'success' && steps.plan_changes.outputs.has_changes == 'true'
+        continue-on-error: true
+        run: |
+          PLAN_DIR="DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}"
+          
+          echo "::notice::🔍 Verifying plan is still valid (checking for state changes since plan)..."
+          
+          if [ ! -f "$PLAN_DIR/tfplan" ]; then
+            echo "::error::Plan file not found - cannot verify"
+            exit 1
+          fi
+          
+          # Refresh state to check if anything changed
+          # Use refresh-only to avoid making changes
+          VAR_FILES="${{ steps.build_var_files.outputs.var_files }}"
+          REFRESH_ARGS="-refresh-only -auto-approve -no-color"
+          
+          if [ -n "$VAR_FILES" ]; then
+            for var_file in $VAR_FILES; do
+              if [ -f "$PLAN_DIR/$var_file" ]; then
+                REFRESH_ARGS="$REFRESH_ARGS -var-file=$var_file"
+              fi
+            done
+          fi
+          
+          REFRESH_OUTPUT=$(terraform -chdir="$PLAN_DIR" apply $REFRESH_ARGS 2>&1 || echo "")
+          
+          # Check if refresh detected any changes
+          if echo "$REFRESH_OUTPUT" | grep -q "No changes"; then
+            echo "::notice::✓ Plan is still valid - no state changes detected"
+            echo "plan_stale=false" >> $GITHUB_OUTPUT
+          else
+            echo "::error::❌ Plan is stale - state has changed since plan was created"
+            echo "::error::State changes detected:"
+            echo "$REFRESH_OUTPUT" | grep -E "(will be|must be|updated in-place)" | head -10 || true
+            echo ""
+            echo "::error::To fix:"
+            echo "::error::  1. Re-run the workflow to create a fresh plan"
+            echo "::error::  2. Or manually run: terraform plan"
+            echo "plan_stale=true" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
       - name: Terraform Apply
         id: apply
-        if: inputs.action == 'apply' && steps.plan.outcome == 'success' && steps.plan_changes.outputs.has_changes == 'true'
+        if: |
+          inputs.action == 'apply' && 
+          steps.plan.outcome == 'success' && 
+          steps.plan_changes.outputs.has_changes == 'true' &&
+          (steps.verify_plan_stale.outcome == 'success' || steps.verify_plan_stale.outputs.plan_stale != 'true')
         uses: ./.github/actions/terraform-apply
         with:
           terraform_path: DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}
