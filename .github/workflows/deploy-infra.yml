@@ -554,14 +554,30 @@ jobs:
           fi
 
       - name: Cleanup partially created resources on apply failure
-        if: inputs.action == 'apply' && steps.apply.outcome == 'failure' && steps.save_state.outputs.state_backed_up == 'true' && inputs.environment != 'production'
+        if: inputs.action == 'apply' && steps.apply.outcome == 'failure' && inputs.environment != 'production'
         continue-on-error: true
         run: |
           echo "::error::Terraform apply failed. Attempting to destroy partially created resources..."
           
           PLAN_DIR="DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}"
           
-          # Try to refresh state to see what was actually created
+          # Check if any resources exist in state
+          # Terraform writes to state as resources are created, even if apply fails
+          echo "::notice::Checking Terraform state for created resources..."
+          STATE_LIST=$(terraform -chdir="$PLAN_DIR" state list 2>/dev/null || echo "")
+          
+          if [ -z "$STATE_LIST" ]; then
+            echo "::notice::No resources found in Terraform state. No cleanup needed."
+            exit 0
+          fi
+          
+          # Show what resources are in state
+          echo "::notice::Resources found in Terraform state (will be destroyed):"
+          echo "$STATE_LIST" | while read -r resource; do
+            echo "::notice::  - $resource"
+          done
+          
+          # Try to refresh state to ensure it's up to date
           echo "::notice::Refreshing Terraform state to identify created resources..."
           terraform -chdir="$PLAN_DIR" refresh -no-color || echo "::warning::State refresh failed, proceeding with destroy attempt"
           
@@ -580,6 +596,7 @@ jobs:
           terraform -chdir="$PLAN_DIR" destroy $DESTROY_ARGS || {
             echo "::error::Destroy failed. Manual cleanup may be required."
             echo "::error::Please review the Terraform state and manually remove any partially created resources."
+            echo "::error::You can run 'terraform state list' to see what resources are in state."
             exit 1
           }
           
