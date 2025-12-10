@@ -676,7 +676,16 @@ jobs:
         run: |
           BACKEND_CHANGED="${{ needs.detect-changes.outputs.backend-code }}"
           FRONTEND_CHANGED="${{ needs.detect-changes.outputs.frontend-code }}"
+          APP_CODE_CHANGED="${{ needs.detect-changes.outputs.app-code }}"
           FULL_MATRIX='${{ needs.detect-app-images.outputs.matrix }}'
+          
+          echo "::group::Change Detection Debug"
+          echo "Backend changed: $BACKEND_CHANGED"
+          echo "Frontend changed: $FRONTEND_CHANGED"
+          echo "App code changed: $APP_CODE_CHANGED"
+          echo "Full matrix:"
+          echo "$FULL_MATRIX" | jq '.'
+          echo "::endgroup::"
           
           # If both changed or tag/manual, use full matrix
           if [ "${{ startsWith(github.ref, 'refs/tags/v') }}" == "true" ] || [ "${{ github.event_name == 'workflow_dispatch' }}" == "true" ]; then
@@ -688,6 +697,7 @@ jobs:
           fi
           
           # Filter matrix based on what changed
+          # If app-code changed, we should build all app-specific images (more permissive)
           if [ "$BACKEND_CHANGED" == "true" ] && [ "$FRONTEND_CHANGED" == "true" ]; then
             echo "matrix<<EOF" >> $GITHUB_OUTPUT
             echo "$FULL_MATRIX" >> $GITHUB_OUTPUT
@@ -715,6 +725,8 @@ jobs:
             COUNT=$(echo "$FILTERED" | jq '.include | length')
             if [ "$COUNT" -eq 0 ]; then
               echo "::error::Frontend code changed but no frontend images found in matrix!"
+              echo "::error::Full matrix was:"
+              echo "$FULL_MATRIX" | jq '.'
               echo "matrix<<EOF" >> $GITHUB_OUTPUT
               echo "$FULL_MATRIX" >> $GITHUB_OUTPUT
               echo "EOF" >> $GITHUB_OUTPUT
@@ -724,10 +736,30 @@ jobs:
               echo "$FILTERED" >> $GITHUB_OUTPUT
               echo "EOF" >> $GITHUB_OUTPUT
               echo "::notice::Building only frontend images ($COUNT image(s))"
+              echo "::notice::Filtered matrix:"
+              echo "$FILTERED" | jq '.'
+            fi
+          elif [ "$APP_CODE_CHANGED" == "true" ]; then
+            # App code changed but path filter didn't detect backend/frontend specifically
+            # This can happen with dorny/paths-filter - be more permissive and build all app-specific images
+            echo "::warning::App code changed but backend/frontend detection unclear - building all app-specific images"
+            FILTERED=$(echo "$FULL_MATRIX" | jq '.include | map(select(.type == "app-specific")) | {include: .}')
+            COUNT=$(echo "$FILTERED" | jq '.include | length')
+            if [ "$COUNT" -eq 0 ]; then
+              echo "::warning::No app-specific images found, using full matrix"
+              echo "matrix<<EOF" >> $GITHUB_OUTPUT
+              echo "$FULL_MATRIX" >> $GITHUB_OUTPUT
+              echo "EOF" >> $GITHUB_OUTPUT
+            else
+              echo "matrix<<EOF" >> $GITHUB_OUTPUT
+              echo "$FILTERED" >> $GITHUB_OUTPUT
+              echo "EOF" >> $GITHUB_OUTPUT
+              echo "::notice::Building app-specific images ($COUNT image(s))"
             fi
           else
             echo "matrix={\"include\": []}" >> $GITHUB_OUTPUT
             echo "::warning::No code changes detected, skipping builds"
+            echo "::warning::This might be a path filter issue - check the detect-changes job output"
           fi
 
   build-images:
