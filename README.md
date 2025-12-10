@@ -9,6 +9,8 @@
 
 **Production-grade full-stack application** with enterprise CI/CD, comprehensive testing, security scanning, and automated versioning.
 
+<!-- Test deployment trigger -->
+
 ## 🚀 Features
 
 - ✅ **FastAPI Backend** with async support, rate limiting, and structured logging
