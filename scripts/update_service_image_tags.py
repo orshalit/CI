@@ -145,8 +145,9 @@ def main():
         print("Error: --service-tags must be a JSON object", file=sys.stderr)
         sys.exit(1)
     
-    changes_made = update_image_tags(args.tfvars_file, service_tags)
-    sys.exit(0 if changes_made or not service_tags else 1)
+    update_image_tags(args.tfvars_file, service_tags)
+    # Always exit 0 for idempotency; "no changes needed" is success.
+    sys.exit(0)
 
 
 if __name__ == "__main__":
