@@ -1,4 +1,11 @@
 # Development docker-compose.yml
+# 
+# NOTE: This file is currently app-specific (test-app). For a scalable, multi-app setup,
+# regenerate it using: python scripts/generate-docker-compose.py
+# 
+# The script automatically detects all applications in applications/ and generates
+# docker-compose.yml with services for each app's backend/frontend.
+#
 # For production, use docker-compose.prod.yml with proper environment variables
 
 services:
@@ -32,17 +39,17 @@ services:
           cpus: '0.25'
           memory: 128M
 
-  backend:
+  test-app-backend:
     build:
-      context: ./backend
+      context: ./applications/test-app/backend
       dockerfile: Dockerfile
       args:
         BUILD_DATE: ${BUILD_DATE:-2024-01-01T00:00:00Z}
         BUILD_VERSION: ${BUILD_VERSION:-dev}
         GIT_COMMIT: ${GIT_COMMIT:-unknown}
         GIT_BRANCH: ${GIT_BRANCH:-main}
-    image: ci-backend:${BUILD_VERSION:-dev}
-    container_name: backend
+    image: test-app-backend:${BUILD_VERSION:-dev}
+    container_name: test-app-backend
     ports:
       - "8000:8000"
     environment:
@@ -73,21 +80,23 @@ services:
           cpus: '0.25'
           memory: 128M
 
-  frontend:
+  test-app-frontend:
     build:
-      context: ./frontend
+      context: ./applications/test-app/frontend
       dockerfile: Dockerfile
       args:
         BUILD_DATE: ${BUILD_DATE:-2024-01-01T00:00:00Z}
         BUILD_VERSION: ${BUILD_VERSION:-dev}
         GIT_COMMIT: ${GIT_COMMIT:-unknown}
         GIT_BRANCH: ${GIT_BRANCH:-main}
-    image: ci-frontend:${BUILD_VERSION:-dev}
-    container_name: frontend
+    image: test-app-frontend:${BUILD_VERSION:-dev}
+    container_name: test-app-frontend
     ports:
       - "3000:3000"
+    environment:
+      VITE_BACKEND_URL: ${TEST_APP_BACKEND_URL:-http://test-app-backend:8000}
     depends_on:
-      backend:
+      test-app-backend:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/"]
