@@ -783,9 +783,20 @@ jobs:
     name: Build Docker Images
     runs-on: ubuntu-latest
     needs: [code-quality, backend-tests, frontend-tests, app-backend-tests, app-frontend-tests, prepare-build, detect-changes, filter-build-matrix]
-    # This is the single source of truth. If the filter job determines there are images, we build.
-    # It simplifies the logic and avoids complex `needs` context issues with skipped jobs.
-    if: needs.filter-build-matrix.outputs.has_images == 'true'
+    # We must use `always()` so this job's `if` condition is evaluated even if upstream jobs are skipped.
+    # The condition then checks that all necessary preceding jobs either succeeded or were skipped,
+    # and most importantly, that the filter-build-matrix job has determined there are images to build.
+    if: |
+      always() &&
+      needs.filter-build-matrix.outputs.has_images == 'true' &&
+      (needs.prepare-build.result == 'success') &&
+      (needs.detect-changes.result == 'success') &&
+      (needs.filter-build-matrix.result == 'success') &&
+      (needs.code-quality.result == 'success' || needs.code-quality.result == 'skipped') &&
+      (needs.backend-tests.result == 'success' || needs.backend-tests.result == 'skipped') &&
+      (needs.frontend-tests.result == 'success' || needs.frontend-tests.result == 'skipped') &&
+      (needs.app-backend-tests.result == 'success' || needs.app-backend-tests.result == 'skipped') &&
+      (needs.app-frontend-tests.result == 'success' || needs.app-frontend-tests.result == 'skipped')
     strategy:
       matrix: ${{ fromJson(needs.filter-build-matrix.outputs.matrix) }}
       fail-fast: false
