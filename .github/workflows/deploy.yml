@@ -151,6 +151,64 @@ jobs:
             echo "application=all" >> $GITHUB_OUTPUT
           fi
 
+      - name: Verify Image Exists
+        id: verify_image
+        if: |
+          (steps.vars.outputs.action == 'plan' || steps.vars.outputs.action == 'apply') &&
+          steps.vars.outputs.module_path == '04-ecs-fargate' &&
+          steps.vars.outputs.image_tag != '' &&
+          steps.vars.outputs.image_tag != 'null'
+        run: |
+          IMAGE_TAG="${{ steps.vars.outputs.image_tag }}"
+          SERVICES_TFVARS="DEVOPS/live/${{ steps.vars.outputs.environment }}/04-ecs-fargate/services.generated.tfvars"
+
+          if [ ! -f "$SERVICES_TFVARS" ]; then
+            echo "::warning::Services TFVARS file not found at $SERVICES_TFVARS. Skipping image verification."
+            exit 0
+          fi
+
+          # Login to GHCR first to inspect manifests
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin || {
+            echo "::error::Failed to login to GHCR.io. Ensure GITHUB_TOKEN has 'packages:read' permission."
+            exit 1
+          }
+
+          # Extract image_name values from the HCL tfvars file.
+          # This uses grep and sed to parse HCL, which is brittle but avoids installing another tool.
+          IMAGE_NAMES=$(grep -E '^\s*image_name\s*=' "$SERVICES_TFVARS" | sed -E 's/^\s*image_name\s*=\s*"(.*)"\s*$/\1/')
+
+          if [ -z "$IMAGE_NAMES" ]; then
+            echo "::error::Could not extract any image_name from $SERVICES_TFVARS."
+            exit 1
+          fi
+
+          echo "::notice::Verifying existence of the following images with tag: $IMAGE_TAG"
+          echo "$IMAGE_NAMES"
+
+          ALL_IMAGES_EXIST=true
+          for IMG_NAME in $IMAGE_NAMES; do
+            FULL_IMAGE_PATH="ghcr.io/${{ github.repository_owner }}/${IMG_NAME}:${IMAGE_TAG}"
+            echo "::group::Checking for $FULL_IMAGE_PATH"
+            if docker manifest inspect "$FULL_IMAGE_PATH" > /dev/null 2>&1; then
+              echo "::notice::✓ Docker image $FULL_IMAGE_PATH found."
+            else
+              echo "::error::❌ Docker image $FULL_IMAGE_PATH NOT found in GitHub Container Registry."
+              ALL_IMAGES_EXIST=false
+            fi
+            echo "::endgroup::"
+          done
+
+          if [ "$ALL_IMAGES_EXIST" = "false" ]; then
+            echo "::error::One or more required Docker images are missing for tag '$IMAGE_TAG'."
+            echo "::error::This deployment cannot proceed. This is expected if the CI pipeline only built a subset of images."
+            echo "::error::Please check the CI/CD Pipeline workflow run for commit ${{ github.sha }} to see which images were built."
+            echo "::error::CI Workflow URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id || github.run_id }}"
+            exit 1
+          fi
+
+          echo "::notice::✓ All required Docker images found in registry."
+          echo "image_check_passed=true" >> $GITHUB_OUTPUT
+
       - name: Terraform Setup
         uses: ./.github/actions/terraform-setup
         with:
