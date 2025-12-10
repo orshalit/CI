@@ -79,6 +79,7 @@ jobs:
           filters: |
             app-code:
               - 'applications/**'  # All application code
+              - 'dhall/**'  # Dhall service definitions (affect what gets deployed)
               - 'Dockerfile*'
               - 'docker-compose*.yml'
             backend-code:
@@ -93,6 +94,8 @@ jobs:
               - '**/package-lock.json'
               - '**/vite.config.*'
               - '**/Dockerfile'  # Frontend Dockerfiles
+            dhall-code:
+              - 'dhall/**'  # Dhall service definitions
 
   # ===========================================================================
   # Code Quality Checks
