@@ -22,9 +22,15 @@ jobs:
 
       - name: Install Dhall
         run: |
+          # Install core dhall interpreter
           curl -L https://github.com/dhall-lang/dhall-haskell/releases/download/1.41.2/dhall-1.41.2-x86_64-linux.tar.bz2 | tar -xj
-          sudo mv dhall /usr/local/bin/
+          sudo mv ./bin/dhall /usr/local/bin/
           dhall --version
+
+          # Install dhall-json for dhall-to-json
+          curl -L https://github.com/dhall-lang/dhall-haskell/releases/download/1.41.2/dhall-json-1.41.2-x86_64-linux.tar.bz2 | tar -xj
+          sudo mv ./bin/dhall-to-json /usr/local/bin/
+          dhall-to-json --version
 
       - name: Convert Dhall to JSON
         id: convert
