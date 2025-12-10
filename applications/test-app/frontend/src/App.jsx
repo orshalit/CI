@@ -87,7 +87,10 @@ function App() {
   return (
     <div className="app">
       <div className="container">
-        <h1>Application</h1>
+        <div className="header-section">
+          <h1>Test Application</h1>
+          <div className="deployment-badge">🚀 Deployed</div>
+        </div>
 
         <div className="card">
           <h2>Service Status</h2>
