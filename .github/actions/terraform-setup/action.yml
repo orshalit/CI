@@ -45,6 +45,8 @@ runs:
         path: ${{ inputs.devops_path }}
         ssh-key: ${{ inputs.devops_repo_key }}
         ref: main  # Ensure we use latest code
+        fetch-depth: 1  # Shallow clone for speed, but ensure we get latest commit
+        clean: true  # Remove any existing files before checkout
 
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v4

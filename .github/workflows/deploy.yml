@@ -36,8 +36,9 @@ on:
       - completed
 
 concurrency:
-  group: deploy-${{ github.event.inputs.environment || 'dev' }}-${{ github.event.inputs.module_path || '04-ecs-fargate' }}
-  cancel-in-progress: false
+  # Use dynamic group based on trigger type - supports both workflow_dispatch and workflow_run
+  group: deploy-${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment || 'dev' }}-${{ github.event_name == 'workflow_dispatch' && github.event.inputs.module_path || '04-ecs-fargate' }}
+  cancel-in-progress: false  # Keep false for resilience - don't cancel in-progress deployments
 
 jobs:
   deploy:
@@ -65,8 +66,18 @@ jobs:
             echo "environment=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
             echo "module_path=${{ github.event.inputs.module_path }}" >> $GITHUB_OUTPUT
             echo "action=${{ github.event.inputs.action }}" >> $GITHUB_OUTPUT
-            echo "image_tag=${{ github.event.inputs.image_tag || github.sha }}" >> $GITHUB_OUTPUT
-            echo "application=${{ github.event.inputs.application || 'all' }}" >> $GITHUB_OUTPUT
+            # Use provided image_tag or fallback to commit SHA (idempotent - same commit = same tag)
+            IMAGE_TAG="${{ github.event.inputs.image_tag }}"
+            if [ -z "$IMAGE_TAG" ] || [ "$IMAGE_TAG" = "" ]; then
+              IMAGE_TAG="${{ github.sha }}"
+            fi
+            echo "image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
+            # Use provided application or default to 'all' (scalable - supports multi-app)
+            APPLICATION="${{ github.event.inputs.application }}"
+            if [ -z "$APPLICATION" ] || [ "$APPLICATION" = "" ]; then
+              APPLICATION="all"
+            fi
+            echo "application=$APPLICATION" >> $GITHUB_OUTPUT
           else
             echo "::notice::Automated workflow run trigger"
             echo "environment=dev" >> $GITHUB_OUTPUT # Or determine dynamically if needed
@@ -88,7 +99,7 @@ jobs:
       - name: Terraform Format
         id: fmt
         run: |
-          TERRAFORM_DIR="DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}"
+          TERRAFORM_DIR="DEVOPS/live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}"
           
           echo "::notice::Formatting Terraform files in $TERRAFORM_DIR..."
           
@@ -98,7 +109,7 @@ jobs:
           # Check if any files were modified by comparing before/after
           cd DEVOPS
           # Get list of files that would be formatted (all .tf and .tfvars files)
-          FORMATTED_FILES=$(find "live/${{ inputs.environment }}/${{ inputs.module_path }}" -type f \( -name "*.tf" -o -name "*.tfvars" \) 2>/dev/null || true)
+          FORMATTED_FILES=$(find "live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}" -type f \( -name "*.tf" -o -name "*.tfvars" \) 2>/dev/null || true)
           
           if [ -z "$FORMATTED_FILES" ]; then
             echo "::notice::No Terraform files found to format"
@@ -106,7 +117,7 @@ jobs:
           fi
           
           # Check git status for changes in the terraform directory
-          if git diff --quiet "live/${{ inputs.environment }}/${{ inputs.module_path }}"; then
+          if git diff --quiet "live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}"; then
             echo "::notice::✓ All Terraform files are properly formatted"
           else
             echo "::error::╔══════════════════════════════════════════════════════════════╗"
@@ -114,7 +125,7 @@ jobs:
             echo "::error::╚══════════════════════════════════════════════════════════════╝"
             echo ""
             echo "::error::The following files need formatting:"
-            git status --short "live/${{ inputs.environment }}/${{ inputs.module_path }}" | while read -r line; do
+            git status --short "live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}" | while read -r line; do
               echo "::error::  • $line"
             done
             echo ""
@@ -126,19 +137,106 @@ jobs:
             echo "::error::  3. Push and re-run this workflow"
             echo ""
             echo "::group::Show formatted changes"
-            git diff "live/${{ inputs.environment }}/${{ inputs.module_path }}"
+            git diff "live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}"
             echo "::endgroup::"
             exit 1
           fi
 
+      - name: Verify DEVOPS Repository Version
+        id: verify_devops
+        if: steps.vars.outputs.action == 'plan' || steps.vars.outputs.action == 'apply'
+        run: |
+          cd DEVOPS
+          echo "::notice::DEVOPS Repository Information:"
+          echo "::notice::  Branch: $(git rev-parse --abbrev-ref HEAD)"
+          echo "::notice::  Commit: $(git rev-parse HEAD)"
+          echo "::notice::  Date: $(git log -1 --format=%ci)"
+          echo "::notice::  Message: $(git log -1 --format=%s)"
+          
+          # Store commit hash for reference
+          echo "commit_hash=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+          
+          # Verify we're on main branch
+          CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+          if [ "$CURRENT_BRANCH" != "main" ]; then
+            echo "::warning::DEVOPS repo is on branch '$CURRENT_BRANCH', not 'main'"
+          fi
+          
+          # Check if repo is clean (no uncommitted changes)
+          if ! git diff-index --quiet HEAD --; then
+            echo "::warning::DEVOPS repo has uncommitted changes"
+            git status --short
+          fi
+
       - name: Terraform Init
         id: init
-        run: terraform -chdir=DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }} init -upgrade
+        run: terraform -chdir=DEVOPS/live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }} init -upgrade
+
+      - name: Validate Variable Declarations
+        id: validate_vars
+        if: |
+          (steps.vars.outputs.action == 'plan' || steps.vars.outputs.action == 'apply') &&
+          steps.vars.outputs.module_path == '04-ecs-fargate'
+        run: |
+          PLAN_DIR="DEVOPS/live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}"
+          VAR_FILE="$PLAN_DIR/variables.tf"
+          
+          echo "::notice::Validating variable declarations for ECS Fargate module..."
+          
+          # Check if variables.tf exists
+          if [ ! -f "$VAR_FILE" ]; then
+            echo "::error::variables.tf not found at $VAR_FILE"
+            exit 1
+          fi
+          
+          # For ECS Fargate deployments, we always pass global_image_tag via extra_vars
+          # Check if image_tag is set (it should always be, either from input or github.sha)
+          IMAGE_TAG_VALUE="${{ steps.vars.outputs.image_tag }}"
+          REQUIRED_VAR="global_image_tag"
+          
+          if [ -n "$IMAGE_TAG_VALUE" ] && [ "$IMAGE_TAG_VALUE" != "null" ] && [ "$IMAGE_TAG_VALUE" != "" ]; then
+            echo "::notice::Image tag will be passed as: $REQUIRED_VAR=$IMAGE_TAG_VALUE"
+            echo "::notice::Checking for required variable declaration: $REQUIRED_VAR"
+            
+            # Check if variable is declared in variables.tf
+            if ! grep -qE "^\s*variable\s+\"$REQUIRED_VAR\"" "$VAR_FILE"; then
+              echo "::error::╔══════════════════════════════════════════════════════════════╗"
+              echo "::error::║  ⚠️  MISSING VARIABLE DECLARATION  ⚠️  ║"
+              echo "::error::╚══════════════════════════════════════════════════════════════╝"
+              echo ""
+              echo "::error::Variable '$REQUIRED_VAR' is being passed via extra_vars but is not declared in:"
+              echo "::error::  $VAR_FILE"
+              echo ""
+              echo "::error::The workflow will pass: $REQUIRED_VAR=$IMAGE_TAG_VALUE"
+              echo "::error::But Terraform configuration doesn't declare this variable."
+              echo ""
+              echo "::error::DEVOPS Repository Commit: ${{ steps.verify_devops.outputs.commit_hash }}"
+              echo ""
+              echo "::error::Current variables.tf content (first 50 lines):"
+              head -50 "$VAR_FILE" | sed 's/^/::error::  /' || true
+              echo ""
+              echo "::error::Solution:"
+              echo "::error::  1. Ensure DEVOPS repository has the latest code with variable declaration"
+              echo "::error::  2. Add variable declaration to $VAR_FILE:"
+              echo "::error::     variable \"$REQUIRED_VAR\" {"
+              echo "::error::       description = \"Optional override tag applied to all services\""
+              echo "::error::       type        = string"
+              echo "::error::       default     = null"
+              echo "::error::     }"
+              echo "::error::  3. Commit and push to DEVOPS repository"
+              echo "::error::  4. Re-run this workflow"
+              exit 1
+            else
+              echo "::notice::✓ Variable '$REQUIRED_VAR' is properly declared in $VAR_FILE"
+            fi
+          else
+            echo "::warning::Image tag is empty or null, skipping variable validation"
+          fi
 
       - name: Check for terraform.tfvars
         id: check_tfvars
         run: |
-          if [ -f "DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}/terraform.tfvars" ]; then
+          if [ -f "DEVOPS/live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}/terraform.tfvars" ]; then
             echo "tfvars_exists=true" >> $GITHUB_OUTPUT
           else
             echo "tfvars_exists=false" >> $GITHUB_OUTPUT
@@ -147,7 +245,7 @@ jobs:
       - name: Check for services.generated.tfvars
         id: check_services_tfvars
         run: |
-          if [ -f "DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}/services.generated.tfvars" ]; then
+          if [ -f "DEVOPS/live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}/services.generated.tfvars" ]; then
             echo "services_tfvars_exists=true" >> $GITHUB_OUTPUT
           else
             echo "services_tfvars_exists=false" >> $GITHUB_OUTPUT
@@ -155,9 +253,9 @@ jobs:
 
       - name: Check if services is empty
         id: check_services_empty
-        if: inputs.action == 'plan' || inputs.action == 'apply'
+        if: steps.vars.outputs.action == 'plan' || steps.vars.outputs.action == 'apply'
         run: |
-          PLAN_DIR="DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}"
+          PLAN_DIR="DEVOPS/live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}"
           
           # Check if services.generated.tfvars exists and has non-empty services
           if [ -f "$PLAN_DIR/services.generated.tfvars" ]; then
@@ -183,12 +281,12 @@ jobs:
         # Skip validate for ECS Fargate module entirely to avoid Terraform crash
         # This is a known Terraform bug with marked values in conditional expressions
         # terraform plan will catch all validation errors anyway
-        if: inputs.module_path != '04-ecs-fargate'
-        run: terraform -chdir=DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }} validate -no-color || echo "Terraform validate failed (non-blocking); relying on plan for validation."
+        if: steps.vars.outputs.module_path != '04-ecs-fargate'
+        run: terraform -chdir=DEVOPS/live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }} validate -no-color || echo "Terraform validate failed (non-blocking); relying on plan for validation."
 
       - name: Build var files list
         id: build_var_files
-        if: inputs.action == 'plan' || inputs.action == 'apply'
+        if: steps.vars.outputs.action == 'plan' || steps.vars.outputs.action == 'apply'
         run: |
           VAR_FILES=""
           if [ "${{ steps.check_tfvars.outputs.tfvars_exists }}" == "true" ]; then
@@ -209,11 +307,11 @@ jobs:
       - name: Check for existing services in state
         id: check_state_services
         if: |
-          (inputs.action == 'plan' || inputs.action == 'apply') &&
+          (steps.vars.outputs.action == 'plan' || steps.vars.outputs.action == 'apply') &&
           steps.check_services_empty.outputs.services_empty == 'true' &&
-          inputs.module_path == '04-ecs-fargate'
+          steps.vars.outputs.module_path == '04-ecs-fargate'
         run: |
-          PLAN_DIR="DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}"
+          PLAN_DIR="DEVOPS/live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}"
           
           echo "::notice::Checking Terraform state for existing services..."
           
@@ -260,17 +358,17 @@ jobs:
       - name: Comprehensive State Validation and Auto-Import
         id: validate_state
         if: |
-          (inputs.action == 'plan' || inputs.action == 'apply') &&
-          inputs.module_path == '04-ecs-fargate' &&
+          (steps.vars.outputs.action == 'plan' || steps.vars.outputs.action == 'apply') &&
+          steps.vars.outputs.module_path == '04-ecs-fargate' &&
           steps.check_services_empty.outputs.services_empty != 'true'
         continue-on-error: true
         timeout-minutes: 5
         run: |
-          PLAN_DIR="DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}"
+          PLAN_DIR="DEVOPS/live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}"
           
           if [ -f "scripts/validate-and-import-state.sh" ]; then
             chmod +x scripts/validate-and-import-state.sh
-            scripts/validate-and-import-state.sh "$PLAN_DIR" "${{ inputs.environment }}" "${{ inputs.module_path }}" || {
+            scripts/validate-and-import-state.sh "$PLAN_DIR" "${{ steps.vars.outputs.environment }}" "${{ steps.vars.outputs.module_path }}" || {
               EXIT_CODE=$?
               if [ $EXIT_CODE -eq 1 ]; then
                 echo "::error::State validation found resources that couldn't be imported"
@@ -284,10 +382,10 @@ jobs:
 
       - name: Terraform Refresh State (Pre-Plan Sync)
         id: refresh
-        if: inputs.action == 'plan' || inputs.action == 'apply'
+        if: steps.vars.outputs.action == 'plan' || steps.vars.outputs.action == 'apply'
         timeout-minutes: 5
         run: |
-          PLAN_DIR="DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}"
+          PLAN_DIR="DEVOPS/live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}"
           REFRESH_ARGS="-no-color"
           
           # Check if state exists - if not, skip refresh (fresh deployment)
@@ -370,19 +468,19 @@ jobs:
 
       - name: Detect State Drift (Target Groups)
         id: detect_drift
-        if: inputs.action == 'plan' || inputs.action == 'apply'
+        if: steps.vars.outputs.action == 'plan' || steps.vars.outputs.action == 'apply'
         continue-on-error: true
         run: |
-          PLAN_DIR="DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}"
+          PLAN_DIR="DEVOPS/live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}"
           
           # Only check for ECS Fargate module
-          if [[ "${{ inputs.module_path }}" == "04-ecs-fargate" ]]; then
+          if [[ "${{ steps.vars.outputs.module_path }}" == "04-ecs-fargate" ]]; then
             echo "::notice::Checking for state drift in target group health check paths..."
             
             if [ -f "scripts/verify-target-group-health-checks.sh" ]; then
               chmod +x scripts/verify-target-group-health-checks.sh
               export TERRAFORM_DIR="$PLAN_DIR"
-              export ENVIRONMENT="${{ inputs.environment }}"
+              export ENVIRONMENT="${{ steps.vars.outputs.environment }}"
               
               if scripts/verify-target-group-health-checks.sh; then
                 echo "::notice::No state drift detected"
@@ -399,12 +497,12 @@ jobs:
       - name: Check for service key mismatches (pre-plan)
         id: check_service_keys
         if: |
-          (inputs.action == 'plan' || inputs.action == 'apply') &&
+          (steps.vars.outputs.action == 'plan' || steps.vars.outputs.action == 'apply') &&
           steps.check_services_empty.outputs.services_empty != 'true' &&
-          inputs.module_path == '04-ecs-fargate'
+          steps.vars.outputs.module_path == '04-ecs-fargate'
         continue-on-error: true
         run: |
-          PLAN_DIR="DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}"
+          PLAN_DIR="DEVOPS/live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}"
           
           echo "::notice::Checking for service key mismatches between state and config..."
           
@@ -481,12 +579,12 @@ jobs:
       - name: Pre-Plan State Validation Summary
         id: pre_plan_summary
         if: |
-          (inputs.action == 'plan' || inputs.action == 'apply') &&
-          inputs.module_path == '04-ecs-fargate' &&
+          (steps.vars.outputs.action == 'plan' || steps.vars.outputs.action == 'apply') &&
+          steps.vars.outputs.module_path == '04-ecs-fargate' &&
           steps.check_services_empty.outputs.services_empty != 'true'
         continue-on-error: true
         run: |
-          PLAN_DIR="DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}"
+          PLAN_DIR="DEVOPS/live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}"
           
           echo "::notice::📊 State Validation Summary:"
           
@@ -544,19 +642,21 @@ jobs:
 
       - name: Terraform Plan
         id: plan
-        if: inputs.action == 'plan' || inputs.action == 'apply'
+        if: steps.vars.outputs.action == 'plan' || steps.vars.outputs.action == 'apply'
         uses: ./.github/actions/terraform-plan
         with:
-          terraform_path: DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}
+          terraform_path: DEVOPS/live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}
           var_files: ${{ steps.build_var_files.outputs.var_files }}
-          extra_vars: global_image_tag=${{ steps.vars.outputs.image_tag }}
+          # Only pass global_image_tag for ECS Fargate module (dynamic based on module_path)
+          # Use conditional expression: if module_path is 04-ecs-fargate, pass image tag, otherwise empty string
+          extra_vars: ${{ steps.vars.outputs.module_path == '04-ecs-fargate' && format('global_image_tag={0}', steps.vars.outputs.image_tag) || '' }}
           plan_file: "tfplan"
         continue-on-error: true
 
       - name: Debug Plan - Show Replacement Reasons
-        if: inputs.action == 'plan' || inputs.action == 'apply'
+        if: steps.vars.outputs.action == 'plan' || steps.vars.outputs.action == 'apply'
         run: |
-          PLAN_DIR="DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}"
+          PLAN_DIR="DEVOPS/live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}"
           if [ -f "$PLAN_DIR/tfplan" ]; then
             echo "::group::Debug: Resources Being Replaced"
             echo "Checking for resources that need replacement..."
@@ -571,10 +671,10 @@ jobs:
           fi
 
       - name: Add Plan to Summary
-        if: inputs.action == 'plan' || (inputs.action == 'apply' && steps.plan.outcome == 'success')
+        if: steps.vars.outputs.action == 'plan' || (steps.vars.outputs.action == 'apply' && steps.plan.outcome == 'success')
         run: |
           echo "## Terraform Plan Output" >> $GITHUB_STEP_SUMMARY
-          PLAN_DIR="DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}"
+          PLAN_DIR="DEVOPS/live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}"
           if [ -f "$PLAN_DIR/tfplan" ]; then
             echo '```' >> $GITHUB_STEP_SUMMARY
             terraform -chdir="$PLAN_DIR" show -no-color tfplan >> $GITHUB_STEP_SUMMARY 2>&1
@@ -600,9 +700,9 @@ jobs:
 
       - name: Check if plan has changes
         id: plan_changes
-        if: inputs.action == 'apply' && steps.plan.outcome == 'success'
+        if: steps.vars.outputs.action == 'apply' && steps.plan.outcome == 'success'
         run: |
-          PLAN_DIR="DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}"
+          PLAN_DIR="DEVOPS/live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}"
           PLAN_OUTPUT=$(terraform -chdir="$PLAN_DIR" show -no-color tfplan 2>&1)
           
           if echo "$PLAN_OUTPUT" | grep -q "No changes"; then
@@ -643,9 +743,9 @@ jobs:
 
       - name: Save State Snapshot Before Apply
         id: save_state_snapshot
-        if: inputs.action == 'apply' && steps.plan.outcome == 'success' && steps.plan_changes.outputs.has_changes == 'true'
+        if: steps.vars.outputs.action == 'apply' && steps.plan.outcome == 'success' && steps.plan_changes.outputs.has_changes == 'true'
         run: |
-          PLAN_DIR="DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}"
+          PLAN_DIR="DEVOPS/live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}"
           
           echo "::notice::Creating state snapshot before apply for targeted cleanup..."
           
@@ -668,9 +768,9 @@ jobs:
 
       - name: Idempotency Check Before Apply
         id: idempotency_check
-        if: inputs.action == 'apply' && steps.plan.outcome == 'success' && steps.plan_changes.outputs.has_changes == 'true'
+        if: steps.vars.outputs.action == 'apply' && steps.plan.outcome == 'success' && steps.plan_changes.outputs.has_changes == 'true'
         run: |
-          PLAN_DIR="DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}"
+          PLAN_DIR="DEVOPS/live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}"
           
           echo "::notice::🔍 Performing idempotency checks before apply..."
           
@@ -764,14 +864,14 @@ jobs:
 
       - name: Comprehensive Pre-Apply Validation
         id: comprehensive_validation
-        if: inputs.action == 'apply' && steps.plan.outcome == 'success' && steps.plan_changes.outputs.has_changes == 'true'
+        if: steps.vars.outputs.action == 'apply' && steps.plan.outcome == 'success' && steps.plan_changes.outputs.has_changes == 'true'
         continue-on-error: true
         run: |
-          PLAN_DIR="DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}"
+          PLAN_DIR="DEVOPS/live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}"
           
           if [ -f "scripts/comprehensive-pre-apply-validation.sh" ]; then
             chmod +x scripts/comprehensive-pre-apply-validation.sh
-            scripts/comprehensive-pre-apply-validation.sh "$PLAN_DIR" "${{ inputs.environment }}" "${{ inputs.module_path }}" || {
+            scripts/comprehensive-pre-apply-validation.sh "$PLAN_DIR" "${{ steps.vars.outputs.environment }}" "${{ steps.vars.outputs.module_path }}" || {
               EXIT_CODE=$?
               if [ $EXIT_CODE -eq 1 ]; then
                 echo "::error::Comprehensive validation found critical errors"
@@ -790,10 +890,10 @@ jobs:
 
       - name: Verify Plan is Still Valid
         id: verify_plan_stale
-        if: inputs.action == 'apply' && steps.plan.outcome == 'success' && steps.plan_changes.outputs.has_changes == 'true'
+        if: steps.vars.outputs.action == 'apply' && steps.plan.outcome == 'success' && steps.plan_changes.outputs.has_changes == 'true'
         continue-on-error: true
         run: |
-          PLAN_DIR="DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}"
+          PLAN_DIR="DEVOPS/live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}"
           
           echo "::notice::🔍 Verifying plan is still valid (checking for state changes since plan)..."
           
@@ -841,7 +941,7 @@ jobs:
       - name: Terraform Apply
         id: apply
         if: |
-          inputs.action == 'apply' && 
+          steps.vars.outputs.action == 'apply' && 
           steps.plan.outcome == 'success' && 
           steps.plan_changes.outputs.has_changes == 'true' &&
           (steps.verify_plan_stale.outcome == 'success' || steps.verify_plan_stale.outputs.plan_stale != 'true') &&
@@ -849,23 +949,23 @@ jobs:
           steps.idempotency_check.outcome == 'success'
         uses: ./.github/actions/terraform-apply
         with:
-          terraform_path: DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}
+          terraform_path: DEVOPS/live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}
           plan_file: "tfplan"
           auto_approve: "true"
 
       - name: Verify Target Group Health Check Paths (Post-Apply)
         id: verify_health_checks
-        if: inputs.action == 'apply' && steps.apply.outcome == 'success' && inputs.module_path == '04-ecs-fargate'
+        if: steps.vars.outputs.action == 'apply' && steps.apply.outcome == 'success' && steps.vars.outputs.module_path == '04-ecs-fargate'
         continue-on-error: true
         run: |
-          PLAN_DIR="DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}"
+          PLAN_DIR="DEVOPS/live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}"
           
           echo "::notice::Verifying target group health check paths after apply..."
           
           if [ -f "scripts/verify-target-group-health-checks.sh" ]; then
             chmod +x scripts/verify-target-group-health-checks.sh
             export TERRAFORM_DIR="$PLAN_DIR"
-            export ENVIRONMENT="${{ inputs.environment }}"
+            export ENVIRONMENT="${{ steps.vars.outputs.environment }}"
             
             if scripts/verify-target-group-health-checks.sh; then
               echo "::notice::✓ All target group health check paths verified successfully"
@@ -877,12 +977,12 @@ jobs:
           fi
 
       - name: Targeted Cleanup on Apply Failure
-        if: inputs.action == 'apply' && steps.apply.outcome == 'failure' && inputs.environment != 'production'
+        if: steps.vars.outputs.action == 'apply' && steps.apply.outcome == 'failure' && steps.vars.outputs.environment != 'production'
         continue-on-error: true
         run: |
           echo "::error::Terraform apply failed. Attempting targeted cleanup of resources created in this run..."
           
-          PLAN_DIR="DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}"
+          PLAN_DIR="DEVOPS/live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}"
           
           # Get state before apply
           STATE_BEFORE=""
@@ -986,7 +1086,7 @@ jobs:
           echo "::notice::Targeted cleanup analysis completed"
 
       - name: Production apply failure notification
-        if: inputs.action == 'apply' && steps.apply.outcome == 'failure' && inputs.environment == 'production'
+        if: steps.vars.outputs.action == 'apply' && steps.apply.outcome == 'failure' && steps.vars.outputs.environment == 'production'
         run: |
           echo "::error::Terraform apply failed in PRODUCTION environment."
           echo "::error::Automatic cleanup is disabled for production. Manual intervention required."
@@ -997,7 +1097,7 @@ jobs:
           exit 1
 
       - name: No Changes Detected
-        if: inputs.action == 'apply' && steps.plan.outcome == 'success' && steps.plan_changes.outputs.has_changes == 'false'
+        if: steps.vars.outputs.action == 'apply' && steps.plan.outcome == 'success' && steps.plan_changes.outputs.has_changes == 'false'
         run: |
           echo "::notice::No changes to apply. Infrastructure is already up to date."
           echo "## ✅ No Changes Required" >> $GITHUB_STEP_SUMMARY
@@ -1005,25 +1105,26 @@ jobs:
           echo "The Terraform plan showed no changes. Your infrastructure matches the configuration." >> $GITHUB_STEP_SUMMARY
 
       - name: Plan Failed
-        if: inputs.action == 'apply' && steps.plan.outcome == 'failure'
+        if: steps.vars.outputs.action == 'apply' && steps.plan.outcome == 'failure'
         run: |
           echo "::error::Terraform plan failed. Apply cannot proceed."
           exit 1
 
       - name: Terraform Destroy (Production Protection)
-        if: inputs.action == 'destroy' && inputs.environment == 'production'
+        if: steps.vars.outputs.action == 'destroy' && steps.vars.outputs.environment == 'production'
         run: |
           echo "::error::Destroy action is blocked for production environment for safety."
           exit 1
 
       - name: Build var files list for destroy
         id: build_var_files_destroy
-        if: inputs.action == 'destroy' && inputs.environment != 'production'
+        if: steps.vars.outputs.action == 'destroy' && steps.vars.outputs.environment != 'production'
         run: |
           VAR_FILES=""
           if [ "${{ steps.check_tfvars.outputs.tfvars_exists }}" == "true" ]; then
             VAR_FILES="terraform.tfvars"
           fi
+          # For destroy, include services.generated.tfvars even if empty (needed for proper cleanup)
           if [ "${{ steps.check_services_tfvars.outputs.services_tfvars_exists }}" == "true" ]; then
             if [ -n "$VAR_FILES" ]; then
               VAR_FILES="$VAR_FILES services.generated.tfvars"
@@ -1034,9 +1135,9 @@ jobs:
           echo "var_files=$VAR_FILES" >> $GITHUB_OUTPUT
 
       - name: Terraform Destroy
-        if: inputs.action == 'destroy' && inputs.environment != 'production'
+        if: steps.vars.outputs.action == 'destroy' && steps.vars.outputs.environment != 'production'
         run: |
-          PLAN_DIR="DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}"
+          PLAN_DIR="DEVOPS/live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}"
           DESTROY_ARGS="-auto-approve"
           if [ -n "${{ steps.build_var_files_destroy.outputs.var_files }}" ]; then
             for var_file in ${{ steps.build_var_files_destroy.outputs.var_files }}; do
@@ -1045,4 +1146,23 @@ jobs:
               fi
             done
           fi
-          terraform -chdir="$PLAN_DIR" destroy $DESTROY_ARGS
+          # Ensure Terraform is initialized before destroy (idempotency)
+          terraform -chdir="$PLAN_DIR" init -upgrade -no-color || {
+            echo "::error::Terraform init failed before destroy"
+            exit 1
+          }
+          
+          # Verify state exists before destroying (resilience)
+          if ! terraform -chdir="$PLAN_DIR" state list -no-color >/dev/null 2>&1; then
+            echo "::notice::No Terraform state found - nothing to destroy"
+            exit 0
+          fi
+          
+          # Execute destroy with proper error handling
+          terraform -chdir="$PLAN_DIR" destroy $DESTROY_ARGS || {
+            echo "::error::Terraform destroy failed"
+            echo "::error::Some resources may have been destroyed. Review state and AWS console."
+            exit 1
+          }
+          
+          echo "::notice::✓ Destroy completed successfully"
