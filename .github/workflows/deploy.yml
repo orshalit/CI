@@ -96,7 +96,7 @@ jobs:
           aws_region: ${{ secrets.AWS_REGION }}
           terraform_version: '1.6.0'
 
-      - name: Terraform Format Check
+      - name: Terraform Format Check and Auto-Fix
         id: fmt
         run: |
           TERRAFORM_DIR="DEVOPS/live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}"
@@ -107,6 +107,7 @@ jobs:
           if terraform fmt -check -recursive "$TERRAFORM_DIR" 2>&1; then
             echo "::notice::✓ All Terraform files are properly formatted"
             echo "needs_formatting=false" >> $GITHUB_OUTPUT
+            echo "changes_made=false" >> $GITHUB_OUTPUT
             exit 0
           fi
           
@@ -122,42 +123,92 @@ jobs:
           if git diff --quiet "live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}"; then
             echo "::notice::✓ Files were auto-formatted and are now correct"
             echo "needs_formatting=false" >> $GITHUB_OUTPUT
+            echo "changes_made=false" >> $GITHUB_OUTPUT
           else
             echo "needs_formatting=true" >> $GITHUB_OUTPUT
+            echo "changes_made=true" >> $GITHUB_OUTPUT
             
             # Show what changed
-            echo "::error::╔══════════════════════════════════════════════════════════════╗"
-            echo "::error::║  ⚠️  TERRAFORM FORMATTING ISSUES DETECTED  ⚠️  ║"
-            echo "::error::╚══════════════════════════════════════════════════════════════╝"
+            echo "::notice::╔══════════════════════════════════════════════════════════════╗"
+            echo "::notice::║  🔧 AUTO-FORMATTING TERRAFORM FILES  🔧  ║"
+            echo "::notice::╚══════════════════════════════════════════════════════════════╝"
             echo ""
-            echo "::error::The following files were auto-formatted:"
+            echo "::notice::The following files were auto-formatted:"
             git status --short "live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}" | while read -r line; do
-              echo "::error::  • $line"
+              echo "::notice::  • $line"
             done
             echo ""
-            echo "::error::Files have been automatically formatted in this workflow run."
-            echo "::error::"
-            echo "::error::🔧 To prevent this in the future:"
-            echo "::error::  1. Install pre-commit hooks: pip install pre-commit && pre-commit install"
-            echo "::error::  2. Or run 'terraform fmt -recursive' before committing"
-            echo "::error::  3. Or use the 'Terraform Format Check' workflow to auto-fix"
-            echo ""
-            echo "::error::📝 To fix this now:"
-            echo "::error::  1. Go to DEVOPS repo and run: terraform fmt -recursive $TERRAFORM_DIR"
-            echo "::error::  2. Commit the formatted files to DEVOPS repo"
-            echo "::error::  3. Re-run this deployment workflow"
-            echo ""
-            echo "::group::Show formatted changes (for reference)"
+            echo "::group::Show formatted changes"
             git diff "live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}"
             echo "::endgroup::"
           fi
 
-      - name: Fail if formatting issues found
-        if: steps.fmt.outputs.needs_formatting == 'true'
+      - name: Commit formatted files to DEVOPS repo
+        id: commit_formatted
+        if: steps.fmt.outputs.needs_formatting == 'true' && steps.fmt.outputs.changes_made == 'true'
         run: |
-          echo "::error::Deployment blocked due to Terraform formatting issues."
-          echo "::error::Please fix formatting in DEVOPS repo before deploying."
-          exit 1
+          cd DEVOPS
+          
+          echo "::notice::Committing auto-formatted files to DEVOPS repo..."
+          
+          # Configure git for commits
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Stage only the formatted files
+          TERRAFORM_DIR="live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}"
+          git add "$TERRAFORM_DIR"
+          
+          # Check if there are actually changes to commit
+          if git diff --cached --quiet; then
+            echo "::notice::No changes to commit (files may have been formatted already)"
+            echo "committed=false" >> $GITHUB_OUTPUT
+          else
+            # Commit with skip-ci to avoid triggering workflows
+            git commit -m "chore: auto-format Terraform files in ${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }} [skip ci]" || {
+              echo "::warning::Failed to commit (may be no changes or merge conflict)"
+              echo "committed=false" >> $GITHUB_OUTPUT
+              exit 0
+            }
+            
+            echo "committed=true" >> $GITHUB_OUTPUT
+            echo "::notice::✓ Committed formatted files"
+          fi
+
+      - name: Push formatted files to DEVOPS repo
+        id: push_formatted
+        if: steps.commit_formatted.outputs.committed == 'true'
+        run: |
+          cd DEVOPS
+          
+          echo "::notice::Pushing auto-formatted files to DEVOPS repo..."
+          
+          # Push to the same branch (usually main)
+          BRANCH=$(git rev-parse --abbrev-ref HEAD)
+          echo "::notice::Pushing to branch: $BRANCH"
+          
+          git push origin "$BRANCH" || {
+            echo "::warning::Failed to push formatted files"
+            echo "::warning::This may be due to:"
+            echo "::warning::  1. Insufficient permissions (check DEVOPS_REPO_KEY secret)"
+            echo "::warning::  2. Branch protection rules"
+            echo "::warning::  3. The branch has moved ahead"
+            echo "::warning::"
+            echo "::warning::The files have been formatted in this run, but you may need to:"
+            echo "::warning::  1. Pull the latest changes in DEVOPS repo"
+            echo "::warning::  2. Run 'terraform fmt -recursive' locally"
+            echo "::warning::  3. Commit and push manually"
+            exit 0
+          }
+          
+          echo "::notice::✓ Successfully pushed formatted files to DEVOPS repo"
+          echo "::notice::The deployment will continue with the formatted files"
+
+      - name: Continue deployment (formatting fixed)
+        if: steps.fmt.outputs.needs_formatting == 'true' && steps.fmt.outputs.changes_made == 'true'
+        run: |
+          echo "::notice::✓ Terraform formatting issues have been auto-fixed"
+          echo "::notice::Deployment will continue with properly formatted files"
 
       - name: Verify DEVOPS Repository Version
         id: verify_devops
