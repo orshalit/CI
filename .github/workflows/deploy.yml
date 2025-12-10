@@ -66,6 +66,34 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           run-id: ${{ github.event.workflow_run.id }}
           path: .
+        continue-on-error: true
+
+      - name: Verify CI workflow completed successfully
+        if: github.event_name == 'workflow_run'
+        run: |
+          CI_WORKFLOW_STATUS="${{ github.event.workflow_run.conclusion }}"
+          CI_WORKFLOW_ID="${{ github.event.workflow_run.id }}"
+          
+          echo "::notice::CI Workflow Status: $CI_WORKFLOW_STATUS"
+          echo "::notice::CI Workflow ID: $CI_WORKFLOW_ID"
+          
+          if [ "$CI_WORKFLOW_STATUS" != "success" ]; then
+            echo "::error::CI workflow did not complete successfully (status: $CI_WORKFLOW_STATUS)"
+            echo "::error::Deployment cannot proceed without successful image builds"
+            echo "::error::Please check the CI workflow run: https://github.com/${{ github.repository }}/actions/runs/$CI_WORKFLOW_ID"
+            exit 1
+          fi
+          
+          # Verify build-version.txt exists
+          if [ ! -f "build-version.txt" ]; then
+            echo "::error::build-version.txt artifact not found from CI workflow"
+            echo "::error::This means no images were built. Deployment cannot proceed."
+            exit 1
+          fi
+          
+          BUILD_VERSION=$(cat build-version.txt)
+          echo "::notice::✓ CI workflow completed successfully"
+          echo "::notice::✓ Build version artifact found: $BUILD_VERSION"
 
       - name: Set up dynamic variables
         id: vars

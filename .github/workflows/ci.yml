@@ -770,6 +770,7 @@ jobs:
     needs: [code-quality, backend-tests, frontend-tests, app-backend-tests, app-frontend-tests, prepare-build, detect-changes, filter-build-matrix]
     # Build images if backend OR frontend code changed, or on version tags, or manual dispatch
     # Also check that prerequisite jobs succeeded (or were skipped)
+    # IMPORTANT: Check filter-build-matrix succeeded to ensure matrix is valid
     if: |
       (needs.detect-changes.outputs.backend-code == 'true' ||
        needs.detect-changes.outputs.frontend-code == 'true' ||
@@ -779,12 +780,33 @@ jobs:
       (needs.backend-tests.result == 'success' || needs.backend-tests.result == 'skipped') &&
       (needs.frontend-tests.result == 'success' || needs.frontend-tests.result == 'skipped') &&
       (needs.app-backend-tests.result == 'success' || needs.app-backend-tests.result == 'skipped') &&
-      (needs.app-frontend-tests.result == 'success' || needs.app-frontend-tests.result == 'skipped')
+      (needs.app-frontend-tests.result == 'success' || needs.app-frontend-tests.result == 'skipped') &&
+      (needs.filter-build-matrix.result == 'success')
     strategy:
       matrix: ${{ fromJson(needs.filter-build-matrix.outputs.matrix) }}
       fail-fast: false
     
     steps:
+      - name: Validate build matrix
+        run: |
+          MATRIX='${{ needs.filter-build-matrix.outputs.matrix }}'
+          echo "::group::Build Matrix Validation"
+          echo "Matrix JSON:"
+          echo "$MATRIX" | jq '.'
+          
+          # Check if matrix is empty
+          COUNT=$(echo "$MATRIX" | jq '.include | length')
+          if [ "$COUNT" -eq 0 ]; then
+            echo "::error::Build matrix is empty! This should not happen when code changes are detected."
+            echo "::error::Backend changed: ${{ needs.detect-changes.outputs.backend-code }}"
+            echo "::error::Frontend changed: ${{ needs.detect-changes.outputs.frontend-code }}"
+            exit 1
+          fi
+          
+          echo "::notice::Matrix contains $COUNT image(s) to build:"
+          echo "$MATRIX" | jq -r '.include[] | "  - \(.image_name) (\(.type))"'
+          echo "::endgroup::"
+      
       - name: Checkout code
         uses: actions/checkout@v4
       
