@@ -501,114 +501,69 @@ jobs:
             echo "services_tfvars_exists=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Filter services by application
+      - name: Filter services by application (native Dhall)
         id: filter_services
         if: |
           (steps.vars.outputs.action == 'plan' || steps.vars.outputs.action == 'apply') &&
           steps.vars.outputs.module_path == '04-ecs-fargate'
         run: |
           PLAN_DIR="DEVOPS/live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}"
-          SERVICES_FILE="$PLAN_DIR/services.generated.tfvars"
           APPLICATION="${{ steps.vars.outputs.application }}"
           
-          # If application is "all", use original file
+          # If application is "all", use the full services file (already generated)
           if [ "$APPLICATION" = "all" ] || [ -z "$APPLICATION" ]; then
             echo "::notice::Deploying all services (application=all or not specified)"
             echo "filtered_services_file=services.generated.tfvars" >> $GITHUB_OUTPUT
-            echo "services_count=$(grep -cE '^\s+"[^"]+::[^"]+"\s*=\s*\{' "$SERVICES_FILE" 2>/dev/null || echo "0")" >> $GITHUB_OUTPUT
+            SERVICES_FILE="$PLAN_DIR/services.generated.tfvars"
+            SERVICE_COUNT=$(grep -cE '^\s+"[^"]+::[^"]+"\s*=\s*\{' "$SERVICES_FILE" 2>/dev/null || echo "0")
+            echo "services_count=$SERVICE_COUNT" >> $GITHUB_OUTPUT
             exit 0
           fi
           
-          # Check if filtering script exists
-          if [ ! -f "scripts/filter-services-by-application.py" ]; then
-            echo "::warning::Filter script not found, deploying all services"
-            echo "filtered_services_file=services.generated.tfvars" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-          
-          # Get list of services for the application
-          chmod +x scripts/filter-services-by-application.py
-          FILTERED_SERVICES=$(python3 scripts/filter-services-by-application.py "$SERVICES_FILE" "$APPLICATION" --format json 2>&1)
-          
-          if [ "$FILTERED_SERVICES" = "[]" ] || [ -z "$FILTERED_SERVICES" ] || echo "$FILTERED_SERVICES" | grep -q "Error:"; then
-            echo "::error::No services found for application: $APPLICATION"
-            echo "::error::Filter script output: $FILTERED_SERVICES"
-            echo "::error::Available applications in services.generated.tfvars:"
-            grep -E 'application\s*=\s*"' "$SERVICES_FILE" 2>/dev/null | sed 's/.*application\s*=\s*"\([^"]*\)".*/  - \1/' | sort -u || echo "  (could not parse)"
-            exit 1
-          fi
-          
-          # Parse service names from JSON array
-          SERVICE_NAMES=$(echo "$FILTERED_SERVICES" | python3 -c "import sys, json; print(' '.join(json.load(sys.stdin)))" 2>&1)
-          
-          if [ -z "$SERVICE_NAMES" ] || echo "$SERVICE_NAMES" | grep -q "Error:"; then
-            echo "::error::Failed to parse filtered services: $SERVICE_NAMES"
-            exit 1
-          fi
-          
-          echo "::notice::Filtering services for application: $APPLICATION"
-          echo "::notice::Services to deploy: $SERVICE_NAMES"
-          
-          # Create filtered services.generated.tfvars with only selected services
+          # Generate filtered tfvars directly from Dhall (native, type-safe)
           FILTERED_FILE="$PLAN_DIR/services.generated.tfvars.filtered"
+          FILTERED_DHALL="CI-REPO/dhall/services.tfvars.filtered.dhall"
           
-          # Write header (comments and opening brace)
-          head -12 "$SERVICES_FILE" > "$FILTERED_FILE" 2>/dev/null || echo "# Filtered services for application: $APPLICATION" > "$FILTERED_FILE"
-          echo "" >> "$FILTERED_FILE"
-          echo "services = {" >> "$FILTERED_FILE"
+          echo "::notice::Filtering services for application: $APPLICATION (using native Dhall)"
           
-          # Use Python script to extract service blocks (avoids YAML parsing issues)
-          chmod +x scripts/extract-service-blocks.py
-          python3 scripts/extract-service-blocks.py "$SERVICES_FILE" "$FILTERED_FILE" "$SERVICE_NAMES"
+          if [ ! -f "$FILTERED_DHALL" ]; then
+            echo "::error::Dhall filtered template not found at $FILTERED_DHALL"
+            exit 1
+          fi
           
-          # Verify filtered file has content
-          if ! grep -qE '^\s+"[^"]+::[^"]+"\s*=\s*\{' "$FILTERED_FILE"; then
+          # Generate filtered tfvars with application as Dhall argument (native, type-safe)
+          dhall --file "$FILTERED_DHALL" --argstr application "$APPLICATION" --plain > "$FILTERED_FILE" || {
+            echo "::error::Failed to generate filtered tfvars from Dhall"
+            echo "::error::Check that application '$APPLICATION' has services defined in Dhall"
+            exit 1
+          }
+          
+          if [ ! -f "$FILTERED_FILE" ] || [ ! -s "$FILTERED_FILE" ]; then
             echo "::error::Filtered services file is empty or invalid"
-            echo "::error::Filtered file content:"
-            cat "$FILTERED_FILE" || true
             exit 1
           fi
           
-          # Validation: Verify all requested services are in the filtered file
-          MISSING_SERVICES=""
-          for SERVICE_NAME in $SERVICE_NAMES; do
-            if ! grep -qE "^\s+\"$SERVICE_NAME\"\s*=\s*\{" "$FILTERED_FILE"; then
-              MISSING_SERVICES="$MISSING_SERVICES $SERVICE_NAME"
-            fi
-          done
+          # Validate filtered file has services
+          SERVICE_COUNT=$(grep -cE '^\s+"[^"]+::[^"]+"\s*=\s*\{' "$FILTERED_FILE" || echo "0")
           
-          if [ -n "$MISSING_SERVICES" ]; then
-            echo "::error::Validation failed: Some requested services are missing from filtered file:"
-            for SERVICE in $MISSING_SERVICES; do
-              echo "::error::  - $SERVICE"
-            done
-            echo "::error::Filtered file content:"
-            cat "$FILTERED_FILE" || true
+          if [ "$SERVICE_COUNT" -eq 0 ]; then
+            echo "::error::No services found for application: $APPLICATION"
+            echo "::error::Available applications in Dhall:"
+            # Extract applications from services.dhall (from JSON we generated earlier)
+            SERVICES_JSON="$PLAN_DIR/services.generated.json"
+            if [ -f "$SERVICES_JSON" ]; then
+              jq -r '.[].application' "$SERVICES_JSON" | sort -u | sed 's/^/  - /' || echo "  (could not parse)"
+            fi
             exit 1
           fi
           
-          # Validation: Verify no extra services (sanity check)
-          FILTERED_SERVICE_COUNT=$(grep -cE '^\s+"[^"]+::[^"]+"\s*=\s*\{' "$FILTERED_FILE" || echo "0")
-          EXPECTED_COUNT=$(echo "$SERVICE_NAMES" | wc -w | tr -d ' ')
-          
-          if [ "$FILTERED_SERVICE_COUNT" != "$EXPECTED_COUNT" ]; then
-            echo "::warning::Service count mismatch: Expected $EXPECTED_COUNT, found $FILTERED_SERVICE_COUNT"
-            echo "::warning::This might indicate duplicate or missing services in filtered file"
-            echo "::warning::Proceeding anyway, but please verify the filtered file"
-          fi
-          
-          # Validation: Verify each service has the correct application field
-          echo "::notice::Validating application field in filtered services..."
-          for SERVICE_NAME in $SERVICE_NAMES; do
-            SERVICE_APP=$(grep -A 20 "^\s+\"$SERVICE_NAME\"\s*=\s*{" "$FILTERED_FILE" | grep -E 'application\s*=\s*"' | sed 's/.*application\s*=\s*"\([^"]*\)".*/\1/' || echo "")
-            if [ "$SERVICE_APP" != "$APPLICATION" ]; then
-              echo "::error::Validation failed: Service '$SERVICE_NAME' has application='$SERVICE_APP', expected '$APPLICATION'"
-              exit 1
-            fi
-          done
+          echo "::notice::✓ Generated filtered tfvars with $SERVICE_COUNT service(s) for application: $APPLICATION"
+          echo "::group::Filtered services preview"
+          head -40 "$FILTERED_FILE"
+          echo "::endgroup::"
           
           echo "filtered_services_file=services.generated.tfvars.filtered" >> $GITHUB_OUTPUT
-          echo "services_count=$EXPECTED_COUNT" >> $GITHUB_OUTPUT
+          echo "services_count=$SERVICE_COUNT" >> $GITHUB_OUTPUT
           echo "::notice::✓ Created filtered services file with $EXPECTED_COUNT service(s) for application: $APPLICATION"
           echo "::notice::✓ Validation passed: All services have correct application field"
           
