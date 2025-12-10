@@ -87,10 +87,10 @@ function App() {
   return (
     <div className="app">
       <div className="container">
-        <h1>Full-Stack Application</h1>
+        <h1>Application</h1>
 
         <div className="card">
-          <h2>Health Check</h2>
+          <h2>Service Status</h2>
           <p className="status">
             Status:{' '}
             <span className={healthStatus === 'healthy' ? 'healthy' : 'unhealthy'}>
@@ -100,9 +100,9 @@ function App() {
         </div>
 
         <div className="card">
-          <h2>Hello Endpoint</h2>
+          <h2>Hello</h2>
           <button onClick={handleHello} disabled={isLoading}>
-            {helloState.loading ? 'Loading...' : 'Call /api/hello'}
+            {helloState.loading ? 'Loading...' : 'Call service'}
           </button>
           {helloState.data?.message && <p className="result success">{helloState.data.message}</p>}
           {helloState.error && (
@@ -113,7 +113,7 @@ function App() {
         </div>
 
         <div className="card">
-          <h2>Greet Endpoint</h2>
+          <h2>Greet</h2>
           <div className="input-group">
             <input
               type="text"

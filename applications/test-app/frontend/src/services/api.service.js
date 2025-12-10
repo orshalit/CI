@@ -29,11 +29,15 @@ class ApiService {
       logger.debug('Checking health status');
       const data = await httpClient.get(`${this.baseUrl}/health`);
 
-      logger.info('Health check completed', { status: data.status });
+      const status = data.status || 'unhealthy';
+      const normalizedStatus = ['healthy', 'ok'].includes(status.toLowerCase())
+        ? 'healthy'
+        : 'unhealthy';
+
+      logger.info('Health check completed', { status: normalizedStatus });
       return {
-        status: data.status || 'unhealthy',
-        database: data.database,
-        error: data.error,
+        status: normalizedStatus,
+        // Do not surface database/error details to the UI
       };
     } catch (error) {
       logger.error('Health check failed', error);

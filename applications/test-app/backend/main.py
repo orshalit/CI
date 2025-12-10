@@ -95,20 +95,42 @@ app.add_middleware(
 )
 
 
+def _is_health_authorized(request: Request) -> bool:
+    """Check if the caller is authorized to see detailed health info."""
+    client_ip = request.client.host if request.client else ""
+    token = request.headers.get("X-Health-Token")
+
+    token_ok = bool(settings.HEALTH_CHECK_TOKEN) and token == settings.HEALTH_CHECK_TOKEN
+    ip_ok = (
+        client_ip in settings.HEALTH_IP_ALLOWLIST
+        or client_ip.startswith("127.")  # allow loopback
+        or client_ip == "::1"
+    )
+    # Require either token or allowlisted IP when any protection is configured.
+    if settings.HEALTH_CHECK_TOKEN or settings.HEALTH_IP_ALLOWLIST:
+        return token_ok or ip_ok
+    # If no protection configured, default to minimal exposure (not authorized for detail).
+    return False
+
+
 @app.get(
     "/health",
     response_model=HealthResponse,
     tags=["health"],
     summary="Health check endpoint",
-    description="Check the health status of the API and database connectivity",
+    description="Check the health status of the API",
 )
-async def health_check():
-    """Health check endpoint with database connectivity check"""
-    # Check if database is available
+async def health_check(request: Request):
+    """Health check endpoint with optional auth and minimal exposure."""
+    authorized = _is_health_authorized(request)
+
+    if not authorized:
+        # Minimal response with no internal details
+        return HealthResponse(status="ok", database="redacted", error=None)
+
     if not database_available:
         return HealthResponse(status="healthy", database="unavailable")
 
-    # Test database connection if available
     try:
         db = next(get_db())
         db.execute(text("SELECT 1"))

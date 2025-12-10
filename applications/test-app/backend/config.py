@@ -44,6 +44,14 @@ class Settings(BaseSettings):
     # Testing
     TESTING: bool = os.getenv("TESTING", "false").lower() == "true"
 
+    # Health check protection
+    HEALTH_CHECK_TOKEN: str | None = os.getenv("HEALTH_CHECK_TOKEN") or None
+    HEALTH_IP_ALLOWLIST: list[str] = [
+        ip.strip()
+        for ip in os.getenv("HEALTH_IP_ALLOWLIST", "").split(",")
+        if ip.strip()
+    ]
+
     def get_cors_origins(self) -> list[str]:
         """Parse CORS origins from environment variable"""
         if self.CORS_ORIGINS == "*":
