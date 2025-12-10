@@ -804,7 +804,7 @@ jobs:
     steps:
       - name: Validate Build Matrix
         run: |
-          MATRIX_JSON='${{ toJson(needs.filter-build-matrix.outputs.matrix) }}'
+          MATRIX_JSON='${{ needs.filter-build-matrix.outputs.matrix }}'
           echo "::debug::Raw matrix JSON: $MATRIX_JSON"
           
           # Check if the matrix is empty or invalid
