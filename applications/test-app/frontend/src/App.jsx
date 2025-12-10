@@ -89,7 +89,7 @@ function App() {
       <div className="container">
         <div className="header-section">
           <h1>Test Application</h1>
-          <div className="deployment-badge">🚀 Deployed</div>
+          <div className="deployment-badge">🚀 Deployed v2</div>
         </div>
 
         <div className="card">

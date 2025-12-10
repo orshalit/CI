@@ -36,6 +36,7 @@ h1 {
   margin-left: 15px;
   box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
   animation: pulse 2s ease-in-out infinite;
+  border: 2px solid #fff;
 }
 
 @keyframes pulse {
