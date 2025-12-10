@@ -159,6 +159,10 @@ jobs:
           steps.vars.outputs.image_tag != '' &&
           steps.vars.outputs.image_tag != 'null'
         run: |
+          echo "::group::File System Debug"
+          ls -R
+          echo "::endgroup::"
+          
           IMAGE_TAG="${{ steps.vars.outputs.image_tag }}"
           SERVICES_TFVARS="DEVOPS/live/${{ steps.vars.outputs.environment }}/04-ecs-fargate/services.generated.tfvars"
 
