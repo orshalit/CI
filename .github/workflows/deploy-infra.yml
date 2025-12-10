@@ -117,7 +117,7 @@ jobs:
 
       - name: Terraform Init
         id: init
-        run: terraform -chdir=DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }} init
+        run: terraform -chdir=DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }} init -upgrade
 
       - name: Check for terraform.tfvars
         id: check_tfvars
