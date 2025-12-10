@@ -251,6 +251,173 @@ jobs:
             echo "services_tfvars_exists=false" >> $GITHUB_OUTPUT
           fi
 
+      - name: Filter services by application
+        id: filter_services
+        if: |
+          (steps.vars.outputs.action == 'plan' || steps.vars.outputs.action == 'apply') &&
+          steps.vars.outputs.module_path == '04-ecs-fargate'
+        run: |
+          PLAN_DIR="DEVOPS/live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}"
+          SERVICES_FILE="$PLAN_DIR/services.generated.tfvars"
+          APPLICATION="${{ steps.vars.outputs.application }}"
+          
+          # If application is "all", use original file
+          if [ "$APPLICATION" = "all" ] || [ -z "$APPLICATION" ]; then
+            echo "::notice::Deploying all services (application=all or not specified)"
+            echo "filtered_services_file=services.generated.tfvars" >> $GITHUB_OUTPUT
+            echo "services_count=$(grep -cE '^\s+"[^"]+::[^"]+"\s*=\s*\{' "$SERVICES_FILE" 2>/dev/null || echo "0")" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # Check if filtering script exists
+          if [ ! -f "scripts/filter-services-by-application.py" ]; then
+            echo "::warning::Filter script not found, deploying all services"
+            echo "filtered_services_file=services.generated.tfvars" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # Get list of services for the application
+          chmod +x scripts/filter-services-by-application.py
+          FILTERED_SERVICES=$(python3 scripts/filter-services-by-application.py "$SERVICES_FILE" "$APPLICATION" --format json 2>&1)
+          
+          if [ "$FILTERED_SERVICES" = "[]" ] || [ -z "$FILTERED_SERVICES" ] || echo "$FILTERED_SERVICES" | grep -q "Error:"; then
+            echo "::error::No services found for application: $APPLICATION"
+            echo "::error::Filter script output: $FILTERED_SERVICES"
+            echo "::error::Available applications in services.generated.tfvars:"
+            grep -E 'application\s*=\s*"' "$SERVICES_FILE" 2>/dev/null | sed 's/.*application\s*=\s*"\([^"]*\)".*/  - \1/' | sort -u || echo "  (could not parse)"
+            exit 1
+          fi
+          
+          # Parse service names from JSON array
+          SERVICE_NAMES=$(echo "$FILTERED_SERVICES" | python3 -c "import sys, json; print(' '.join(json.load(sys.stdin)))" 2>&1)
+          
+          if [ -z "$SERVICE_NAMES" ] || echo "$SERVICE_NAMES" | grep -q "Error:"; then
+            echo "::error::Failed to parse filtered services: $SERVICE_NAMES"
+            exit 1
+          fi
+          
+          echo "::notice::Filtering services for application: $APPLICATION"
+          echo "::notice::Services to deploy: $SERVICE_NAMES"
+          
+          # Create filtered services.generated.tfvars with only selected services
+          FILTERED_FILE="$PLAN_DIR/services.generated.tfvars.filtered"
+          
+          # Write header (comments and opening brace)
+          head -12 "$SERVICES_FILE" > "$FILTERED_FILE" 2>/dev/null || echo "# Filtered services for application: $APPLICATION" > "$FILTERED_FILE"
+          echo "" >> "$FILTERED_FILE"
+          echo "services = {" >> "$FILTERED_FILE"
+          
+          # Use Python to extract service blocks (more reliable)
+          python3 << PYTHON_EOF "$SERVICES_FILE" "$FILTERED_FILE" "$SERVICE_NAMES"
+import sys
+import re
+
+services_file = sys.argv[1]
+filtered_file = sys.argv[2]
+service_names = sys.argv[3].split()
+
+with open(services_file, 'r') as f:
+    content = f.read()
+
+# Find all service blocks
+services_to_include = set(service_names)
+extracted_services = []
+
+# Match service blocks: "service-name" = { ... }
+pattern = r'^\s+("([^"]+)")\s*=\s*\{'
+for match in re.finditer(pattern, content, re.MULTILINE):
+    service_key = match.group(2)
+    if service_key in services_to_include:
+        # Find the matching closing brace
+        start_pos = match.end()
+        brace_count = 1
+        pos = start_pos
+        while pos < len(content) and brace_count > 0:
+            if content[pos] == '{':
+                brace_count += 1
+            elif content[pos] == '}':
+                brace_count -= 1
+            pos += 1
+        
+        # Extract the full service block
+        service_block = content[match.start():pos]
+        extracted_services.append(service_block)
+
+# Write extracted services to filtered file
+with open(filtered_file, 'a') as f:
+    for service_block in extracted_services:
+        # Indent properly (add 2 spaces to each line)
+        for line in service_block.split('\n'):
+            if line.strip():
+                f.write('  ' + line + '\n')
+            else:
+                f.write('\n')
+    f.write('}\n')
+
+print(f"Extracted {len(extracted_services)} service(s)")
+PYTHON_EOF
+          
+          # Verify filtered file has content
+          if ! grep -qE '^\s+"[^"]+::[^"]+"\s*=\s*\{' "$FILTERED_FILE"; then
+            echo "::error::Filtered services file is empty or invalid"
+            echo "::error::Filtered file content:"
+            cat "$FILTERED_FILE" || true
+            exit 1
+          fi
+          
+          # Validation: Verify all requested services are in the filtered file
+          MISSING_SERVICES=""
+          for SERVICE_NAME in $SERVICE_NAMES; do
+            if ! grep -qE "^\s+\"$SERVICE_NAME\"\s*=\s*\{" "$FILTERED_FILE"; then
+              MISSING_SERVICES="$MISSING_SERVICES $SERVICE_NAME"
+            fi
+          done
+          
+          if [ -n "$MISSING_SERVICES" ]; then
+            echo "::error::Validation failed: Some requested services are missing from filtered file:"
+            for SERVICE in $MISSING_SERVICES; do
+              echo "::error::  - $SERVICE"
+            done
+            echo "::error::Filtered file content:"
+            cat "$FILTERED_FILE" || true
+            exit 1
+          fi
+          
+          # Validation: Verify no extra services (sanity check)
+          FILTERED_SERVICE_COUNT=$(grep -cE '^\s+"[^"]+::[^"]+"\s*=\s*\{' "$FILTERED_FILE" || echo "0")
+          EXPECTED_COUNT=$(echo "$SERVICE_NAMES" | wc -w | tr -d ' ')
+          
+          if [ "$FILTERED_SERVICE_COUNT" != "$EXPECTED_COUNT" ]; then
+            echo "::warning::Service count mismatch: Expected $EXPECTED_COUNT, found $FILTERED_SERVICE_COUNT"
+            echo "::warning::This might indicate duplicate or missing services in filtered file"
+            echo "::warning::Proceeding anyway, but please verify the filtered file"
+          fi
+          
+          # Validation: Verify each service has the correct application field
+          echo "::notice::Validating application field in filtered services..."
+          for SERVICE_NAME in $SERVICE_NAMES; do
+            SERVICE_APP=$(grep -A 20 "^\s+\"$SERVICE_NAME\"\s*=\s*{" "$FILTERED_FILE" | grep -E 'application\s*=\s*"' | sed 's/.*application\s*=\s*"\([^"]*\)".*/\1/' || echo "")
+            if [ "$SERVICE_APP" != "$APPLICATION" ]; then
+              echo "::error::Validation failed: Service '$SERVICE_NAME' has application='$SERVICE_APP', expected '$APPLICATION'"
+              exit 1
+            fi
+          done
+          
+          echo "filtered_services_file=services.generated.tfvars.filtered" >> $GITHUB_OUTPUT
+          echo "services_count=$EXPECTED_COUNT" >> $GITHUB_OUTPUT
+          echo "::notice::✓ Created filtered services file with $EXPECTED_COUNT service(s) for application: $APPLICATION"
+          echo "::notice::✓ Validation passed: All services have correct application field"
+          
+          # Show summary
+          echo ""
+          echo "::group::Filtered Services Summary"
+          echo "Application: $APPLICATION"
+          echo "Services to deploy:"
+          for SERVICE_NAME in $SERVICE_NAMES; do
+            echo "  - $SERVICE_NAME"
+          done
+          echo "::endgroup::"
+
       - name: Check if services is empty
         id: check_services_empty
         if: steps.vars.outputs.action == 'plan' || steps.vars.outputs.action == 'apply'
@@ -288,18 +455,29 @@ jobs:
         id: build_var_files
         if: steps.vars.outputs.action == 'plan' || steps.vars.outputs.action == 'apply'
         run: |
+          PLAN_DIR="DEVOPS/live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}"
           VAR_FILES=""
           if [ "${{ steps.check_tfvars.outputs.tfvars_exists }}" == "true" ]; then
             VAR_FILES="terraform.tfvars"
           fi
-          # Only include services.generated.tfvars if it exists AND services is not empty
+          
+          # Use filtered services file if application filtering was applied, otherwise use original
+          SERVICES_FILE="services.generated.tfvars"
+          if [ -n "${{ steps.filter_services.outputs.filtered_services_file }}" ] && \
+             [ "${{ steps.filter_services.outputs.filtered_services_file }}" != "services.generated.tfvars" ] && \
+             [ -f "$PLAN_DIR/${{ steps.filter_services.outputs.filtered_services_file }}" ]; then
+            SERVICES_FILE="${{ steps.filter_services.outputs.filtered_services_file }}"
+            echo "::notice::Using filtered services file: $SERVICES_FILE"
+          fi
+          
+          # Only include services file if it exists AND services is not empty
           # This prevents Terraform crash when services = {} (empty services map)
           if [ "${{ steps.check_services_tfvars.outputs.services_tfvars_exists }}" == "true" ] && \
              [ "${{ steps.check_services_empty.outputs.services_empty }}" != "true" ]; then
             if [ -n "$VAR_FILES" ]; then
-              VAR_FILES="$VAR_FILES services.generated.tfvars"
+              VAR_FILES="$VAR_FILES $SERVICES_FILE"
             else
-              VAR_FILES="services.generated.tfvars"
+              VAR_FILES="$SERVICES_FILE"
             fi
           fi
           echo "var_files=$VAR_FILES" >> $GITHUB_OUTPUT
