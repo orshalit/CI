@@ -75,3 +75,21 @@ repos:
       - id: terraform_validate
         args: ['-no-color']
         files: \.tf$
+
+  # Auto-regenerate docker-compose files when application structure changes
+  - repo: local
+    hooks:
+      - id: regenerate-docker-compose
+        name: Regenerate docker-compose files
+        entry: bash scripts/generate-docker-compose.sh
+        language: system
+        files: ^applications/.*/backend/|^applications/.*/frontend/|^scripts/generate-docker-compose\.(sh|py)$
+        pass_filenames: false
+        always_run: false
+      - id: regenerate-docker-compose-prod
+        name: Regenerate docker-compose.prod.yml
+        entry: bash scripts/generate-docker-compose.sh --prod
+        language: system
+        files: ^applications/.*/backend/|^applications/.*/frontend/|^scripts/generate-docker-compose\.(sh|py)$
+        pass_filenames: false
+        always_run: false
