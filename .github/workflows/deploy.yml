@@ -163,8 +163,8 @@ jobs:
           SERVICES_TFVARS="DEVOPS/live/${{ steps.vars.outputs.environment }}/04-ecs-fargate/services.generated.tfvars"
 
           if [ ! -f "$SERVICES_TFVARS" ]; then
-            echo "::warning::Services TFVARS file not found at $SERVICES_TFVARS. Skipping image verification."
-            exit 0
+            echo "::error::Services TFVARS file not found at $SERVICES_TFVARS. Cannot verify images."
+            exit 1
           fi
 
           # Login to GHCR first to inspect manifests
