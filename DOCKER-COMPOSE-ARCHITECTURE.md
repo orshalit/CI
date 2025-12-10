@@ -7,9 +7,14 @@ We use a **hybrid approach** that combines the best of both worlds:
 ### Structure
 
 ```
-docker-compose.base.yml          # Shared infrastructure (database, redis, etc.)
-docker-compose.{app-name}.yml    # Per-application services (one per app)
-docker-compose.yml               # Legacy: All-in-one (auto-generated for backward compatibility)
+docker-compose.base.yml                    # Shared infrastructure (database, redis, etc.)
+docker-compose.yml                         # Legacy: All-in-one (auto-generated for backward compatibility)
+applications/
+  └── {app-name}/
+      ├── docker-compose.yml              # ✅ Per-application services (best practice: co-located)
+      ├── docker-compose.prod.yml         # ✅ Production overrides (optional)
+      ├── backend/
+      └── frontend/
 ```
 
 ### Why This Approach?
@@ -31,13 +36,18 @@ docker-compose.yml               # Legacy: All-in-one (auto-generated for backwa
 1. **Modularity**: Each app is self-contained
 2. **Selective Startup**: Start only what you need
    ```bash
-   # Start only test-app
-   docker compose -f docker-compose.base.yml -f docker-compose.test-app.yml up
+   # Start only test-app (from root)
+   docker compose -f docker-compose.base.yml \
+                   -f applications/test-app/docker-compose.yml up
    
    # Start multiple apps
    docker compose -f docker-compose.base.yml \
-                  -f docker-compose.test-app.yml \
-                  -f docker-compose.other-app.yml up
+                  -f applications/test-app/docker-compose.yml \
+                  -f applications/other-app/docker-compose.yml up
+   
+   # Or use glob pattern
+   docker compose -f docker-compose.base.yml \
+                   -f applications/*/docker-compose.yml up
    ```
 
 3. **Isolation**: Apps don't interfere with each other
@@ -48,23 +58,29 @@ docker-compose.yml               # Legacy: All-in-one (auto-generated for backwa
 
 #### Development - Single App
 ```bash
-# Work on test-app only
-docker compose -f docker-compose.base.yml -f docker-compose.test-app.yml up --build
+# Work on test-app only (from root)
+docker compose -f docker-compose.base.yml \
+                -f applications/test-app/docker-compose.yml up --build
+
+# Or from app directory
+cd applications/test-app
+docker compose -f ../../docker-compose.base.yml \
+               -f docker-compose.yml up --build
 ```
 
 #### Development - Multiple Apps
 ```bash
 # Work on multiple apps
 docker compose -f docker-compose.base.yml \
-               -f docker-compose.test-app.yml \
-               -f docker-compose.app2.yml up
+               -f applications/test-app/docker-compose.yml \
+               -f applications/app2/docker-compose.yml up
 ```
 
 #### CI/CD - All Apps
 ```bash
 # Test all apps together (like production)
 docker compose -f docker-compose.base.yml \
-               -f docker-compose.*.yml up --build
+               -f applications/*/docker-compose.yml up --build
 ```
 
 #### Production-like Testing
@@ -72,7 +88,7 @@ docker compose -f docker-compose.base.yml \
 # Use production images
 export TEST_APP_BACKEND_IMAGE=ghcr.io/orshalit/test-app-backend:v1.0.0
 docker compose -f docker-compose.base.yml \
-               -f docker-compose.test-app.yml up
+                -f applications/test-app/docker-compose.prod.yml up
 ```
 
 ### Migration Path
@@ -114,14 +130,16 @@ Files are auto-generated:
 
 ### Recommendation
 
-**For Development:** Use per-app files
+**For Development:** Use per-app files (co-located in app directory)
 ```bash
-docker compose -f docker-compose.base.yml -f docker-compose.test-app.yml up
+docker compose -f docker-compose.base.yml \
+                -f applications/test-app/docker-compose.yml up
 ```
 
 **For CI/CD:** Use base + all apps (or single file for simplicity)
 ```bash
-docker compose -f docker-compose.base.yml -f docker-compose.*.yml up
+docker compose -f docker-compose.base.yml \
+                -f applications/*/docker-compose.yml up
 ```
 
 **For Production:** Use orchestration (ECS/Kubernetes), not docker-compose
