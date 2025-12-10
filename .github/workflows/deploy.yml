@@ -375,55 +375,9 @@ jobs:
           echo "" >> "$FILTERED_FILE"
           echo "services = {" >> "$FILTERED_FILE"
           
-          # Use Python to extract service blocks (more reliable)
-          python3 << PYTHON_EOF "$SERVICES_FILE" "$FILTERED_FILE" "$SERVICE_NAMES"
-import sys
-import re
-
-services_file = sys.argv[1]
-filtered_file = sys.argv[2]
-service_names = sys.argv[3].split()
-
-with open(services_file, 'r') as f:
-    content = f.read()
-
-# Find all service blocks
-services_to_include = set(service_names)
-extracted_services = []
-
-# Match service blocks: "service-name" = { ... }
-pattern = r'^\s+("([^"]+)")\s*=\s*\{'
-for match in re.finditer(pattern, content, re.MULTILINE):
-    service_key = match.group(2)
-    if service_key in services_to_include:
-        # Find the matching closing brace
-        start_pos = match.end()
-        brace_count = 1
-        pos = start_pos
-        while pos < len(content) and brace_count > 0:
-            if content[pos] == '{':
-                brace_count += 1
-            elif content[pos] == '}':
-                brace_count -= 1
-            pos += 1
-        
-        # Extract the full service block
-        service_block = content[match.start():pos]
-        extracted_services.append(service_block)
-
-# Write extracted services to filtered file
-with open(filtered_file, 'a') as f:
-    for service_block in extracted_services:
-        # Indent properly (add 2 spaces to each line)
-        for line in service_block.split('\n'):
-            if line.strip():
-                f.write('  ' + line + '\n')
-            else:
-                f.write('\n')
-    f.write('}\n')
-
-print(f"Extracted {len(extracted_services)} service(s)")
-PYTHON_EOF
+          # Use Python script to extract service blocks (avoids YAML parsing issues)
+          chmod +x scripts/extract-service-blocks.py
+          python3 scripts/extract-service-blocks.py "$SERVICES_FILE" "$FILTERED_FILE" "$SERVICE_NAMES"
           
           # Verify filtered file has content
           if ! grep -qE '^\s+"[^"]+::[^"]+"\s*=\s*\{' "$FILTERED_FILE"; then
