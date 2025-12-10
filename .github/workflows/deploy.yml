@@ -96,51 +96,68 @@ jobs:
           aws_region: ${{ secrets.AWS_REGION }}
           terraform_version: '1.6.0'
 
-      - name: Terraform Format
+      - name: Terraform Format Check
         id: fmt
         run: |
           TERRAFORM_DIR="DEVOPS/live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}"
           
-          echo "::notice::Formatting Terraform files in $TERRAFORM_DIR..."
+          echo "::notice::Checking Terraform formatting in $TERRAFORM_DIR..."
+          
+          # First, check formatting without modifying files (faster feedback)
+          if terraform fmt -check -recursive "$TERRAFORM_DIR" 2>&1; then
+            echo "::notice::✓ All Terraform files are properly formatted"
+            echo "needs_formatting=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          echo "::warning::Formatting issues detected. Auto-formatting files..."
           
           # Format all Terraform files
           terraform fmt -recursive "$TERRAFORM_DIR"
           
           # Check if any files were modified by comparing before/after
           cd DEVOPS
-          # Get list of files that would be formatted (all .tf and .tfvars files)
-          FORMATTED_FILES=$(find "live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}" -type f \( -name "*.tf" -o -name "*.tfvars" \) 2>/dev/null || true)
-          
-          if [ -z "$FORMATTED_FILES" ]; then
-            echo "::notice::No Terraform files found to format"
-            exit 0
-          fi
           
           # Check git status for changes in the terraform directory
           if git diff --quiet "live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}"; then
-            echo "::notice::✓ All Terraform files are properly formatted"
+            echo "::notice::✓ Files were auto-formatted and are now correct"
+            echo "needs_formatting=false" >> $GITHUB_OUTPUT
           else
+            echo "needs_formatting=true" >> $GITHUB_OUTPUT
+            
+            # Show what changed
             echo "::error::╔══════════════════════════════════════════════════════════════╗"
             echo "::error::║  ⚠️  TERRAFORM FORMATTING ISSUES DETECTED  ⚠️  ║"
             echo "::error::╚══════════════════════════════════════════════════════════════╝"
             echo ""
-            echo "::error::The following files need formatting:"
+            echo "::error::The following files were auto-formatted:"
             git status --short "live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}" | while read -r line; do
               echo "::error::  • $line"
             done
             echo ""
             echo "::error::Files have been automatically formatted in this workflow run."
             echo "::error::"
-            echo "::error::To fix this:"
-            echo "::error::  1. Run 'terraform fmt -recursive' locally in: $TERRAFORM_DIR"
-            echo "::error::  2. Commit the formatted files"
-            echo "::error::  3. Push and re-run this workflow"
+            echo "::error::🔧 To prevent this in the future:"
+            echo "::error::  1. Install pre-commit hooks: pip install pre-commit && pre-commit install"
+            echo "::error::  2. Or run 'terraform fmt -recursive' before committing"
+            echo "::error::  3. Or use the 'Terraform Format Check' workflow to auto-fix"
             echo ""
-            echo "::group::Show formatted changes"
+            echo "::error::📝 To fix this now:"
+            echo "::error::  1. Go to DEVOPS repo and run: terraform fmt -recursive $TERRAFORM_DIR"
+            echo "::error::  2. Commit the formatted files to DEVOPS repo"
+            echo "::error::  3. Re-run this deployment workflow"
+            echo ""
+            echo "::group::Show formatted changes (for reference)"
             git diff "live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}"
             echo "::endgroup::"
-            exit 1
           fi
+
+      - name: Fail if formatting issues found
+        if: steps.fmt.outputs.needs_formatting == 'true'
+        run: |
+          echo "::error::Deployment blocked due to Terraform formatting issues."
+          echo "::error::Please fix formatting in DEVOPS repo before deploying."
+          exit 1
 
       - name: Verify DEVOPS Repository Version
         id: verify_devops

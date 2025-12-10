@@ -1,0 +1,145 @@
+name: Terraform Format Check
+
+# This workflow runs on PRs and pushes to main to catch formatting issues early
+# It can optionally auto-format and commit back to the DEVOPS repo
+
+on:
+  pull_request:
+    paths:
+      - 'DEVOPS/**/*.tf'
+      - 'DEVOPS/**/*.tfvars'
+  push:
+    branches: [main]
+    paths:
+      - 'DEVOPS/**/*.tf'
+      - 'DEVOPS/**/*.tfvars'
+  workflow_dispatch:
+    inputs:
+      auto_fix:
+        description: 'Auto-format and commit back to DEVOPS repo'
+        required: false
+        default: 'false'
+        type: boolean
+
+jobs:
+  check-format:
+    name: Check Terraform Format
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout CI repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout DEVOPS repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ secrets.DEVOPS_REPO_NAME || 'orshalit/DEVOPS' }}
+          token: ${{ secrets.DEVOPS_REPO_KEY }}
+          path: DEVOPS
+          fetch-depth: 0
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.6.0'
+
+      - name: Check Terraform Format
+        id: fmt_check
+        run: |
+          cd DEVOPS
+          
+          echo "::notice::Checking Terraform formatting in all live environments..."
+          
+          # Find all Terraform directories
+          TERRAFORM_DIRS=$(find live -type d -name "*.tf" -prune -o -type d -print | grep -E "live/[^/]+/[0-9]+-" | sort -u || true)
+          
+          if [ -z "$TERRAFORM_DIRS" ]; then
+            echo "::notice::No Terraform directories found"
+            exit 0
+          fi
+          
+          FORMATTED_COUNT=0
+          UNFORMATTED_FILES=""
+          
+          for DIR in $TERRAFORM_DIRS; do
+            if [ -d "$DIR" ]; then
+              echo "::notice::Checking $DIR..."
+              
+              # Check formatting without modifying files
+              if terraform fmt -check -recursive "$DIR" 2>&1; then
+                echo "  ✓ $DIR is properly formatted"
+              else
+                FORMATTED_COUNT=$((FORMATTED_COUNT + 1))
+                UNFORMATTED_FILES="$UNFORMATTED_FILES\n  - $DIR"
+                echo "  ✗ $DIR needs formatting"
+              fi
+            fi
+          done
+          
+          if [ $FORMATTED_COUNT -eq 0 ]; then
+            echo "::notice::✓ All Terraform files are properly formatted"
+            echo "needs_formatting=false" >> $GITHUB_OUTPUT
+          else
+            echo "::error::Found $FORMATTED_COUNT directory(ies) with formatting issues:$UNFORMATTED_FILES"
+            echo "needs_formatting=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Auto-format Terraform files
+        if: |
+          steps.fmt_check.outputs.needs_formatting == 'true' &&
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.auto_fix == 'true' || false)
+        run: |
+          cd DEVOPS
+          
+          echo "::notice::Auto-formatting Terraform files..."
+          
+          # Format all Terraform files
+          terraform fmt -recursive live/
+          
+          # Check if any changes were made
+          if git diff --quiet; then
+            echo "::notice::No changes needed (files were already formatted)"
+            echo "changes_made=false" >> $GITHUB_OUTPUT
+          else
+            echo "::notice::Formatted files:"
+            git status --short
+            echo "changes_made=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit formatted files
+        if: |
+          steps.fmt_check.outputs.needs_formatting == 'true' &&
+          steps.auto_format.outputs.changes_made == 'true' &&
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.auto_fix == 'true' || false)
+        run: |
+          cd DEVOPS
+          
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          git add -A
+          git commit -m "chore: auto-format Terraform files [skip ci]" || exit 0
+          
+          git push || echo "::warning::Failed to push formatted files (may need manual intervention)"
+
+      - name: Fail if formatting issues found
+        if: |
+          steps.fmt_check.outputs.needs_formatting == 'true' &&
+          (github.event_name != 'workflow_dispatch' || github.event.inputs.auto_fix != 'true')
+        run: |
+          echo "::error::╔══════════════════════════════════════════════════════════════╗"
+          echo "::error::║  ⚠️  TERRAFORM FORMATTING ISSUES DETECTED  ⚠️  ║"
+          echo "::error::╚══════════════════════════════════════════════════════════════╝"
+          echo ""
+          echo "::error::To fix this automatically:"
+          echo "::error::  1. Go to Actions → Terraform Format Check → Run workflow"
+          echo "::error::  2. Enable 'Auto-format and commit back to DEVOPS repo'"
+          echo "::error::  3. Click 'Run workflow'"
+          echo ""
+          echo "::error::Or fix manually:"
+          echo "::error::  1. Run 'terraform fmt -recursive' in the DEVOPS repo"
+          echo "::error::  2. Commit and push the formatted files"
+          exit 1
+
