@@ -8,7 +8,6 @@ We use a **hybrid approach** that combines the best of both worlds:
 
 ```
 docker-compose.base.yml                    # Shared infrastructure (database, redis, etc.)
-docker-compose.yml                         # Legacy: All-in-one (auto-generated for backward compatibility)
 applications/
   └── {app-name}/
       ├── docker-compose.yml              # ✅ Per-application services (best practice: co-located)
@@ -94,8 +93,8 @@ docker compose -f docker-compose.base.yml \
 ### Migration Path
 
 **Current State:**
-- `docker-compose.yml` - All apps in one file (auto-generated)
-- Used for backward compatibility and CI/CD
+- Modular approach: `docker-compose.base.yml` + per-app compose files
+- Self-contained: Each app has its own compose file in its directory
 
 **Future State (Recommended):**
 - Use per-app files for development

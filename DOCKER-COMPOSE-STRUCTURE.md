@@ -5,8 +5,6 @@
 ```
 CI/
 ├── docker-compose.base.yml              # ✅ Shared infrastructure (database, etc.)
-├── docker-compose.yml.disabled          # 📋 Legacy reference (DO NOT USE)
-├── docker-compose.prod.yml.disabled     # 📋 Legacy reference (DO NOT USE)
 └── applications/
     ├── README.md                        # ✅ Usage guide
     ├── .docker-compose.template.yml     # ✅ Template showing structure
@@ -38,26 +36,17 @@ CI/
 
 ### 📋 Reference/Template Files
 
-4. **`docker-compose.yml.disabled`** (Root)
-   - Legacy all-in-one file (reference only)
-   - Shows migration path
-   - **DO NOT USE** - Keep for reference
-
-5. **`docker-compose.prod.yml.disabled`** (Root)
-   - Legacy production all-in-one (reference only)
-   - Shows migration path
-   - **DO NOT USE** - Keep for reference
-
-6. **`applications/.docker-compose.template.yml`**
+4. **`applications/.docker-compose.template.yml`**
    - Template showing structure
    - Usage instructions
    - **REFERENCE** - Shows what gets generated
 
 ## ❌ Removed Files
 
-- ~~`docker-compose.yml`~~ → Moved to `.disabled`
-- ~~`docker-compose.prod.yml`~~ → Moved to `.disabled`
+- ~~`docker-compose.yml`~~ → Removed (legacy all-in-one)
+- ~~`docker-compose.prod.yml`~~ → Removed (legacy all-in-one)
 - ~~`docker-compose.test-app.yml`~~ → Moved to `applications/test-app/docker-compose.yml`
+- ~~`.disabled` files~~ → Removed (no longer needed)
 
 ## Usage
 
@@ -95,8 +84,8 @@ docker compose -f docker-compose.base.yml \
 
 - ✅ **Keep**: `docker-compose.base.yml` (shared infrastructure)
 - ✅ **Keep**: `applications/{app}/docker-compose.yml` (per-app, self-contained)
-- ✅ **Keep**: `.disabled` files (reference/templates)
-- ❌ **Removed**: All root-level app-specific compose files
+- ✅ **Keep**: `applications/.docker-compose.template.yml` (template/reference)
+- ❌ **Removed**: All legacy files (all-in-one compose files and references)
 
-Everything is now self-contained and follows best practices!
+Everything is now clean, self-contained, and follows best practices!
 
