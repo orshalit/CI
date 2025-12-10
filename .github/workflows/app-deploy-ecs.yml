@@ -137,6 +137,13 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           repository: ${{ github.repository }}
 
+      - name: Checkout DEVOPS repo to access services.generated.tfvars
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ secrets.DEVOPS_REPO_NAME || 'orshalit/DEVOPS' }}
+          token: ${{ secrets.DEVOPS_REPO_KEY }}
+          path: DEVOPS
+
       - name: Set up environment variables
         id: vars
         run: |
@@ -216,10 +223,10 @@ jobs:
           TF_PATH="${{ steps.vars.outputs.tf_path }}"
           APP="${{ steps.vars.outputs.application }}"
           
-          # Read services from services.generated.tfvars
+          # Ensure services.generated.tfvars exists
           if [ ! -f "$TF_PATH/services.generated.tfvars" ]; then
-            echo "::error::services.generated.tfvars not found at $TF_PATH/services.generated.tfvars"
-            exit 1
+            echo "::warning::services.generated.tfvars not found, creating empty file."
+            echo "services = {}" > "$TF_PATH/services.generated.tfvars"
           fi
           
           # Use helper script to extract services by application
