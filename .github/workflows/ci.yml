@@ -783,21 +783,9 @@ jobs:
     name: Build Docker Images
     runs-on: ubuntu-latest
     needs: [code-quality, backend-tests, frontend-tests, app-backend-tests, app-frontend-tests, prepare-build, detect-changes, filter-build-matrix]
-    # Build images if backend OR frontend code changed, or on version tags, or manual dispatch
-    # Also check that prerequisite jobs succeeded (or were skipped)
-    # IMPORTANT: Check filter-build-matrix succeeded AND has_images is true to ensure matrix is non-empty
-    if: |
-      (needs.detect-changes.outputs.backend-code == 'true' ||
-       needs.detect-changes.outputs.frontend-code == 'true' ||
-       startsWith(github.ref, 'refs/tags/v') ||
-       github.event_name == 'workflow_dispatch') &&
-      (needs.code-quality.result == 'success' || needs.code-quality.result == 'skipped') &&
-      (needs.backend-tests.result == 'success' || needs.backend-tests.result == 'skipped') &&
-      (needs.frontend-tests.result == 'success' || needs.frontend-tests.result == 'skipped') &&
-      (needs.app-backend-tests.result == 'success' || needs.app-backend-tests.result == 'skipped') &&
-      (needs.app-frontend-tests.result == 'success' || needs.app-frontend-tests.result == 'skipped') &&
-      (needs.filter-build-matrix.result == 'success') &&
-      (needs.filter-build-matrix.outputs.has_images == 'true')
+    # This is the single source of truth. If the filter job determines there are images, we build.
+    # It simplifies the logic and avoids complex `needs` context issues with skipped jobs.
+    if: needs.filter-build-matrix.outputs.has_images == 'true'
     strategy:
       matrix: ${{ fromJson(needs.filter-build-matrix.outputs.matrix) }}
       fail-fast: false
