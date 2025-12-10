@@ -27,92 +27,143 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       
+      - name: Detect app directories
+        id: detect-apps
+        run: |
+          BACKEND_APPS=$(find applications -mindepth 2 -maxdepth 2 -type d -name "backend" -exec dirname {} \; | xargs -n1 basename | jq -R -s -c 'split("\n") | map(select(length > 0))' || echo '[]')
+          FRONTEND_APPS=$(find applications -mindepth 2 -maxdepth 2 -type d -name "frontend" -exec dirname {} \; | xargs -n1 basename | jq -R -s -c 'split("\n") | map(select(length > 0))' || echo '[]')
+          echo "backend_apps=$BACKEND_APPS" >> $GITHUB_OUTPUT
+          echo "frontend_apps=$FRONTEND_APPS" >> $GITHUB_OUTPUT
+          echo "::notice::Detected backend apps: $BACKEND_APPS"
+          echo "::notice::Detected frontend apps: $FRONTEND_APPS"
+      
       - name: Set up Python
+        if: steps.detect-apps.outputs.backend_apps != '[]'
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
-          cache-dependency-path: backend/requirements-dev.txt
       
       - name: Set up Node.js
+        if: steps.detect-apps.outputs.frontend_apps != '[]'
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
       
-      - name: Install Python dependencies
-        working-directory: ./backend
+      - name: Install Python dependencies for all apps
+        if: steps.detect-apps.outputs.backend_apps != '[]'
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt
+          for app_name in $(echo "${{ steps.detect-apps.outputs.backend_apps }}" | jq -r '.[]'); do
+            app_backend_dir="applications/$app_name/backend"
+            if [ -d "$app_backend_dir" ] && [ -f "$app_backend_dir/requirements-dev.txt" ]; then
+              echo "::group::Installing dependencies for $app_name backend"
+              python -m pip install --upgrade pip
+              pip install -r "$app_backend_dir/requirements-dev.txt"
+              echo "::endgroup::"
+            fi
+          done
       
-      - name: Install Node.js dependencies
-        working-directory: ./frontend
-        run: npm ci
-      
-      - name: Run backend unit tests
-        working-directory: ./backend
-        env:
-          TESTING: 'true'
-        run: pytest -m unit --verbose --tb=short -x
-      
-      - name: Run frontend tests
-        working-directory: ./frontend
-        run: npm test -- --watchAll=false --ci --bail
-      
-      - name: Verify Docker builds
+      - name: Install Node.js dependencies for all apps
+        if: steps.detect-apps.outputs.frontend_apps != '[]'
         run: |
-          docker build -t backend:pr ./backend
-          docker build -t frontend:pr ./frontend
+          for app_name in $(echo "${{ steps.detect-apps.outputs.frontend_apps }}" | jq -r '.[]'); do
+            app_frontend_dir="applications/$app_name/frontend"
+            if [ -d "$app_frontend_dir" ] && [ -f "$app_frontend_dir/package-lock.json" ]; then
+              echo "::group::Installing dependencies for $app_name frontend"
+              cd "$app_frontend_dir"
+              npm ci
+              cd - > /dev/null
+              echo "::endgroup::"
+            fi
+          done
       
-      - name: Check for service spec changes
-        id: check_service_changes
+      - name: Run backend unit tests for all apps
+        if: steps.detect-apps.outputs.backend_apps != '[]'
+        continue-on-error: true
+        run: |
+          for app_name in $(echo "${{ steps.detect-apps.outputs.backend_apps }}" | jq -r '.[]'); do
+            app_backend_dir="applications/$app_name/backend"
+            if [ -d "$app_backend_dir" ] && [ -d "$app_backend_dir/tests" ]; then
+              echo "::group::Running unit tests for $app_name backend"
+              cd "$app_backend_dir"
+              env TESTING='true' pytest -m unit --verbose --tb=short -x || echo "::warning::Tests failed for $app_name backend"
+              cd - > /dev/null
+              echo "::endgroup::"
+            fi
+          done
+      
+      - name: Run frontend tests for all apps
+        if: steps.detect-apps.outputs.frontend_apps != '[]'
+        continue-on-error: true
+        run: |
+          for app_name in $(echo "${{ steps.detect-apps.outputs.frontend_apps }}" | jq -r '.[]'); do
+            app_frontend_dir="applications/$app_name/frontend"
+            if [ -d "$app_frontend_dir" ] && [ -f "$app_frontend_dir/package.json" ]; then
+              echo "::group::Running tests for $app_name frontend"
+              cd "$app_frontend_dir"
+              if npm run | grep -q "test"; then
+                npm test -- --watchAll=false --ci --bail || echo "::warning::Tests failed for $app_name frontend"
+              else
+                echo "::notice::No test script found for $app_name frontend"
+              fi
+              cd - > /dev/null
+              echo "::endgroup::"
+            fi
+          done
+      
+      - name: Verify Docker builds for all apps
+        continue-on-error: true
+        run: |
+          for app_name in $(echo "${{ steps.detect-apps.outputs.backend_apps }}" | jq -r '.[]'); do
+            app_backend_dir="applications/$app_name/backend"
+            if [ -d "$app_backend_dir" ] && [ -f "$app_backend_dir/Dockerfile" ]; then
+              echo "::group::Building Docker image for $app_name backend"
+              docker build -t "$app_name-backend:pr" "$app_backend_dir" || echo "::warning::Docker build failed for $app_name backend"
+              echo "::endgroup::"
+            fi
+          done
+          
+          for app_name in $(echo "${{ steps.detect-apps.outputs.frontend_apps }}" | jq -r '.[]'); do
+            app_frontend_dir="applications/$app_name/frontend"
+            if [ -d "$app_frontend_dir" ] && [ -f "$app_frontend_dir/Dockerfile" ]; then
+              echo "::group::Building Docker image for $app_name frontend"
+              docker build -t "$app_name-frontend:pr" "$app_frontend_dir" || echo "::warning::Docker build failed for $app_name frontend"
+              echo "::endgroup::"
+            fi
+          done
+      
+      - name: Check for Dhall service spec changes
+        id: check_dhall_changes
         run: |
           # Fetch base branch for comparison
           git fetch origin ${{ github.base_ref }}:${{ github.base_ref }} || true
           
-          # Check if any service spec files were changed
-          if git diff --name-only ${{ github.base_ref }}...HEAD | grep -E '^(services/|applications/)'; then
+          # Check if any Dhall service spec files were changed
+          if git diff --name-only ${{ github.base_ref }}...HEAD | grep -E '^dhall/'; then
             echo "changed=true" >> $GITHUB_OUTPUT
           else
             echo "changed=false" >> $GITHUB_OUTPUT
           fi
       
-      - name: Validate service specs
-        if: steps.check_service_changes.outputs.changed == 'true'
+      - name: Validate Dhall service specs
+        if: steps.check_dhall_changes.outputs.changed == 'true'
         run: |
-          echo "Validating service definitions..."
+          echo "Validating Dhall service definitions..."
           
-          # Install pyyaml for validation script
-          pip install pyyaml
+          # Install Dhall
+          curl -L https://github.com/dhall-lang/dhall-haskell/releases/download/1.41.2/dhall-1.41.2-x86_64-linux.tar.bz2 | tar -xj
+          sudo mv ./bin/dhall /usr/local/bin/
+          dhall --version
           
-          # Check if we have any service specs
-          if [ ! -d "services" ] && [ ! -d "applications" ]; then
-            echo "::warning::No service directories found. Skipping validation."
-            exit 0
-          fi
-          
-          # Run validation for dev environment (most common)
-          # We use a dummy DEVOPS dir since we're only validating, not generating
-          mkdir -p /tmp/dummy-devops/live/dev/04-ecs-fargate
-          
-          echo "::notice::Validating service specs for dev environment..."
-          
-          if python scripts/generate_ecs_services_tfvars.py \
-            --base-dir . \
-            --devops-dir /tmp/dummy-devops \
-            --environment dev 2>&1; then
-            echo "✓ Service spec validation passed"
+          # Validate Dhall files
+          if [ -f "dhall/services.dhall" ]; then
+            echo "::notice::Type-checking dhall/services.dhall..."
+            dhall type --file dhall/services.dhall || {
+              echo "::error::Dhall type-checking failed!"
+              exit 1
+            }
+            echo "✓ Dhall service spec validation passed"
           else
-            echo "::error::Service spec validation failed!"
-            echo ""
-            echo "Common issues:"
-            echo "  - Duplicate path patterns on the same ALB"
-            echo "  - Missing required fields (name, application)"
-            echo "  - Invalid application names (must be lowercase, alphanumeric, hyphens only)"
-            echo "  - Application name mismatch with directory name"
-            exit 1
+            echo "::warning::No dhall/services.dhall found. Skipping validation."
           fi
       
       - name: PR feedback

@@ -10,17 +10,15 @@ on:
   push:
     branches: [main, develop]
     paths:
-      - 'backend/**'
-      - 'frontend/**'
       - 'applications/**'
       - 'scripts/**'
+      - 'dhall/**'
   pull_request:
     branches: [main]
     paths:
-      - 'backend/**'
-      - 'frontend/**'
       - 'applications/**'
       - 'scripts/**'
+      - 'dhall/**'
   schedule:
     - cron: '0 6 * * 1'  # Weekly on Monday at 6 AM UTC - always runs for comprehensive analysis
 

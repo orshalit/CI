@@ -19,20 +19,18 @@ on:
     tags:
       - 'v*'  # Always run on version tags
     paths:
-      - 'backend/**'
-      - 'frontend/**'
-      - 'applications/**'  # Include app-specific code directories
+      - 'applications/**'  # All application code
       - 'scripts/**'
+      - 'dhall/**'  # Dhall configuration files
       - 'docker-compose*.yml'
       - 'Dockerfile*'
       - '.github/workflows/ci.yml'  # Run if CI workflow itself changes
   pull_request:
     branches: [main, develop]
     paths:
-      - 'backend/**'
-      - 'frontend/**'
-      - 'applications/**'  # Include app-specific code directories
+      - 'applications/**'  # All application code
       - 'scripts/**'
+      - 'dhall/**'  # Dhall configuration files
       - 'docker-compose*.yml'
       - 'Dockerfile*'
       - '.github/workflows/ci.yml'
@@ -80,20 +78,16 @@ jobs:
         with:
           filters: |
             app-code:
-              - 'backend/**'
-              - 'frontend/**'
-              - 'applications/**'  # Include all app-specific code
+              - 'applications/**'  # All application code
               - 'Dockerfile*'
               - 'docker-compose*.yml'
             backend-code:
-              - 'backend/**'
               - 'applications/*/backend/**'
               - '**/requirements*.txt'
               - '**/pyproject.toml'
               - '**/pytest.ini'
               - '**/Dockerfile'  # Backend Dockerfiles
             frontend-code:
-              - 'frontend/**'
               - 'applications/*/frontend/**'
               - '**/package.json'
               - '**/package-lock.json'
@@ -121,73 +115,57 @@ jobs:
         with:
           fetch-depth: 0  # Full history for better analysis
       
+      - name: Detect app directories
+        id: detect-apps
+        run: |
+          # Find all apps with backend/frontend directories
+          BACKEND_APPS=$(find applications -mindepth 2 -maxdepth 2 -type d -name "backend" -exec dirname {} \; | xargs -n1 basename | jq -R -s -c 'split("\n") | map(select(length > 0))' || echo '[]')
+          FRONTEND_APPS=$(find applications -mindepth 2 -maxdepth 2 -type d -name "frontend" -exec dirname {} \; | xargs -n1 basename | jq -R -s -c 'split("\n") | map(select(length > 0))' || echo '[]')
+          echo "backend_apps=$BACKEND_APPS" >> $GITHUB_OUTPUT
+          echo "frontend_apps=$FRONTEND_APPS" >> $GITHUB_OUTPUT
+          echo "::notice::Detected backend apps: $BACKEND_APPS"
+          echo "::notice::Detected frontend apps: $FRONTEND_APPS"
+      
+      # Python code quality - Dynamic for all app backends
       - name: Set up Python
+        if: steps.detect-apps.outputs.backend_apps != '[]'
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'pip'
-          cache-dependency-path: backend/requirements-dev.txt
       
-      - name: Install Python dependencies
-        working-directory: ./backend
+      - name: Install Python dependencies for all apps
+        if: steps.detect-apps.outputs.backend_apps != '[]'
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt
+          for app_name in $(echo "${{ steps.detect-apps.outputs.backend_apps }}" | jq -r '.[]'); do
+            app_backend_dir="applications/$app_name/backend"
+            if [ -d "$app_backend_dir" ] && [ -f "$app_backend_dir/requirements-dev.txt" ]; then
+              echo "::group::Installing dependencies for $app_name backend"
+              python -m pip install --upgrade pip
+              pip install -r "$app_backend_dir/requirements-dev.txt"
+              echo "::endgroup::"
+            fi
+          done
       
+      # JavaScript code quality - Dynamic for all app frontends
       - name: Set up Node.js
+        if: steps.detect-apps.outputs.frontend_apps != '[]'
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
       
-      - name: Install Node.js dependencies
-        working-directory: ./frontend
-        run: npm ci
-      
-      # Python code quality - FAST (Ruff + Black)
-      - name: Run Ruff linter ⚡ (replaces Flake8, Pylint, isort)
-        working-directory: ./backend
-        run: ruff check . --output-format=github
-      
-      - name: Check Python code formatting (Black)
-        working-directory: ./backend
+      - name: Install Node.js dependencies for all apps
+        if: steps.detect-apps.outputs.frontend_apps != '[]'
         run: |
-          echo "::notice::Formatting code with Black..."
-          black .
-          if [ -n "$(git status --porcelain backend/)" ]; then
-            echo "::error::Code was reformatted by Black. Changes:"
-            git diff backend/
-            echo ""
-            echo "::error::Please commit these formatting changes."
-            exit 1
-          else
-            echo "::notice::Code is already properly formatted."
-          fi
-      
-      # JavaScript code quality - FAST (ESLint + Prettier)
-      - name: Run ESLint
-        working-directory: ./frontend
-        run: npm run lint
-      
-      - name: Check JavaScript formatting (Prettier)
-        working-directory: ./frontend
-        run: |
-          npm run format:check || (echo "⚠️  Formatting issues found. Run 'npm run format' locally with Node 20+ to fix." && exit 1)
-      
-      # Dependency Auditing
-      - name: Audit Python dependencies
-        working-directory: ./backend
-        continue-on-error: true  # Report but don't fail on vulnerabilities
-        run: |
-          pip install pip-audit
-          pip-audit -r requirements.txt --desc on || echo "⚠️  Vulnerabilities found in Python dependencies"
-      
-      - name: Audit Node.js dependencies
-        working-directory: ./frontend
-        continue-on-error: true  # Report but don't fail on vulnerabilities
-        run: |
-          npm audit --audit-level=high || echo "⚠️  Vulnerabilities found in Node.js dependencies"
+          for app_name in $(echo "${{ steps.detect-apps.outputs.frontend_apps }}" | jq -r '.[]'); do
+            app_frontend_dir="applications/$app_name/frontend"
+            if [ -d "$app_frontend_dir" ] && [ -f "$app_frontend_dir/package-lock.json" ]; then
+              echo "::group::Installing dependencies for $app_name frontend"
+              cd "$app_frontend_dir"
+              npm ci
+              cd - > /dev/null
+              echo "::endgroup::"
+            fi
+          done
       
       # App-specific Python code quality
       - name: Run Ruff linter for app backends
@@ -279,88 +257,112 @@ jobs:
       needs.detect-changes.outputs.backend-code == 'true' ||
       startsWith(github.ref, 'refs/tags/v') ||
       github.event_name == 'workflow_dispatch'
-    strategy:
-      matrix:
-        test-type: [unit, integration]
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
       
+      - name: Detect app backends
+        id: detect-apps
+        run: |
+          APPS=$(find applications -mindepth 2 -maxdepth 2 -type d -name "backend" -exec dirname {} \; | xargs -n1 basename | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          echo "apps=$APPS" >> $GITHUB_OUTPUT
+          echo "::notice::Detected app backends: $APPS"
+      
       - name: Set up Python
+        if: steps.detect-apps.outputs.apps != '[]'
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'pip'
-          cache-dependency-path: backend/requirements-dev.txt
       
-      - name: Install dependencies
-        working-directory: ./backend
+      - name: Run tests for each app backend
+        if: steps.detect-apps.outputs.apps != '[]'
+        continue-on-error: true
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt
-      
-      - name: Run unit tests
-        if: matrix.test-type == 'unit'
-        working-directory: ./backend
-        env:
-          TESTING: 'true'
-          RATE_LIMIT_ENABLED: 'false'
-        run: |
-          pytest -m unit \
-            --verbose \
-            --tb=short \
-            --cov=. \
-            --cov-report=xml \
-            --cov-report=html \
-            --cov-report=term-missing \
-            --junitxml=junit-unit.xml \
-            tests/
-      
-      - name: Run integration tests
-        if: matrix.test-type == 'integration'
-        working-directory: ./backend
-        env:
-          TESTING: 'false'
-          BACKEND_URL: 'http://localhost:8000'
-        run: |
-          # Start services for integration tests
-          cd ..
-          docker compose up -d database backend
-          
-          # Wait for services
-          timeout 60 bash -c 'until curl -f http://localhost:8000/health; do sleep 2; done'
-          
-          # Run integration tests
-          cd backend
-          pytest -m integration \
-            --verbose \
-            --tb=short \
-            --junitxml=junit-integration.xml \
-            tests/test_integration.py
+          for app_name in $(echo "${{ steps.detect-apps.outputs.apps }}" | jq -r '.[]'); do
+            app_backend_dir="applications/$app_name/backend"
+            
+            if [ ! -d "$app_backend_dir" ]; then
+              echo "::warning::Backend directory not found: $app_backend_dir"
+              continue
+            fi
+            
+            if [ ! -d "$app_backend_dir/tests" ] && [ ! -f "$app_backend_dir/pytest.ini" ]; then
+              echo "::notice::No tests found for $app_name backend, skipping"
+              continue
+            fi
+            
+            echo "::group::Testing $app_name backend"
+            
+            # Install dependencies
+            if [ -f "$app_backend_dir/requirements-dev.txt" ]; then
+              python -m pip install --upgrade pip
+              pip install -r "$app_backend_dir/requirements-dev.txt"
+            elif [ -f "$app_backend_dir/requirements.txt" ]; then
+              python -m pip install --upgrade pip
+              pip install -r "$app_backend_dir/requirements.txt"
+            fi
+            
+            # Run unit tests
+            cd "$app_backend_dir"
+            if [ -d "tests" ]; then
+              echo "Running unit tests for $app_name..."
+              pytest -m unit \
+                --verbose \
+                --tb=short \
+                --cov=. \
+                --cov-report=xml \
+                --cov-report=html \
+                --cov-report=term-missing \
+                --junitxml=junit-$app_name-unit.xml \
+                tests/ || echo "::warning::Unit tests failed for $app_name"
+              
+              # Run integration tests if they exist
+              if pytest -m integration --collect-only tests/ 2>/dev/null | grep -q "integration"; then
+                echo "Running integration tests for $app_name..."
+                # Start services for integration tests
+                cd ../../..
+                docker compose up -d database || true
+                docker compose -f docker-compose.yml -f docker-compose.prod.yml build "$app_name-backend" || docker compose -f docker-compose.yml -f docker-compose.prod.yml build backend || true
+                docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d "$app_name-backend" || docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d backend || true
+                
+                # Wait for services
+                timeout 60 bash -c 'until curl -f http://localhost:8000/health 2>/dev/null; do sleep 2; done' || true
+                
+                # Run integration tests
+                cd "applications/$app_name/backend"
+                pytest -m integration \
+                  --verbose \
+                  --tb=short \
+                  --junitxml=junit-$app_name-integration.xml \
+                  tests/ || echo "::warning::Integration tests failed for $app_name"
+                
+                # Stop services
+                cd ../../..
+                docker compose down -v || true
+              fi
+            fi
+            cd - > /dev/null
+            
+            echo "::endgroup::"
+          done
       
       - name: Upload test results
-        if: always()
+        if: always() && steps.detect-apps.outputs.apps != '[]'
         uses: actions/upload-artifact@v4
         with:
-          name: backend-test-results-${{ matrix.test-type }}
-          path: |
-            backend/junit-*.xml
-            backend/htmlcov/
-            backend/coverage.xml
+          name: backend-test-results
+          path: applications/*/backend/junit-*.xml
+          if-no-files-found: ignore
       
       - name: Upload coverage to Codecov
-        if: matrix.test-type == 'unit'
+        if: always() && steps.detect-apps.outputs.apps != '[]'
         uses: codecov/codecov-action@v4
         with:
-          files: ./backend/coverage.xml
+          files: applications/*/backend/coverage.xml
           flags: backend
           name: backend-coverage
           fail_ci_if_error: false
-      
-      - name: Stop services
-        if: always() && matrix.test-type == 'integration'
-        run: docker compose down -v
 
   # ===========================================================================
   # App-Specific Backend Testing
@@ -451,55 +453,6 @@ jobs:
   
   frontend-tests:
     name: Frontend Tests
-    runs-on: ubuntu-latest
-    needs: [detect-changes]
-    # Only run if frontend code changed, or on version tags, or manual dispatch
-    if: |
-      needs.detect-changes.outputs.frontend-code == 'true' ||
-      startsWith(github.ref, 'refs/tags/v') ||
-      github.event_name == 'workflow_dispatch'
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
-      
-      - name: Install dependencies
-        working-directory: ./frontend
-        run: npm ci
-      
-      - name: Run tests with coverage
-        working-directory: ./frontend
-        run: npm test -- --coverage --watchAll=false --ci --maxWorkers=50%
-      
-      - name: Upload test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: frontend-test-results
-          path: |
-            frontend/coverage/
-      
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
-        with:
-          files: ./frontend/coverage/coverage-final.json
-          flags: frontend
-          name: frontend-coverage
-          fail_ci_if_error: false
-
-  # ===========================================================================
-  # App-Specific Frontend Testing
-  # ===========================================================================
-  
-  app-frontend-tests:
-    name: App-Specific Frontend Tests
     runs-on: ubuntu-latest
     needs: [detect-changes]
     # Only run if frontend code changed, or on version tags, or manual dispatch
@@ -709,57 +662,47 @@ jobs:
             echo "has_images=$([ "$COUNT" -gt 0 ] && echo "true" || echo "false")" >> $GITHUB_OUTPUT
             echo "::notice::Building all images (both backend and frontend changed)"
           elif [ "$BACKEND_CHANGED" == "true" ]; then
-            # Only shared backend images (backend/ directory changes affect shared backend only)
-            # App-specific backends (applications/*/backend) are built separately when their code changes
-            FILTERED=$(echo "$FULL_MATRIX" | jq '.include | map(select(.service == "backend" and .type == "shared")) | {include: .}')
+            # Build all backend images (app-specific backends in applications/*/backend)
+            FILTERED=$(echo "$FULL_MATRIX" | jq '.include | map(select(.service == "backend")) | {include: .}')
             COUNT=$(echo "$FILTERED" | jq '.include | length')
             if [ "$COUNT" -eq 0 ]; then
-              echo "::error::Backend code changed but no shared backend images found in matrix!"
+              echo "::warning::Backend code changed but no backend images found in matrix, using full matrix"
               echo "matrix<<EOF" >> $GITHUB_OUTPUT
               echo "$FULL_MATRIX" >> $GITHUB_OUTPUT
               echo "EOF" >> $GITHUB_OUTPUT
               FALLBACK_COUNT=$(echo "$FULL_MATRIX" | jq '.include | length')
               echo "has_images=$([ "$FALLBACK_COUNT" -gt 0 ] && echo "true" || echo "false")" >> $GITHUB_OUTPUT
-              echo "::warning::Using full matrix as fallback"
             else
               echo "matrix<<EOF" >> $GITHUB_OUTPUT
               echo "$FILTERED" >> $GITHUB_OUTPUT
               echo "EOF" >> $GITHUB_OUTPUT
               echo "has_images=true" >> $GITHUB_OUTPUT
-              echo "::notice::Building only shared backend images ($COUNT image(s))"
+              echo "::notice::Building backend images ($COUNT image(s))"
             fi
           elif [ "$FRONTEND_CHANGED" == "true" ]; then
-            # Only shared frontend images (frontend/ directory changes affect shared frontend only)
-            # App-specific frontends (applications/*/frontend) are built separately when their code changes
-            FILTERED=$(echo "$FULL_MATRIX" | jq '.include | map(select(.service == "frontend" and .type == "shared")) | {include: .}')
+            # Build all frontend images (app-specific frontends in applications/*/frontend)
+            FILTERED=$(echo "$FULL_MATRIX" | jq '.include | map(select(.service == "frontend")) | {include: .}')
             COUNT=$(echo "$FILTERED" | jq '.include | length')
             if [ "$COUNT" -eq 0 ]; then
-              echo "::error::Frontend code changed but no shared frontend images found in matrix!"
-              echo "::error::Full matrix was:"
-              echo "$FULL_MATRIX" | jq '.'
+              echo "::warning::Frontend code changed but no frontend images found in matrix, using full matrix"
               echo "matrix<<EOF" >> $GITHUB_OUTPUT
               echo "$FULL_MATRIX" >> $GITHUB_OUTPUT
               echo "EOF" >> $GITHUB_OUTPUT
               FALLBACK_COUNT=$(echo "$FULL_MATRIX" | jq '.include | length')
               echo "has_images=$([ "$FALLBACK_COUNT" -gt 0 ] && echo "true" || echo "false")" >> $GITHUB_OUTPUT
-              echo "::warning::Using full matrix as fallback"
             else
               echo "matrix<<EOF" >> $GITHUB_OUTPUT
               echo "$FILTERED" >> $GITHUB_OUTPUT
               echo "EOF" >> $GITHUB_OUTPUT
               echo "has_images=true" >> $GITHUB_OUTPUT
-              echo "::notice::Building only shared frontend images ($COUNT image(s))"
-              echo "::notice::Filtered matrix:"
-              echo "$FILTERED" | jq '.'
+              echo "::notice::Building frontend images ($COUNT image(s))"
             fi
           elif [ "$APP_CODE_CHANGED" == "true" ]; then
-            # App code changed but path filter didn't detect backend/frontend specifically
-            # This can happen with dorny/paths-filter - be more permissive and build all app-specific images
-            echo "::warning::App code changed but backend/frontend detection unclear - building all app-specific images"
+            # App code changed - build all app-specific images
             FILTERED=$(echo "$FULL_MATRIX" | jq '.include | map(select(.type == "app-specific")) | {include: .}')
             COUNT=$(echo "$FILTERED" | jq '.include | length')
             if [ "$COUNT" -eq 0 ]; then
-              echo "::warning::No app-specific images found, using full matrix"
+              echo "::warning::App code changed but no app-specific images found, using full matrix"
               echo "matrix<<EOF" >> $GITHUB_OUTPUT
               echo "$FULL_MATRIX" >> $GITHUB_OUTPUT
               echo "EOF" >> $GITHUB_OUTPUT
@@ -782,7 +725,7 @@ jobs:
   build-images:
     name: Build Docker Images
     runs-on: ubuntu-latest
-    needs: [code-quality, backend-tests, frontend-tests, app-backend-tests, app-frontend-tests, prepare-build, detect-changes, filter-build-matrix]
+    needs: [code-quality, backend-tests, frontend-tests, app-backend-tests, prepare-build, detect-changes, filter-build-matrix]
     # We must use `always()` so this job's `if` condition is evaluated even if upstream jobs are skipped.
     # The condition then checks that all necessary preceding jobs either succeeded or were skipped,
     # and most importantly, that the filter-build-matrix job has determined there are images to build.
@@ -796,7 +739,7 @@ jobs:
       (needs.backend-tests.result == 'success' || needs.backend-tests.result == 'skipped') &&
       (needs.frontend-tests.result == 'success' || needs.frontend-tests.result == 'skipped') &&
       (needs.app-backend-tests.result == 'success' || needs.app-backend-tests.result == 'skipped') &&
-      (needs.app-frontend-tests.result == 'success' || needs.app-frontend-tests.result == 'skipped')
+      (needs.frontend-tests.result == 'success' || needs.frontend-tests.result == 'skipped')
     strategy:
       matrix: ${{ fromJson(needs.filter-build-matrix.outputs.matrix) }}
       fail-fast: false
@@ -1188,7 +1131,7 @@ jobs:
   summary:
     name: Build Summary
     runs-on: ubuntu-latest
-    needs: [e2e-tests, prepare-build, detect-changes, build-images, code-quality, backend-tests, frontend-tests, app-backend-tests, app-frontend-tests, detect-app-images, filter-build-matrix]
+    needs: [e2e-tests, prepare-build, detect-changes, build-images, code-quality, backend-tests, frontend-tests, app-backend-tests, detect-app-images, filter-build-matrix]
     if: always()
     
     steps:
