@@ -670,6 +670,7 @@ jobs:
     needs: [detect-changes, detect-app-images]
     outputs:
       matrix: ${{ steps.filter.outputs.matrix }}
+      has_images: ${{ steps.filter.outputs.has_images }}
     steps:
       - name: Filter matrix by changed code
         id: filter
@@ -692,6 +693,8 @@ jobs:
             echo "matrix<<EOF" >> $GITHUB_OUTPUT
             echo "$FULL_MATRIX" >> $GITHUB_OUTPUT
             echo "EOF" >> $GITHUB_OUTPUT
+            COUNT=$(echo "$FULL_MATRIX" | jq '.include | length')
+            echo "has_images=$([ "$COUNT" -gt 0 ] && echo "true" || echo "false")" >> $GITHUB_OUTPUT
             echo "::notice::Building all images (tag/manual trigger)"
             exit 0
           fi
@@ -702,6 +705,8 @@ jobs:
             echo "matrix<<EOF" >> $GITHUB_OUTPUT
             echo "$FULL_MATRIX" >> $GITHUB_OUTPUT
             echo "EOF" >> $GITHUB_OUTPUT
+            COUNT=$(echo "$FULL_MATRIX" | jq '.include | length')
+            echo "has_images=$([ "$COUNT" -gt 0 ] && echo "true" || echo "false")" >> $GITHUB_OUTPUT
             echo "::notice::Building all images (both backend and frontend changed)"
           elif [ "$BACKEND_CHANGED" == "true" ]; then
             # Only shared backend images (backend/ directory changes affect shared backend only)
@@ -713,11 +718,14 @@ jobs:
               echo "matrix<<EOF" >> $GITHUB_OUTPUT
               echo "$FULL_MATRIX" >> $GITHUB_OUTPUT
               echo "EOF" >> $GITHUB_OUTPUT
+              FALLBACK_COUNT=$(echo "$FULL_MATRIX" | jq '.include | length')
+              echo "has_images=$([ "$FALLBACK_COUNT" -gt 0 ] && echo "true" || echo "false")" >> $GITHUB_OUTPUT
               echo "::warning::Using full matrix as fallback"
             else
               echo "matrix<<EOF" >> $GITHUB_OUTPUT
               echo "$FILTERED" >> $GITHUB_OUTPUT
               echo "EOF" >> $GITHUB_OUTPUT
+              echo "has_images=true" >> $GITHUB_OUTPUT
               echo "::notice::Building only shared backend images ($COUNT image(s))"
             fi
           elif [ "$FRONTEND_CHANGED" == "true" ]; then
@@ -732,11 +740,14 @@ jobs:
               echo "matrix<<EOF" >> $GITHUB_OUTPUT
               echo "$FULL_MATRIX" >> $GITHUB_OUTPUT
               echo "EOF" >> $GITHUB_OUTPUT
+              FALLBACK_COUNT=$(echo "$FULL_MATRIX" | jq '.include | length')
+              echo "has_images=$([ "$FALLBACK_COUNT" -gt 0 ] && echo "true" || echo "false")" >> $GITHUB_OUTPUT
               echo "::warning::Using full matrix as fallback"
             else
               echo "matrix<<EOF" >> $GITHUB_OUTPUT
               echo "$FILTERED" >> $GITHUB_OUTPUT
               echo "EOF" >> $GITHUB_OUTPUT
+              echo "has_images=true" >> $GITHUB_OUTPUT
               echo "::notice::Building only shared frontend images ($COUNT image(s))"
               echo "::notice::Filtered matrix:"
               echo "$FILTERED" | jq '.'
@@ -752,14 +763,18 @@ jobs:
               echo "matrix<<EOF" >> $GITHUB_OUTPUT
               echo "$FULL_MATRIX" >> $GITHUB_OUTPUT
               echo "EOF" >> $GITHUB_OUTPUT
+              FALLBACK_COUNT=$(echo "$FULL_MATRIX" | jq '.include | length')
+              echo "has_images=$([ "$FALLBACK_COUNT" -gt 0 ] && echo "true" || echo "false")" >> $GITHUB_OUTPUT
             else
               echo "matrix<<EOF" >> $GITHUB_OUTPUT
               echo "$FILTERED" >> $GITHUB_OUTPUT
               echo "EOF" >> $GITHUB_OUTPUT
+              echo "has_images=true" >> $GITHUB_OUTPUT
               echo "::notice::Building app-specific images ($COUNT image(s))"
             fi
           else
             echo "matrix={\"include\": []}" >> $GITHUB_OUTPUT
+            echo "has_images=false" >> $GITHUB_OUTPUT
             echo "::warning::No code changes detected, skipping builds"
             echo "::warning::This might be a path filter issue - check the detect-changes job output"
           fi
@@ -770,7 +785,7 @@ jobs:
     needs: [code-quality, backend-tests, frontend-tests, app-backend-tests, app-frontend-tests, prepare-build, detect-changes, filter-build-matrix]
     # Build images if backend OR frontend code changed, or on version tags, or manual dispatch
     # Also check that prerequisite jobs succeeded (or were skipped)
-    # IMPORTANT: Check filter-build-matrix succeeded to ensure matrix is valid
+    # IMPORTANT: Check filter-build-matrix succeeded AND has_images is true to ensure matrix is non-empty
     if: |
       (needs.detect-changes.outputs.backend-code == 'true' ||
        needs.detect-changes.outputs.frontend-code == 'true' ||
@@ -781,7 +796,8 @@ jobs:
       (needs.frontend-tests.result == 'success' || needs.frontend-tests.result == 'skipped') &&
       (needs.app-backend-tests.result == 'success' || needs.app-backend-tests.result == 'skipped') &&
       (needs.app-frontend-tests.result == 'success' || needs.app-frontend-tests.result == 'skipped') &&
-      (needs.filter-build-matrix.result == 'success')
+      (needs.filter-build-matrix.result == 'success') &&
+      (needs.filter-build-matrix.outputs.has_images == 'true')
     strategy:
       matrix: ${{ fromJson(needs.filter-build-matrix.outputs.matrix) }}
       fail-fast: false
