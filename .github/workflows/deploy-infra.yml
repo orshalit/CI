@@ -800,9 +800,14 @@ jobs:
           
           REFRESH_OUTPUT=$(terraform -chdir="$PLAN_DIR" apply $REFRESH_ARGS 2>&1 || echo "")
           
-          # Check if refresh detected any changes
+          # Check if refresh detected any changes.
+          # Terraform 1.6 sometimes prints "Apply complete! Resources: 0 added, 0 changed, 0 destroyed."
+          # even when refresh-only makes no changes, so treat that as "no changes" too.
           if echo "$REFRESH_OUTPUT" | grep -q "No changes"; then
             echo "::notice::✓ Plan is still valid - no state changes detected"
+            echo "plan_stale=false" >> $GITHUB_OUTPUT
+          elif echo "$REFRESH_OUTPUT" | grep -q "Apply complete! Resources: 0 added, 0 changed, 0 destroyed."; then
+            echo "::notice::✓ Plan is still valid - refresh-only reported zero changes"
             echo "plan_stale=false" >> $GITHUB_OUTPUT
           else
             echo "::error::❌ Plan is stale - state has changed since plan was created"
