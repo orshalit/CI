@@ -791,25 +791,28 @@ jobs:
       fail-fast: false
     
     steps:
-      - name: Validate build matrix
+      - name: Validate Build Matrix
         run: |
-          MATRIX='${{ needs.filter-build-matrix.outputs.matrix }}'
-          echo "::group::Build Matrix Validation"
-          echo "Matrix JSON:"
-          echo "$MATRIX" | jq '.'
+          MATRIX_JSON='${{ toJson(needs.filter-build-matrix.outputs.matrix) }}'
+          echo "::debug::Raw matrix JSON: $MATRIX_JSON"
           
-          # Check if matrix is empty
-          COUNT=$(echo "$MATRIX" | jq '.include | length')
-          if [ "$COUNT" -eq 0 ]; then
-            echo "::error::Build matrix is empty! This should not happen when code changes are detected."
-            echo "::error::Backend changed: ${{ needs.detect-changes.outputs.backend-code }}"
-            echo "::error::Frontend changed: ${{ needs.detect-changes.outputs.frontend-code }}"
+          # Check if the matrix is empty or invalid
+          if [ "$MATRIX_JSON" == "null" ] || [ "$MATRIX_JSON" == "{\\"include\\":[]}" ]; then
+            echo "::error::Build matrix is empty or invalid. No images will be built."
+            echo "::error::This usually means no relevant code changes were detected by 'detect-changes' or 'filter-build-matrix'."
+            echo "::error::If this is unexpected, review the 'detect-changes' and 'filter-build-matrix' job outputs."
             exit 1
           fi
           
-          echo "::notice::Matrix contains $COUNT image(s) to build:"
-          echo "$MATRIX" | jq -r '.include[] | "  - \(.image_name) (\(.type))"'
-          echo "::endgroup::"
+          # Further validation: check if 'include' array exists and has elements
+          if ! echo "$MATRIX_JSON" | jq -e '.include | length > 0' > /dev/null; then
+            echo "::error::Build matrix 'include' array is empty. No images will be built."
+            echo "::error::Review the 'filter-build-matrix' job output for details."
+            exit 1
+          fi
+          
+          echo "::notice::Build matrix validated. Images to build:"
+          echo "$MATRIX_JSON" | jq -r '.include[] | "  - \\(.image_name) (type: \\(.type), context: \\(.context))"'
       
       - name: Checkout code
         uses: actions/checkout@v4
