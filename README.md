@@ -356,7 +356,7 @@ npm run format        # Format with Prettier
 - Backend: `ruff.toml`, `pyproject.toml`
 - Frontend: `.eslintrc.cjs`, `.prettierrc`
 
-**See:** `LINTING-GUIDE.md` for complete linting documentation
+**Linting:** Ruff (Python) and ESLint (JavaScript) run automatically in CI and via pre-commit hooks.
 
 ## 🐳 Docker & Versioning
 
@@ -398,7 +398,7 @@ Every Docker image includes:
 - Runtime versions (Python/Node)
 - OCI-compliant labels
 
-**See:** `VERSIONING.md` for complete versioning guide
+**Versioning:** Images are tagged with semantic versions and Git commit SHAs automatically in CI.
 
 ## ⚙️ CI/CD Pipeline
 
@@ -451,7 +451,7 @@ The project uses GitHub Actions for automated CI/CD:
 
 **Typical Run Time:** 10-15 minutes
 
-**See:** `CI-CD-GUIDE.md` for complete CI/CD documentation
+**CI/CD:** Automated testing, building, and deployment via GitHub Actions workflows.
 
 ## 📚 Documentation
 
