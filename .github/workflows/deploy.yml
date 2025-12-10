@@ -549,6 +549,7 @@ jobs:
         with:
           terraform_path: DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}
           var_files: ${{ steps.build_var_files.outputs.var_files }}
+          extra_vars: "global_image_tag=${{ steps.vars.outputs.image_tag }}"
           plan_file: "tfplan"
         continue-on-error: true
 
