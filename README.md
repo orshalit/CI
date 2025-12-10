@@ -455,18 +455,8 @@ The project uses GitHub Actions for automated CI/CD:
 
 ## 📚 Documentation
 
-### CI/CD & Deployment
-- **[DEPLOYMENT.md](DEPLOYMENT.md)** - Secure AWS deployment guide (OIDC, SSM, Docker Compose)
-- **[CI-CD-GUIDE.md](CI-CD-GUIDE.md)** - Comprehensive CI/CD pipeline guide
-- **[QUICK-START.md](QUICK-START.md)** - Quick reference for common commands
-
-### Code Quality & Standards
-- **[LINTING-GUIDE.md](LINTING-GUIDE.md)** - Code quality and linting setup
-- **[VERSIONING.md](VERSIONING.md)** - Docker versioning and build system
-
-### Infrastructure
+- **[applications/README.md](applications/README.md)** - Application structure and docker-compose usage
 - **[DEVOPS/live/dev/03-github-oidc/](../DEVOPS/live/dev/03-github-oidc/)** - Terraform OIDC infrastructure
-- **[DEVOPS/modules/backend/github-oidc/](../DEVOPS/modules/backend/github-oidc/)** - OIDC Terraform module
 
 ### Running Backend Locally
 

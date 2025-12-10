@@ -219,26 +219,34 @@ jobs:
           cat "$SERVICES_JSON" | jq 'keys' | head -20
           echo "::endgroup::"
           
-          # Convert JSON to Terraform tfvars format
+          # Generate Terraform tfvars directly from Dhall (native, type-safe)
           SERVICES_TFVARS="$PLAN_DIR/services.generated.tfvars"
-          echo "::notice::Converting JSON to Terraform tfvars format..."
+          SERVICES_TFVARS_DHALL="CI-REPO/dhall/services.tfvars.dhall"
           
-          # Find the conversion script (should be in DEVOPS repo)
-          CONVERSION_SCRIPT="DEVOPS/scripts/dhall-json-to-tfvars.py"
-          if [ ! -f "$CONVERSION_SCRIPT" ]; then
-            echo "::error::Conversion script not found at $CONVERSION_SCRIPT"
-            echo "::error::Ensure DEVOPS repository is checked out"
+          echo "::notice::Generating Terraform tfvars directly from Dhall (native, type-safe)..."
+          
+          if [ ! -f "$SERVICES_TFVARS_DHALL" ]; then
+            echo "::error::Dhall tfvars template not found at $SERVICES_TFVARS_DHALL"
             exit 1
           fi
           
-          python3 "$CONVERSION_SCRIPT" "$SERVICES_JSON" "$SERVICES_TFVARS"
+          # Use dhall to evaluate Text expression and generate tfvars format directly
+          # Dhall expressions that evaluate to Text can be output directly with --plain flag
+          # This is the native Dhall way - no Python script needed!
+          dhall --file "$SERVICES_TFVARS_DHALL" --plain > "$SERVICES_TFVARS" || {
+            echo "::error::Failed to generate tfvars from Dhall"
+            echo "::error::Dhall expression should evaluate to Text"
+            echo "::error::Checking Dhall file..."
+            dhall type --file "$SERVICES_TFVARS_DHALL" || true
+            exit 1
+          }
           
           if [ ! -f "$SERVICES_TFVARS" ] || [ ! -s "$SERVICES_TFVARS" ]; then
-            echo "::error::Failed to generate services.generated.tfvars"
+            echo "::error::Failed to generate services.generated.tfvars from Dhall"
             exit 1
           fi
           
-          echo "::notice::✓ Generated $SERVICES_TFVARS"
+          echo "::notice::✓ Generated $SERVICES_TFVARS (directly from Dhall)"
           echo "::group::Generated services.generated.tfvars (preview)"
           head -30 "$SERVICES_TFVARS"
           echo "::endgroup::"
