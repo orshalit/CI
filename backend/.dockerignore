@@ -1,0 +1,69 @@
+# =============================================================================
+# Backend .dockerignore
+# Excludes files that shouldn't be copied into Docker image
+# =============================================================================
+
+# Python bytecode and cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+*.manifest
+*.spec
+
+# Virtual environments
+.env
+.venv/
+venv/
+ENV/
+env/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+tests/
+conftest.py
+
+# IDE and editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Git
+.git/
+.gitignore
+
+# Documentation (not needed in production image)
+*.md
+docs/
+
+# Development files
+*.txt
+!requirements.txt
+Makefile
+*.sh
+*.bat
+pyproject.toml
+pytest.ini
+ruff.toml
+setup.py
+setup.cfg
+
+# Temporary files
+*.log
+*.tmp
+tmp/
+temp/

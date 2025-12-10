@@ -1,0 +1,31 @@
+# =============================================================================
+# Development Dependencies
+# =============================================================================
+# Includes all production dependencies plus testing and code quality tools.
+# Use this for local development: pip install -r requirements-dev.txt
+
+# Include production dependencies
+-r requirements.txt
+
+# =============================================================================
+# Testing
+# =============================================================================
+pytest==7.4.3
+httpx==0.25.2
+pytest-asyncio==0.21.1
+pytest-cov==4.1.0
+pytest-mock==3.12.0
+pytest-timeout==2.2.0
+faker==22.0.0
+
+# =============================================================================
+# Code Quality & Linting
+# =============================================================================
+ruff==0.14.6          # Modern fast linter (replaces flake8, pylint, isort)
+black==23.12.1        # Code formatter
+
+# =============================================================================
+# Security Auditing (optional, for local security checks)
+# =============================================================================
+pip-audit>=2.6.0      # Dependency vulnerability scanner
+
