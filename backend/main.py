@@ -67,7 +67,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.API_TITLE,
     version=settings.API_VERSION,
-    # Deployment test#6 - verify build matrix validation step
+    # Deployment test#7 - verify always() condition fix
     lifespan=lifespan,
     docs_url="/docs" if not settings.TESTING else None,
     redoc_url="/redoc" if not settings.TESTING else None,
