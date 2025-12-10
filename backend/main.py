@@ -67,6 +67,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.API_TITLE,
     version=settings.API_VERSION,
+    # Deployment test - trigger CI build
     lifespan=lifespan,
     docs_url="/docs" if not settings.TESTING else None,
     redoc_url="/redoc" if not settings.TESTING else None,
