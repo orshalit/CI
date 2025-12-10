@@ -42,7 +42,6 @@ let renderALB = \(alb : Service.ALBConfig) ->
 let renderService = \(service : Service) ->
       let envVars = renderEnvVars service.env
       let albBlock = renderALB service.alb
-      let hasAlb = Prelude.Optional.fold Service.ALBConfig False (\(_ : Service.ALBConfig) -> True) service.alb
       
       in  ''
   "${service.application}::${service.name}" = {
@@ -53,7 +52,9 @@ let renderService = \(service : Service) ->
     memory          = ${Natural/show service.memory}
     desired_count   = ${Natural/show service.desired_count}
     application     = "${service.application}"
-${if Prelude.List.length service.env > 0 then "\n    environment_variables = {\n${envVars}\n    }\n" else ""}${if hasAlb then "\n${albBlock}\n" else ""}  }
+${if Prelude.List.length service.env > 0 then "\n    environment_variables = {\n${envVars}\n    }\n" else ""}
+${albBlock}
+  }
 ''
 
 let renderServices = \(services : List Service) ->
