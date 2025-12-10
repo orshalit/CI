@@ -1,7 +1,0 @@
-# Security scanning tools (used in nightly security-scan workflow)
-# These have dependency conflicts with Pydantic 2, so they're separate
-
-bandit==1.7.6         # Python code security scanner
-# safety requires pydantic<2.0, so we'll use it without installing our app dependencies
-
-
