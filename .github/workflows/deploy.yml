@@ -159,15 +159,11 @@ jobs:
           steps.vars.outputs.image_tag != '' &&
           steps.vars.outputs.image_tag != 'null'
         run: |
-          echo "::group::File System Debug"
-          ls -R
-          echo "::endgroup::"
-          
           IMAGE_TAG="${{ steps.vars.outputs.image_tag }}"
-          SERVICES_TFVARS="DEVOPS/live/${{ steps.vars.outputs.environment }}/04-ecs-fargate/services.generated.tfvars"
+          SERVICES_JSON="DEVOPS/live/${{ steps.vars.outputs.environment }}/04-ecs-fargate/services.generated.json"
 
-          if [ ! -f "$SERVICES_TFVARS" ]; then
-            echo "::error::Services TFVARS file not found at $SERVICES_TFVARS. Cannot verify images."
+          if [ ! -f "$SERVICES_JSON" ]; then
+            echo "::error::Services JSON file not found at $SERVICES_JSON. Cannot verify images."
             exit 1
           fi
 
@@ -177,12 +173,11 @@ jobs:
             exit 1
           }
 
-          # Extract image_name values from the HCL tfvars file.
-          # This uses grep and sed to parse HCL, which is brittle but avoids installing another tool.
-          IMAGE_NAMES=$(grep -E '^\s*image_name\s*=' "$SERVICES_TFVARS" | sed -E 's/^\s*image_name\s*=\s*"(.*)"\s*$/\1/')
+          # Extract image_repo values from the JSON file using jq
+          IMAGE_NAMES=$(jq -r '.[].image_repo' "$SERVICES_JSON")
 
           if [ -z "$IMAGE_NAMES" ]; then
-            echo "::error::Could not extract any image_name from $SERVICES_TFVARS."
+            echo "::error::Could not extract any image_repo from $SERVICES_JSON."
             exit 1
           fi
 
@@ -221,6 +216,33 @@ jobs:
           aws_role_arn: ${{ secrets.AWS_ROLE_ARN }}
           aws_region: ${{ secrets.AWS_REGION }}
           terraform_version: '1.6.0'
+
+      - name: Install Dhall and jq
+        run: |
+          sudo apt-get update && sudo apt-get install -y jq
+          curl -L https://github.com/dhall-lang/dhall-haskell/releases/download/1.41.2/dhall-1.41.2-x86_64-linux.tar.bz2 | tar -xj
+          sudo mv dhall /usr/local/bin/
+          dhall --version
+
+      - name: Generate Terraform Config from Dhall
+        id: generate_config
+        if: steps.vars.outputs.action == 'plan' || steps.vars.outputs.action == 'apply' || steps.vars.outputs.action == 'destroy'
+        run: |
+          ENV="${{ steps.vars.outputs.environment }}"
+          MODULE_PATH="${{ steps.vars.outputs.module_path }}"
+          MODULE_NAME=$(basename "$MODULE_PATH")
+          OUTPUT_FILE="DEVOPS/live/${ENV}/${MODULE_PATH}/terraform.tfvars.json"
+
+          echo "::notice::Generating config for ${ENV}/${MODULE_NAME}..."
+
+          # Generate the JSON config for the specific module being deployed
+          dhall-to-json --file DEVOPS/config/environments/${ENV}.dhall | jq ".[\"${MODULE_NAME}\"]" > "${OUTPUT_FILE}"
+
+          echo "::notice::✓ Generated ${OUTPUT_FILE}"
+          echo "::group::Generated terraform.tfvars.json"
+          cat "${OUTPUT_FILE}"
+          echo "::endgroup::"
+          echo "var_file_path=${OUTPUT_FILE}" >> $GITHUB_OUTPUT
 
       - name: Terraform Format Check and Auto-Fix
         id: fmt
@@ -553,29 +575,24 @@ jobs:
         run: |
           PLAN_DIR="DEVOPS/live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}"
           VAR_FILES=""
-          if [ "${{ steps.check_tfvars.outputs.tfvars_exists }}" == "true" ]; then
-            VAR_FILES="terraform.tfvars"
-          fi
           
-          # Use filtered services file if application filtering was applied, otherwise use original
-          SERVICES_FILE="services.generated.tfvars"
-          if [ -n "${{ steps.filter_services.outputs.filtered_services_file }}" ] && \
-             [ "${{ steps.filter_services.outputs.filtered_services_file }}" != "services.generated.tfvars" ] && \
-             [ -f "$PLAN_DIR/${{ steps.filter_services.outputs.filtered_services_file }}" ]; then
-            SERVICES_FILE="${{ steps.filter_services.outputs.filtered_services_file }}"
-            echo "::notice::Using filtered services file: $SERVICES_FILE"
-          fi
+          # Always use the generated terraform.tfvars.json
+          VAR_FILES="terraform.tfvars.json"
           
-          # Only include services file if it exists AND services is not empty
-          # This prevents Terraform crash when services = {} (empty services map)
-          if [ "${{ steps.check_services_tfvars.outputs.services_tfvars_exists }}" == "true" ] && \
-             [ "${{ steps.check_services_empty.outputs.services_empty }}" != "true" ]; then
-            if [ -n "$VAR_FILES" ]; then
-              VAR_FILES="$VAR_FILES $SERVICES_FILE"
+          # For ECS module, also include services.generated.json if it exists
+          if [ "${{ steps.vars.outputs.module_path }}" == "04-ecs-fargate" ] && [ -f "$PLAN_DIR/services.generated.json" ]; then
+            # Check if services list is empty
+            if jq -e '. | length > 0' "$PLAN_DIR/services.generated.json" > /dev/null; then
+               VAR_FILES="$VAR_FILES services.generated.json"
+               echo "services_empty=false" >> $GITHUB_OUTPUT
             else
-              VAR_FILES="$SERVICES_FILE"
+               echo "::notice::Services JSON is empty, will not be included."
+               echo "services_empty=true" >> $GITHUB_OUTPUT
             fi
+          else
+            echo "services_empty=true" >> $GITHUB_OUTPUT
           fi
+          
           echo "var_files=$VAR_FILES" >> $GITHUB_OUTPUT
 
       - name: Check for existing services in state
@@ -611,23 +628,28 @@ jobs:
             done
             echo ""
             echo "::error::Why this is blocked:"
-            echo "::error::  • Config says: 'deploy zero services' (services = {})"
+            echo "::error::  • Config says: 'deploy zero services' (services = [])"
             echo "::error::  • State says: 'these services exist'"
             echo "::error::  • Terraform will destroy existing services to match empty config"
             echo "::error::  • This is almost certainly a mistake, not intentional"
             echo ""
             echo "::error::Solution - Generate services configuration first:"
-            echo "::error::  1. Go to: Actions → 'Create / Update ECS Service (generate DEVOPS PR)'"
-            echo "::error::  2. Run the workflow to generate services.generated.tfvars from YAML"
+            echo "::error::  1. Go to: Actions → 'Generate Service Config'"
+            echo "::error::  2. Run the workflow to generate services.generated.json from Dhall"
             echo "::error::  3. Review and merge the PR in DEVOPS repository"
             echo "::error::  4. Then run this deployment workflow again"
             echo ""
-            echo "::error::This ensures services in config match your YAML definitions."
+            echo "::error::This ensures services in config match your Dhall definitions."
             exit 1
           else
             echo "::notice::✓ No existing services in state"
             echo "::notice::✓ Safe to proceed with empty services config (fresh deployment)"
           fi
+          # For destroy, include services.generated.json even if empty (needed for proper cleanup)
+          if [ "${{ steps.vars.outputs.module_path }}" == "04-ecs-fargate" ] && [ -f "DEVOPS/live/${{ steps.vars.outputs.environment }}/04-ecs-fargate/services.generated.json" ]; then
+            VAR_FILES="$VAR_FILES services.generated.json"
+          fi
+          echo "var_files=$VAR_FILES" >> $GITHUB_OUTPUT
 
       - name: Comprehensive State Validation and Auto-Import
         id: validate_state
