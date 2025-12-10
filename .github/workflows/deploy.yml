@@ -1036,27 +1036,44 @@ jobs:
             echo "validation_failed=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Check Terraform State Lock
+      - name: Check Terraform State Lock (if DynamoDB locking enabled)
         id: check_state_lock
         if: steps.vars.outputs.action == 'apply' && steps.plan.outcome == 'success' && steps.plan_changes.outputs.has_changes == 'true'
         continue-on-error: true
-        timeout-minutes: 2
+        timeout-minutes: 1
         run: |
           PLAN_DIR="DEVOPS/live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}"
           
           echo "::notice::🔒 Checking for Terraform state locks..."
           
-          # Try to force-unlock if lock exists (with 30s timeout)
-          # This handles stale locks from failed/cancelled runs
-          LOCK_INFO=$(terraform -chdir="$PLAN_DIR" force-unlock -force -no-color $(terraform -chdir="$PLAN_DIR" force-unlock 2>&1 | grep -oP 'Lock ID: \K[^\s]+' | head -1) 2>&1 || echo "")
-          
-          if echo "$LOCK_INFO" | grep -q "No locks"; then
-            echo "::notice::✓ No state locks detected"
-            echo "state_locked=false" >> $GITHUB_OUTPUT
+          # Check if DynamoDB locking is configured in backend
+          if grep -q "dynamodb_table" "$PLAN_DIR/backend.tf" 2>/dev/null || grep -q "dynamodb_table" "$PLAN_DIR/backend.hcl" 2>/dev/null; then
+            echo "::notice::DynamoDB state locking is configured"
+            
+            # Try to list locks (terraform will error if locked)
+            # Note: There's no direct "check lock" command, but we can try a safe operation
+            # that will fail if locked: terraform state list (read-only, but still requires lock)
+            if terraform -chdir="$PLAN_DIR" state list -no-color >/dev/null 2>&1; then
+              echo "::notice::✓ No state locks detected (state is accessible)"
+              echo "state_locked=false" >> $GITHUB_OUTPUT
+            else
+              LOCK_ERROR=$(terraform -chdir="$PLAN_DIR" state list -no-color 2>&1 || true)
+              if echo "$LOCK_ERROR" | grep -qi "lock\|locked"; then
+                echo "::warning::⚠ State is locked by another operation"
+                echo "::warning::Lock error: $LOCK_ERROR"
+                echo "::warning::Waiting for lock to be released or checking for stale locks..."
+                echo "state_locked=true" >> $GITHUB_OUTPUT
+              else
+                echo "::notice::State check completed (may be fresh deployment with no state)"
+                echo "state_locked=false" >> $GITHUB_OUTPUT
+              fi
+            fi
           else
-            echo "::warning::State lock detected or lock check failed"
-            echo "::warning::This may cause 'stale plan' errors"
-            echo "state_locked=true" >> $GITHUB_OUTPUT
+            echo "::notice::DynamoDB state locking is NOT configured (S3 backend only)"
+            echo "::notice::State locking relies on S3 object locking, which is less reliable"
+            echo "::notice::Consider enabling DynamoDB locking for better concurrency control"
+            echo "::notice::See: DEVOPS/live/dev/01-vpc/README-BACKEND.md"
+            echo "state_locked=false" >> $GITHUB_OUTPUT
           fi
 
       - name: Always Re-plan Before Apply (Prevent Stale Plans)
