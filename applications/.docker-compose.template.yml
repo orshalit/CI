@@ -1,0 +1,68 @@
+# Docker Compose Template for Applications
+# 
+# This is a TEMPLATE showing the structure of application-specific docker-compose files.
+# DO NOT USE THIS FILE DIRECTLY - Generate your app's compose file using the script.
+#
+# To generate docker-compose.yml for your application:
+#
+#   1. From repository root:
+#      ./scripts/generate-app-compose.sh <app-name>
+#
+#   2. For production overrides:
+#      ./scripts/generate-app-compose.sh <app-name> --prod
+#
+#   3. Generate for all applications:
+#      ./scripts/generate-app-compose.sh
+#
+# Generated files will be created at:
+#   applications/<app-name>/docker-compose.yml
+#   applications/<app-name>/docker-compose.prod.yml (if --prod flag used)
+#
+# Usage:
+#   docker compose -f ../../docker-compose.base.yml \
+#                  -f docker-compose.yml up --build
+#
+# Or from repository root:
+#   docker compose -f docker-compose.base.yml \
+#                  -f applications/<app-name>/docker-compose.yml up
+
+version: '3.8'
+
+services:
+  # Backend service (if backend/ directory exists with Dockerfile)
+  # <app-name>-backend:
+  #   build:
+  #     context: ./backend
+  #     dockerfile: Dockerfile
+  #   image: <app-name>-backend:${BUILD_VERSION:-dev}
+  #   container_name: <app-name>-backend
+  #   ports:
+  #     - "${<APP_NAME>_BACKEND_PORT:-8000}:8000"
+  #   environment:
+  #     DATABASE_URL: postgresql://${POSTGRES_USER:-appuser}:${POSTGRES_PASSWORD:-apppassword}@database:5432/${POSTGRES_DB:-appdb}
+  #   depends_on:
+  #     database:
+  #       condition: service_healthy
+  #   networks:
+  #     - app-network
+
+  # Frontend service (if frontend/ directory exists with Dockerfile)
+  # <app-name>-frontend:
+  #   build:
+  #     context: ./frontend
+  #     dockerfile: Dockerfile
+  #   image: <app-name>-frontend:${BUILD_VERSION:-dev}
+  #   container_name: <app-name>-frontend
+  #   ports:
+  #     - "${<APP_NAME>_FRONTEND_PORT:-3000}:3000"
+  #   environment:
+  #     VITE_BACKEND_URL: ${<APP_NAME>_BACKEND_URL:-http://<app-name>-backend:8000}
+  #   depends_on:
+  #     <app-name>-backend:
+  #       condition: service_healthy
+  #   networks:
+  #     - app-network
+
+# Note: The 'database' service is defined in docker-compose.base.yml
+# This file only defines application-specific services.
+

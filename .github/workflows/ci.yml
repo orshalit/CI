@@ -80,15 +80,15 @@ jobs:
           # Check if application structure changed
           if git diff --name-only ${{ github.event.before || 'HEAD~1' }}..HEAD | grep -E '^applications/.*/(backend|frontend)/' > /dev/null; then
             echo "changed=true" >> $GITHUB_OUTPUT
-            echo "::notice::Application structure changed, regenerating docker-compose files..."
-            chmod +x scripts/generate-docker-compose.sh
-            bash scripts/generate-docker-compose.sh
-            bash scripts/generate-docker-compose.sh --prod
+            echo "::notice::Application structure changed, regenerating per-app docker-compose files..."
+            chmod +x scripts/generate-app-compose.sh
+            bash scripts/generate-app-compose.sh
             
-            # Check if files changed
-            if ! git diff --quiet docker-compose.yml docker-compose.prod.yml; then
+            # Check if any app compose files changed
+            CHANGED_FILES=$(git diff --name-only applications/*/docker-compose.yml 2>/dev/null || echo "")
+            if [ -n "$CHANGED_FILES" ]; then
               echo "::warning::docker-compose files were regenerated. Consider committing these changes."
-              git diff docker-compose.yml docker-compose.prod.yml
+              git diff applications/*/docker-compose.yml
             fi
           else
             echo "changed=false" >> $GITHUB_OUTPUT
@@ -347,17 +347,18 @@ jobs:
                 echo "Running integration tests for $app_name..."
                 # Start services for integration tests
                 cd ../../..
-                docker compose up -d database || true
+                docker compose -f docker-compose.base.yml up -d database || true
                 
                 # Build and start the app-specific backend service (dynamic)
                 BACKEND_SERVICE="${app_name}-backend"
-                docker compose -f docker-compose.yml -f docker-compose.prod.yml build "$BACKEND_SERVICE" || {
-                  echo "::warning::Failed to build $BACKEND_SERVICE, trying alternative..."
-                  docker compose -f docker-compose.yml build "$BACKEND_SERVICE" || true
+                APP_COMPOSE="applications/${app_name}/docker-compose.yml"
+                docker compose -f docker-compose.base.yml -f "$APP_COMPOSE" build "$BACKEND_SERVICE" || {
+                  echo "::warning::Failed to build $BACKEND_SERVICE"
+                  exit 1
                 }
-                docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d "$BACKEND_SERVICE" || {
-                  echo "::warning::Failed to start $BACKEND_SERVICE, trying alternative..."
-                  docker compose -f docker-compose.yml up -d "$BACKEND_SERVICE" || true
+                docker compose -f docker-compose.base.yml -f "$APP_COMPOSE" up -d "$BACKEND_SERVICE" || {
+                  echo "::warning::Failed to start $BACKEND_SERVICE"
+                  exit 1
                 }
                 
                 # Get backend port from docker-compose (dynamic - handles port conflicts)
@@ -377,7 +378,7 @@ jobs:
                 
                 # Stop services
                 cd ../../..
-                docker compose down -v || true
+                docker compose -f docker-compose.base.yml -f "applications/${app_name}/docker-compose.yml" down -v || true
               fi
             fi
             cd - > /dev/null
@@ -892,10 +893,9 @@ jobs:
       
       - name: Regenerate docker-compose files (ensure up-to-date)
         run: |
-          chmod +x scripts/generate-docker-compose.sh
-          bash scripts/generate-docker-compose.sh
-          bash scripts/generate-docker-compose.sh --prod
-          echo "::notice::docker-compose files regenerated with latest application structure"
+          chmod +x scripts/generate-app-compose.sh
+          bash scripts/generate-app-compose.sh
+          echo "::notice::Per-app docker-compose files regenerated with latest application structure"
       
       - name: Start services with docker compose
         env:
@@ -904,19 +904,35 @@ jobs:
           GIT_BRANCH: ${{ needs.prepare-build.outputs.branch }}
           BUILD_DATE: ${{ needs.prepare-build.outputs.build_date }}
         run: |
-          docker compose up -d --build
+          # Build compose file list (base + all app compose files)
+          COMPOSE_FILES="-f docker-compose.base.yml"
+          for APP_COMPOSE in applications/*/docker-compose.yml; do
+            if [ -f "$APP_COMPOSE" ]; then
+              COMPOSE_FILES="$COMPOSE_FILES -f $APP_COMPOSE"
+            fi
+          done
+          docker compose $COMPOSE_FILES up -d --build
       
       - name: Detect application services from docker-compose
         id: detect-services
         run: |
+          # Build compose file list (base + all app compose files)
+          COMPOSE_FILES="-f docker-compose.base.yml"
+          for APP_COMPOSE in applications/*/docker-compose.yml; do
+            if [ -f "$APP_COMPOSE" ]; then
+              COMPOSE_FILES="$COMPOSE_FILES -f $APP_COMPOSE"
+            fi
+          done
+          
           # Get all services from docker-compose (dynamic)
-          ALL_SERVICES=$(docker compose config --services | grep -v "^database$" || echo "")
+          ALL_SERVICES=$(docker compose $COMPOSE_FILES config --services | grep -v "^database$" || echo "")
           BACKEND_SERVICES=$(echo "$ALL_SERVICES" | grep -E "-backend$" || echo "")
           FRONTEND_SERVICES=$(echo "$ALL_SERVICES" | grep -E "-frontend$" || echo "")
           
           echo "backend_services=$BACKEND_SERVICES" >> $GITHUB_OUTPUT
           echo "frontend_services=$FRONTEND_SERVICES" >> $GITHUB_OUTPUT
           echo "all_services=$ALL_SERVICES" >> $GITHUB_OUTPUT
+          echo "compose_files=$COMPOSE_FILES" >> $GITHUB_OUTPUT
           
           echo "::notice::Detected services:"
           echo "  Backend: $BACKEND_SERVICES"
@@ -924,16 +940,22 @@ jobs:
 
       - name: Wait for services to be healthy
         run: |
+          # Build compose file list
+          COMPOSE_FILES="${{ steps.detect-services.outputs.compose_files }}"
+          
           echo "Waiting for services to be healthy..."
           
           echo "=== Waiting for database ==="
-          timeout 120 bash -c '
-            until docker compose ps database | grep -q "healthy"; do 
-              echo "Waiting for database..."; 
+          timeout 120 bash -c "
+            until docker compose $COMPOSE_FILES ps database | grep -q \"healthy\"; do 
+              echo \"Waiting for database...\"; 
               sleep 2; 
             done
-          '
+          "
           echo "✓ Database is healthy"
+          
+          # Build compose file list
+          COMPOSE_FILES="${{ steps.detect-services.outputs.compose_files }}"
           
           # Wait for all backend services (dynamic)
           BACKEND_SERVICES="${{ steps.detect-services.outputs.backend_services }}"
@@ -941,7 +963,7 @@ jobs:
             for BACKEND_SERVICE in $BACKEND_SERVICES; do
               echo "=== Waiting for $BACKEND_SERVICE ==="
               timeout 120 bash -c "
-                until docker compose ps $BACKEND_SERVICE | grep -q \"healthy\"; do 
+                until docker compose $COMPOSE_FILES ps $BACKEND_SERVICE | grep -q \"healthy\"; do 
                   echo \"Waiting for $BACKEND_SERVICE...\"; 
                   sleep 2; 
                 done
@@ -958,29 +980,29 @@ jobs:
             for FRONTEND_SERVICE in $FRONTEND_SERVICES; do
               echo "=== Waiting for $FRONTEND_SERVICE ==="
               echo "Container status before wait:"
-              docker compose ps "$FRONTEND_SERVICE"
+              docker compose $COMPOSE_FILES ps "$FRONTEND_SERVICE"
               
-              timeout 120 bash -c '
+              timeout 120 bash -c "
                 counter=0
-                until docker compose ps "$FRONTEND_SERVICE" | grep -q "healthy"; do 
-                  counter=$((counter + 1))
-                  echo "Waiting for $FRONTEND_SERVICE... (attempt $counter)"
+                until docker compose $COMPOSE_FILES ps \"$FRONTEND_SERVICE\" | grep -q \"healthy\"; do 
+                  counter=\$((counter + 1))
+                  echo \"Waiting for $FRONTEND_SERVICE... (attempt \$counter)\"
                   
                   # Every 10 attempts, show detailed debug info
-                  if [ $((counter % 10)) -eq 0 ]; then
-                    echo "--- Debug Info (attempt $counter) ---"
-                    echo "Container status:"
-                    docker compose ps "$FRONTEND_SERVICE"
-                    echo "Health check status:"
-                    docker inspect --format="{{json .State.Health}}" "$FRONTEND_SERVICE" 2>/dev/null | jq . || echo "No health info available"
-                    echo "Recent logs:"
-                    docker compose logs --tail=20 "$FRONTEND_SERVICE"
-                    echo "---"
+                  if [ \$((counter % 10)) -eq 0 ]; then
+                    echo \"--- Debug Info (attempt \$counter) ---\"
+                    echo \"Container status:\"
+                    docker compose $COMPOSE_FILES ps \"$FRONTEND_SERVICE\"
+                    echo \"Health check status:\"
+                    docker inspect --format='{{json .State.Health}}' \"$FRONTEND_SERVICE\" 2>/dev/null | jq . || echo \"No health info available\"
+                    echo \"Recent logs:\"
+                    docker compose $COMPOSE_FILES logs --tail=20 \"$FRONTEND_SERVICE\"
+                    echo \"---\"
                   fi
                   
                   sleep 2
                 done
-              '
+              "
               echo "✓ $FRONTEND_SERVICE is healthy"
             done
           else
@@ -989,18 +1011,21 @@ jobs:
       
       - name: Verify service health
         run: |
+          # Build compose file list
+          COMPOSE_FILES="${{ steps.detect-services.outputs.compose_files }}"
+          
           echo "=== Service Status ==="
-          docker compose ps
+          docker compose $COMPOSE_FILES ps
           
           echo -e "\n=== Database Health ==="
-          docker compose exec -T database pg_isready -U appuser -d appdb
+          docker compose $COMPOSE_FILES exec -T database pg_isready -U appuser -d appdb
           
           # Verify all backend services (dynamic)
           BACKEND_SERVICES="${{ steps.detect-services.outputs.backend_services }}"
           if [ -n "$BACKEND_SERVICES" ]; then
             for BACKEND_SERVICE in $BACKEND_SERVICES; do
               # Get port from docker-compose config
-              BACKEND_PORT=$(docker compose config | grep -A 30 "^  ${BACKEND_SERVICE}:" | grep -E "^\s+-.*:8000" | head -1 | sed -E 's/.*:([0-9]+):8000/\1/' || echo "8000")
+              BACKEND_PORT=$(docker compose $COMPOSE_FILES config | grep -A 30 "^  ${BACKEND_SERVICE}:" | grep -E "^\s+-.*:8000" | head -1 | sed -E 's/.*:([0-9]+):8000/\1/' || echo "8000")
               
               echo -e "\n=== ${BACKEND_SERVICE} Health (port ${BACKEND_PORT}) ==="
               curl -f "http://localhost:${BACKEND_PORT}/health" | jq . || echo "Health check failed"
@@ -1015,7 +1040,7 @@ jobs:
           if [ -n "$FRONTEND_SERVICES" ]; then
             for FRONTEND_SERVICE in $FRONTEND_SERVICES; do
               # Get port from docker-compose config
-              FRONTEND_PORT=$(docker compose config | grep -A 30 "^  ${FRONTEND_SERVICE}:" | grep -E "^\s+-.*:3000" | head -1 | sed -E 's/.*:([0-9]+):3000/\1/' || echo "3000")
+              FRONTEND_PORT=$(docker compose $COMPOSE_FILES config | grep -A 30 "^  ${FRONTEND_SERVICE}:" | grep -E "^\s+-.*:3000" | head -1 | sed -E 's/.*:([0-9]+):3000/\1/' || echo "3000")
               
               echo -e "\n=== ${FRONTEND_SERVICE} Health (port ${FRONTEND_PORT}) ==="
               curl -f "http://localhost:${FRONTEND_PORT}/" > /dev/null || echo "Health check failed"
@@ -1060,13 +1085,16 @@ jobs:
       
       - name: Test version metadata
         run: |
+          # Build compose file list
+          COMPOSE_FILES="${{ steps.detect-services.outputs.compose_files }}"
+          
           # Get backend and frontend URLs (dynamic)
           BACKEND_SERVICES="${{ steps.detect-services.outputs.backend_services }}"
           FRONTEND_SERVICES="${{ steps.detect-services.outputs.frontend_services }}"
           
           if [ -n "$BACKEND_SERVICES" ]; then
             FIRST_BACKEND=$(echo "$BACKEND_SERVICES" | head -1)
-            BACKEND_PORT=$(docker compose config | grep -A 30 "^  ${FIRST_BACKEND}:" | grep -E "^\s+-.*:8000" | head -1 | sed -E 's/.*:([0-9]+):8000/\1/' || echo "8000")
+            BACKEND_PORT=$(docker compose $COMPOSE_FILES config | grep -A 30 "^  ${FIRST_BACKEND}:" | grep -E "^\s+-.*:8000" | head -1 | sed -E 's/.*:([0-9]+):8000/\1/' || echo "8000")
             BACKEND_URL="http://localhost:${BACKEND_PORT}"
             
             echo "=== Verify Backend Version (${FIRST_BACKEND}) ==="
@@ -1078,7 +1106,7 @@ jobs:
           
           if [ -n "$FRONTEND_SERVICES" ]; then
             FIRST_FRONTEND=$(echo "$FRONTEND_SERVICES" | head -1)
-            FRONTEND_PORT=$(docker compose config | grep -A 30 "^  ${FIRST_FRONTEND}:" | grep -E "^\s+-.*:3000" | head -1 | sed -E 's/.*:([0-9]+):3000/\1/' || echo "3000")
+            FRONTEND_PORT=$(docker compose $COMPOSE_FILES config | grep -A 30 "^  ${FIRST_FRONTEND}:" | grep -E "^\s+-.*:3000" | head -1 | sed -E 's/.*:([0-9]+):3000/\1/' || echo "3000")
             FRONTEND_URL="http://localhost:${FRONTEND_PORT}"
             
             echo "=== Verify Frontend Version (${FIRST_FRONTEND}) ==="
