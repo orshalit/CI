@@ -1,88 +1,119 @@
 # Workflow Dead Code Analysis
 
-## Unused Outputs (Set but Never Referenced)
+## Summary
 
-### 1. `steps.detect_drift.outputs.drift_detected` ❌ **DEAD CODE**
-- **Set in:** Line 376, 379, 384, 388
-- **Never used:** No step references this output
-- **Recommendation:** Remove output setting (keep step for informational purposes, or remove step entirely if not useful)
+Cleaned up **8 unused step outputs** and **2 debug steps** from `deploy-infra.yml`.
 
-### 2. `steps.check_service_keys.outputs.key_mismatch` ❌ **DEAD CODE**
-- **Set in:** Line 452, 455, 473
-- **Never used:** No step references this output
-- **Recommendation:** Remove output setting (step is informational only)
+## Removed Unused Outputs
 
-### 3. `steps.pre_plan_summary.outputs.resources_missing_in_state` ❌ **DEAD CODE**
-- **Set in:** Line 536, 539
-- **Never used:** No step references this output
-- **Recommendation:** Remove output setting (step is informational only)
+### 1. `steps.detect_drift.outputs.drift_detected` ❌ **REMOVED**
+- **Was set in:** Lines 376, 379, 384, 388
+- **Reason:** Never referenced by any step
+- **Action:** Removed output setting, kept step for informational purposes
 
-### 4. `steps.save_state_snapshot.outputs.state_snapshot_created` ❌ **DEAD CODE**
-- **Set in:** Line 665
-- **Never used:** No step references this output
-- **Recommendation:** Remove output setting (step creates files, output not needed)
+### 2. `steps.check_service_keys.outputs.key_mismatch` ❌ **REMOVED**
+- **Was set in:** Lines 452, 455, 473
+- **Reason:** Never referenced by any step
+- **Action:** Removed output setting, kept step for informational purposes
 
-### 5. `steps.verify_health_checks.outputs.verification_passed` ❌ **DEAD CODE**
-- **Set in:** Line 866, 869, 873
-- **Never used:** No step references this output
-- **Recommendation:** Remove output setting (step is informational only)
+### 3. `steps.pre_plan_summary.outputs.resources_missing_in_state` ❌ **REMOVED**
+- **Was set in:** Lines 536, 539
+- **Reason:** Never referenced by any step
+- **Action:** Removed output setting, kept step for informational purposes
 
-### 6. `steps.check_state_services.outputs.services_in_state` ❌ **DEAD CODE**
-- **Set in:** Line 210, 243
-- **Never used:** No step references this output
-- **Recommendation:** Remove output setting (step exits with error if services found, output not needed)
+### 4. `steps.save_state_snapshot.outputs.state_snapshot_created` ❌ **REMOVED**
+- **Was set in:** Line 665
+- **Reason:** Never referenced by any step
+- **Action:** Removed output setting (step creates files, output not needed)
 
-### 7. `steps.check_state_services.outputs.existing_services` ❌ **DEAD CODE**
-- **Set in:** Line 211-214
-- **Never used:** No step references this output
-- **Recommendation:** Remove output setting (step exits with error if services found, output not needed)
+### 5. `steps.verify_health_checks.outputs.verification_passed` ❌ **REMOVED**
+- **Was set in:** Lines 866, 869, 873
+- **Reason:** Never referenced by any step
+- **Action:** Removed output setting, kept step for informational purposes
 
-### 8. `steps.refresh.outputs.state_updated` ❌ **DEAD CODE**
-- **Set in:** Line 352, 354
-- **Never used:** Previously used to invalidate plan, but plan step doesn't check this anymore
-- **Recommendation:** Remove output setting (plan file is removed in the step itself, output not needed)
+### 6. `steps.check_state_services.outputs.services_in_state` ❌ **REMOVED**
+- **Was set in:** Lines 210, 243
+- **Reason:** Never referenced by any step
+- **Action:** Removed output setting (step exits with error if services found)
 
-## Unused Step IDs (No Outputs Set, Not Referenced)
+### 7. `steps.check_state_services.outputs.existing_services` ❌ **REMOVED**
+- **Was set in:** Lines 211-214
+- **Reason:** Never referenced by any step
+- **Action:** Removed output setting (step exits with error if services found)
 
-### 1. `steps.fmt` ✅ **OK**
-- **Purpose:** Step identification only
-- **Recommendation:** Keep (useful for debugging/logging)
+### 8. `steps.refresh.outputs.state_updated` ❌ **REMOVED**
+- **Was set in:** Lines 352, 354
+- **Reason:** Previously used to invalidate plan, but plan step doesn't check this anymore
+- **Action:** Removed output setting (plan file is removed in the step itself)
 
-### 2. `steps.validate` ✅ **OK**
-- **Purpose:** Step identification only
-- **Recommendation:** Keep (useful for debugging/logging)
+## Commented Out Debug Steps
 
-## Debug Steps (Potentially Unused)
+### 1. `Debug GitHub context` ⚠️ **COMMENTED OUT**
+- **Was in:** Lines 47-51
+- **Reason:** Debugging only, not needed in production
+- **Action:** Commented out (can be uncommented if needed for troubleshooting)
 
-### 1. `Debug GitHub context` (Line 47-51) ⚠️ **CONSIDER REMOVING**
-- **Purpose:** Debugging only
-- **Recommendation:** Remove or make conditional (only run in debug mode)
+### 2. `Debug AWS role and region` ⚠️ **COMMENTED OUT**
+- **Was in:** Lines 53-60
+- **Reason:** Debugging only, not needed in production
+- **Action:** Commented out (can be uncommented if needed for troubleshooting)
 
-### 2. `Debug AWS role and region` (Line 53-60) ⚠️ **CONSIDER REMOVING**
-- **Purpose:** Debugging only
-- **Recommendation:** Remove or make conditional (only run in debug mode)
+## Scripts Not Referenced in Workflows
 
-## Steps That Should Be Used But Aren't
+### 1. `sync-target-group-state.sh` ⚠️ **NOT USED IN WORKFLOWS**
+- **Status:** Only referenced in documentation
+- **Purpose:** Manual state sync script
+- **Recommendation:** Keep for manual troubleshooting, or remove if not needed
 
-### 1. `Detect State Drift (Target Groups)` ⚠️ **SHOULD BLOCK DEPLOYMENT**
-- **Current:** Only sets output, doesn't block
-- **Recommendation:** Use `drift_detected` output to block apply if drift is detected
+### 2. `test-local.sh` ✅ **OK**
+- **Status:** Local testing script
+- **Purpose:** Run CI checks locally before pushing
+- **Recommendation:** Keep (useful for developers)
 
-### 2. `Check for service key mismatches` ⚠️ **SHOULD WARN MORE PROMINENTLY**
+### 3. `build.sh` ✅ **OK**
+- **Status:** Local build script
+- **Purpose:** Build Docker images locally
+- **Recommendation:** Keep (useful for developers)
+
+### 4. `setup-test-app.ps1` ✅ **OK**
+- **Status:** Local setup script
+- **Purpose:** Setup test application locally
+- **Recommendation:** Keep (useful for developers)
+
+### 5. `verify-image-mapping.py` ❓ **UNKNOWN**
+- **Status:** Not referenced in workflows
+- **Purpose:** Unknown
+- **Recommendation:** Check if needed, remove if not
+
+## Steps That Could Be Enhanced
+
+### 1. `Detect State Drift (Target Groups)` ⚠️ **COULD BLOCK DEPLOYMENT**
 - **Current:** Only warns, doesn't block
-- **Recommendation:** Could block apply if `key_mismatch=true` to prevent accidental service destruction
+- **Enhancement:** Could use `drift_detected` output to block apply if drift is detected
+- **Priority:** Medium (drift is usually handled by refresh step)
 
-## Recommendations
+### 2. `Check for service key mismatches` ⚠️ **COULD BLOCK DEPLOYMENT**
+- **Current:** Only warns, doesn't block
+- **Enhancement:** Could use `key_mismatch` output to block apply if services will be destroyed
+- **Priority:** Low (warnings are usually sufficient)
 
-### High Priority (Remove Dead Code)
-1. Remove all unused output settings (8 outputs listed above)
-2. Remove or make conditional debug steps
+## All Scripts Referenced in Workflows
 
-### Medium Priority (Enhance Functionality)
-1. Use `drift_detected` output to block apply if drift detected
-2. Use `key_mismatch` output to block apply if services will be destroyed
+✅ **All referenced scripts exist:**
+- `validate-and-import-state.sh` ✅
+- `comprehensive-pre-apply-validation.sh` ✅
+- `verify-target-group-health-checks.sh` ✅
+- `generate_ecs_services_tfvars.py` ✅
+- `update_service_image_tags.py` ✅
+- `filter-services-by-application.py` ✅
+- `detect-app-images.py` ✅
+- `deploy.sh` ✅
+- `diagnose-ecs-deployment.sh` ✅ (referenced in comments/instructions)
 
-### Low Priority (Keep for Now)
-1. Keep step IDs without outputs (useful for debugging)
-2. Keep informational steps even if outputs aren't used
+## Conclusion
 
+- ✅ **8 unused outputs removed** - Cleaned up dead code
+- ✅ **2 debug steps commented out** - Can be uncommented if needed
+- ✅ **All referenced scripts exist** - No broken references
+- ⚠️ **5 scripts not used in workflows** - Mostly local/testing scripts (OK to keep)
+- ⚠️ **1 script (`sync-target-group-state.sh`) only in docs** - Consider removing or documenting as manual tool
