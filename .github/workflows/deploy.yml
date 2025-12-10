@@ -58,6 +58,15 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Download build version from CI workflow
+        if: github.event_name == 'workflow_run'
+        uses: actions/download-artifact@v4
+        with:
+          name: build-version
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+          path: .
+
       - name: Set up dynamic variables
         id: vars
         run: |
@@ -66,10 +75,20 @@ jobs:
             echo "environment=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
             echo "module_path=${{ github.event.inputs.module_path }}" >> $GITHUB_OUTPUT
             echo "action=${{ github.event.inputs.action }}" >> $GITHUB_OUTPUT
-            # Use provided image_tag or fallback to commit SHA (idempotent - same commit = same tag)
+            # Use provided image_tag or fallback to generated tag (idempotent - same commit = same tag)
+            # For manual dispatch, generate tag format matching CI workflow logic (dynamic, scalable)
             IMAGE_TAG="${{ github.event.inputs.image_tag }}"
             if [ -z "$IMAGE_TAG" ] || [ "$IMAGE_TAG" = "" ]; then
-              IMAGE_TAG="${{ github.sha }}"
+              # Generate tag format matching CI workflow logic (supports tags, main, and other branches)
+              SHORT_SHA=$(git rev-parse --short HEAD)
+              if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+                IMAGE_TAG="${{ github.ref_name }}"
+              elif [[ "${{ github.ref }}" == refs/heads/main ]]; then
+                IMAGE_TAG="main-${SHORT_SHA}"
+              else
+                IMAGE_TAG="dev-${SHORT_SHA}"
+              fi
+              echo "::notice::Generated image tag: $IMAGE_TAG"
             fi
             echo "image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
             # Use provided application or default to 'all' (scalable - supports multi-app)
@@ -83,7 +102,24 @@ jobs:
             echo "environment=dev" >> $GITHUB_OUTPUT # Or determine dynamically if needed
             echo "module_path=04-ecs-fargate" >> $GITHUB_OUTPUT
             echo "action=apply" >> $GITHUB_OUTPUT
-            echo "image_tag=${{ github.sha }}" >> $GITHUB_OUTPUT
+            # Use build version from CI workflow artifact (single source of truth)
+            # This ensures tag format always matches what CI built
+            if [ -f "build-version.txt" ]; then
+              IMAGE_TAG=$(cat build-version.txt)
+              echo "::notice::Using build version from CI workflow: $IMAGE_TAG"
+            else
+              # Fallback: Generate tag format matching CI workflow logic (dynamic, scalable)
+              SHORT_SHA=$(git rev-parse --short HEAD)
+              if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+                IMAGE_TAG="${{ github.ref_name }}"
+              elif [[ "${{ github.ref }}" == refs/heads/main ]]; then
+                IMAGE_TAG="main-${SHORT_SHA}"
+              else
+                IMAGE_TAG="dev-${SHORT_SHA}"
+              fi
+              echo "::notice::Generated image tag (fallback): $IMAGE_TAG"
+            fi
+            echo "image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
             echo "application=all" >> $GITHUB_OUTPUT
           fi
 

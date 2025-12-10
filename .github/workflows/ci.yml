@@ -704,11 +704,12 @@ jobs:
             echo "EOF" >> $GITHUB_OUTPUT
             echo "::notice::Building all images (both backend and frontend changed)"
           elif [ "$BACKEND_CHANGED" == "true" ]; then
-            # Only backend images
-            FILTERED=$(echo "$FULL_MATRIX" | jq '.include | map(select(.service == "backend")) | {include: .}')
+            # Only shared backend images (backend/ directory changes affect shared backend only)
+            # App-specific backends (applications/*/backend) are built separately when their code changes
+            FILTERED=$(echo "$FULL_MATRIX" | jq '.include | map(select(.service == "backend" and .type == "shared")) | {include: .}')
             COUNT=$(echo "$FILTERED" | jq '.include | length')
             if [ "$COUNT" -eq 0 ]; then
-              echo "::error::Backend code changed but no backend images found in matrix!"
+              echo "::error::Backend code changed but no shared backend images found in matrix!"
               echo "matrix<<EOF" >> $GITHUB_OUTPUT
               echo "$FULL_MATRIX" >> $GITHUB_OUTPUT
               echo "EOF" >> $GITHUB_OUTPUT
@@ -717,14 +718,15 @@ jobs:
               echo "matrix<<EOF" >> $GITHUB_OUTPUT
               echo "$FILTERED" >> $GITHUB_OUTPUT
               echo "EOF" >> $GITHUB_OUTPUT
-              echo "::notice::Building only backend images ($COUNT image(s))"
+              echo "::notice::Building only shared backend images ($COUNT image(s))"
             fi
           elif [ "$FRONTEND_CHANGED" == "true" ]; then
-            # Only frontend images
-            FILTERED=$(echo "$FULL_MATRIX" | jq '.include | map(select(.service == "frontend")) | {include: .}')
+            # Only shared frontend images (frontend/ directory changes affect shared frontend only)
+            # App-specific frontends (applications/*/frontend) are built separately when their code changes
+            FILTERED=$(echo "$FULL_MATRIX" | jq '.include | map(select(.service == "frontend" and .type == "shared")) | {include: .}')
             COUNT=$(echo "$FILTERED" | jq '.include | length')
             if [ "$COUNT" -eq 0 ]; then
-              echo "::error::Frontend code changed but no frontend images found in matrix!"
+              echo "::error::Frontend code changed but no shared frontend images found in matrix!"
               echo "::error::Full matrix was:"
               echo "$FULL_MATRIX" | jq '.'
               echo "matrix<<EOF" >> $GITHUB_OUTPUT
@@ -735,7 +737,7 @@ jobs:
               echo "matrix<<EOF" >> $GITHUB_OUTPUT
               echo "$FILTERED" >> $GITHUB_OUTPUT
               echo "EOF" >> $GITHUB_OUTPUT
-              echo "::notice::Building only frontend images ($COUNT image(s))"
+              echo "::notice::Building only shared frontend images ($COUNT image(s))"
               echo "::notice::Filtered matrix:"
               echo "$FILTERED" | jq '.'
             fi
