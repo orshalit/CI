@@ -1,7 +1,4 @@
-name: Deploy Infrastructure (deploy-infra)
-
-# This workflow manages infrastructure deployments (VPC, OIDC, DNS/ACM, ECS Fargate)
-# It is manual-only for safety and control over infrastructure changes.
+name: Unified Deployment Pipeline (deploy)
 
 on:
   workflow_dispatch:
@@ -17,20 +14,34 @@ on:
         required: true
         type: string
       action:
-        description: 'Terraform action to perform'
+        description: 'Terraform action (plan, apply, or destroy)'
         required: true
         default: 'plan'
         type: choice
         options: [plan, apply, destroy]
+      image_tag:
+        description: 'Docker image tag for app deployments (optional, commit SHA)'
+        required: false
+        type: string
+      application:
+        description: 'Application to deploy (for app deployments, e.g., "test-app")'
+        required: false
+        default: 'all'
+        type: string
 
-# Prevent concurrent runs on the same environment/module to avoid state corruption
+  workflow_run:
+    workflows: ["CI/CD Pipeline"]
+    branches: [main]
+    types:
+      - completed
+
 concurrency:
-  group: deploy-${{ github.event.inputs.environment }}-${{ github.event.inputs.module_path }}
-  cancel-in-progress: false  # Wait for current run to finish (safer than canceling)
+  group: deploy-${{ github.event.inputs.environment || 'dev' }}-${{ github.event.inputs.module_path || '04-ecs-fargate' }}
+  cancel-in-progress: false
 
 jobs:
   deploy:
-    name: ${{ inputs.action }} - ${{ inputs.module_path }}
+    name: ${{ github.event_name == 'workflow_dispatch' && format('{0} - {1}', github.event.inputs.action, github.event.inputs.module_path) || 'Deploy Application' }}
     runs-on: ubuntu-latest
     
     permissions:
@@ -38,27 +49,32 @@ jobs:
       contents: read
 
     environment:
-      name: ${{ inputs.environment }}
+      name: ${{ github.event.inputs.environment || 'dev' }}
 
     steps:
       - name: Checkout CI repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      # Debug steps removed - uncomment if needed for troubleshooting
-      # - name: Debug GitHub context
-      #   run: |
-      #     echo "repository: $GITHUB_REPOSITORY"
-      #     echo "ref:        $GITHUB_REF"
-      #     echo "event_name: $GITHUB_EVENT_NAME"
-      #
-      # - name: Debug AWS role and region
-      #   run: |
-      #     echo "Has AWS_ROLE_ARN: $([ -n \"$AWS_ROLE_ARN\" ] && echo yes || echo no)"
-      #     echo "AWS_ROLE_ARN length: ${#AWS_ROLE_ARN}"
-      #     echo "AWS_REGION: $AWS_REGION"
-      #   env:
-      #     AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
-      #     AWS_REGION: ${{ secrets.AWS_REGION }}
+      - name: Set up dynamic variables
+        id: vars
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "::notice::Manual workflow dispatch trigger"
+            echo "environment=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
+            echo "module_path=${{ github.event.inputs.module_path }}" >> $GITHUB_OUTPUT
+            echo "action=${{ github.event.inputs.action }}" >> $GITHUB_OUTPUT
+            echo "image_tag=${{ github.event.inputs.image_tag || github.sha }}" >> $GITHUB_OUTPUT
+            echo "application=${{ github.event.inputs.application || 'all' }}" >> $GITHUB_OUTPUT
+          else
+            echo "::notice::Automated workflow run trigger"
+            echo "environment=dev" >> $GITHUB_OUTPUT # Or determine dynamically if needed
+            echo "module_path=04-ecs-fargate" >> $GITHUB_OUTPUT
+            echo "action=apply" >> $GITHUB_OUTPUT
+            echo "image_tag=${{ github.sha }}" >> $GITHUB_OUTPUT
+            echo "application=all" >> $GITHUB_OUTPUT
+          fi
 
       - name: Terraform Setup
         uses: ./.github/actions/terraform-setup
