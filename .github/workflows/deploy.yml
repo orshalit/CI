@@ -175,13 +175,15 @@ jobs:
             echo "::notice::✓ Committed formatted files"
           fi
 
-      - name: Push formatted files to DEVOPS repo
+      - name: Push formatted files to DEVOPS repo (after plan)
         id: push_formatted
-        if: steps.commit_formatted.outputs.committed == 'true'
+        if: |
+          steps.commit_formatted.outputs.committed == 'true' &&
+          steps.plan.outcome == 'success'
         run: |
           cd DEVOPS
           
-          echo "::notice::Pushing auto-formatted files to DEVOPS repo..."
+          echo "::notice::Pushing auto-formatted files to DEVOPS repo (after plan creation)..."
           
           # Push to the same branch (usually main)
           BRANCH=$(git rev-parse --abbrev-ref HEAD)
@@ -202,7 +204,7 @@ jobs:
           }
           
           echo "::notice::✓ Successfully pushed formatted files to DEVOPS repo"
-          echo "::notice::The deployment will continue with the formatted files"
+          echo "::notice::Note: Plan was created before push, so it may need re-planning if state changed"
 
       - name: Continue deployment (formatting fixed)
         if: steps.fmt.outputs.needs_formatting == 'true' && steps.fmt.outputs.changes_made == 'true'
@@ -1138,13 +1140,53 @@ jobs:
             exit 1
           fi
 
+      - name: Re-plan if plan is stale
+        id: replan_if_stale
+        if: |
+          steps.vars.outputs.action == 'apply' && 
+          steps.plan.outcome == 'success' && 
+          steps.plan_changes.outputs.has_changes == 'true' &&
+          steps.verify_plan_stale.outputs.plan_stale == 'true'
+        run: |
+          PLAN_DIR="DEVOPS/live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}"
+          
+          echo "::warning::Plan is stale - creating a new plan before applying..."
+          
+          # Remove old plan file
+          rm -f "$PLAN_DIR/tfplan"
+          
+          # Re-run plan with same parameters
+          VAR_FILES="${{ steps.build_var_files.outputs.var_files }}"
+          PLAN_ARGS="-out=tfplan -no-color"
+          
+          if [ -n "$VAR_FILES" ]; then
+            for var_file in $VAR_FILES; do
+              if [ -f "$PLAN_DIR/$var_file" ]; then
+                PLAN_ARGS="$PLAN_ARGS -var-file=$var_file"
+              fi
+            done
+          fi
+          
+          # Add global_image_tag if applicable
+          if [ "${{ steps.vars.outputs.module_path }}" == "04-ecs-fargate" ] && [ -n "${{ steps.vars.outputs.image_tag }}" ]; then
+            PLAN_ARGS="$PLAN_ARGS -var=global_image_tag=${{ steps.vars.outputs.image_tag }}"
+          fi
+          
+          terraform -chdir="$PLAN_DIR" plan $PLAN_ARGS || {
+            echo "::error::Re-plan failed"
+            exit 1
+          }
+          
+          echo "replanned=true" >> $GITHUB_OUTPUT
+
       - name: Terraform Apply
         id: apply
         if: |
           steps.vars.outputs.action == 'apply' && 
           steps.plan.outcome == 'success' && 
           steps.plan_changes.outputs.has_changes == 'true' &&
-          (steps.verify_plan_stale.outcome == 'success' || steps.verify_plan_stale.outputs.plan_stale != 'true') &&
+          ((steps.verify_plan_stale.outcome == 'success' || steps.verify_plan_stale.outputs.plan_stale != 'true') || 
+           (steps.replan_if_stale.outcome == 'success' && steps.replan_if_stale.outputs.replanned == 'true')) &&
           steps.comprehensive_validation.outputs.validation_failed != 'true' &&
           steps.idempotency_check.outcome == 'success'
         uses: ./.github/actions/terraform-apply
