@@ -59,9 +59,10 @@ runs:
         if [ -n "${{ inputs.extra_vars }}" ]; then
           # Split by space and process each key=value pair
           for var in ${{ inputs.extra_vars }}; do
-            # Use single quotes to prevent bash from interpreting the = sign
-            # Terraform accepts: -var='key=value' or -var="key=value"
-            PLAN_ARGS="$PLAN_ARGS -var='$var'"
+            # Terraform accepts -var=key=value format without quotes
+            # Since we're building PLAN_ARGS as a string and expanding it later,
+            # we need to ensure proper quoting. Use eval-safe format.
+            PLAN_ARGS="$PLAN_ARGS -var=$var"
           done
         fi
         
