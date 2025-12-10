@@ -92,7 +92,7 @@ A complete, secure, production-ready deployment pipeline for deploying your full
 #### GitHub Actions
 - ✅ `.github/workflows/app-deploy-ec2.yml` - NEW deployment workflow
   - OIDC authentication
-  - EC2 instance discovery (by tags: Environment=dev, SubnetType=app)
+  - EC2 instance discovery (by tags: Environment=dev)
   - SSM-based deployment execution
   - Health verification
   - Comprehensive logging
@@ -133,7 +133,7 @@ A complete, secure, production-ready deployment pipeline for deploying your full
 
 ### Infrastructure Security
 - ✅ **Least-privilege IAM** - Only EC2 describe + SSM command permissions
-- ✅ **Private subnets** - EC2 instances in `SubnetType=app` subnets
+- ✅ **Private subnets** - EC2 instances in private app subnets (identified by subnet names)
 - ✅ **No SSH** - All access via AWS Systems Manager (SSM)
 - ✅ **No open ports** - No inbound security group rules needed
 
