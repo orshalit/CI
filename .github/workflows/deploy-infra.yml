@@ -269,7 +269,6 @@ jobs:
       - name: Terraform Refresh State (Pre-Plan Sync)
         id: refresh
         if: inputs.action == 'plan' || inputs.action == 'apply'
-        continue-on-error: true
         timeout-minutes: 5
         run: |
           PLAN_DIR="DEVOPS/live/${{ inputs.environment }}/${{ inputs.module_path }}"
@@ -303,21 +302,25 @@ jobs:
           
           # Use refresh-only mode to update state without making changes
           # This syncs state with actual AWS resources
+          # Fail on errors - configuration errors should be caught here
           timeout 300 terraform -chdir="$PLAN_DIR" apply -refresh-only -auto-approve $REFRESH_ARGS 2>&1 | tee /tmp/refresh_output.txt || {
             REFRESH_EXITCODE=$?
             if [ $REFRESH_EXITCODE -eq 124 ]; then
-              echo "::warning::State refresh timed out after 5 minutes, but continuing with plan..."
+              echo "::error::State refresh timed out after 5 minutes"
+              exit 124
             else
               # Check if refresh-only failed because there are no changes (exit code 0 from apply -refresh-only)
               if grep -q "No changes" /tmp/refresh_output.txt 2>/dev/null; then
                 echo "::notice::✓ State is already in sync with AWS (no changes needed)"
-            else
-              echo "::warning::State refresh failed with exit code $REFRESH_EXITCODE, but continuing with plan..."
-                echo "::warning::Refresh output:"
+                exit 0
+              else
+                echo "::error::State refresh failed with exit code $REFRESH_EXITCODE"
+                echo "::error::Refresh output:"
                 cat /tmp/refresh_output.txt 2>/dev/null || true
+                echo "::error::This indicates a configuration error that must be fixed before proceeding"
+                exit $REFRESH_EXITCODE
               fi
             fi
-            exit 0  # Don't fail the workflow, just warn
           }
           
           # Check if refresh-only made any changes
