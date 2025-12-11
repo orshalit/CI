@@ -50,6 +50,13 @@ jobs:
           chmod +x scripts/install-dhall-with-fallback.sh
           scripts/install-dhall-with-fallback.sh
 
+      - name: Verify Dhall remote imports are accessible
+        run: |
+          echo "::notice::Verifying remote imports before type-checking..."
+          chmod +x scripts/verify-dhall-imports.sh
+          scripts/verify-dhall-imports.sh --retry 3 --timeout 10
+          echo "::notice::✓ All remote imports verified"
+
       - name: Type-check Dhall service definitions
         run: |
           echo "::notice::Type-checking dhall/services.dhall..."

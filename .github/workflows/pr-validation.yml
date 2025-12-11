@@ -154,6 +154,18 @@ jobs:
           sudo mv ./bin/dhall /usr/local/bin/
           dhall --version
           
+          # Verify remote imports first (if verification script exists)
+          if [ -f "scripts/verify-dhall-imports.sh" ]; then
+            echo "::notice::Verifying remote imports..."
+            chmod +x scripts/verify-dhall-imports.sh
+            scripts/verify-dhall-imports.sh --retry 2 --timeout 8 || {
+              echo "::error::Remote import verification failed!"
+              echo "::error::Fix import issues before type-checking"
+              exit 1
+            }
+            echo "✓ Remote imports verified"
+          fi
+          
           # Validate Dhall files
           if [ -f "dhall/services.dhall" ]; then
             echo "::notice::Type-checking dhall/services.dhall..."

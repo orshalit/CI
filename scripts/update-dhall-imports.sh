@@ -142,5 +142,6 @@ fi
 echo ""
 echo "Next steps:"
 echo "1. Review the changes: git diff"
-echo "2. Test Dhall type-checking: dhall type --file dhall/services.dhall"
-echo "3. Commit if satisfied: git add -A && git commit -m 'chore: Update DEVOPS import to $COMMIT_HASH'"
+echo "2. Verify imports: ./scripts/verify-dhall-imports.sh"
+echo "3. Test Dhall type-checking: dhall type --file dhall/services.dhall"
+echo "4. Commit if satisfied: git add -A && git commit -m 'chore: Update DEVOPS import to $COMMIT_HASH'"
