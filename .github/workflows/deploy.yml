@@ -224,7 +224,6 @@ jobs:
       - name: Generate services.generated.json from Dhall (on-demand)
         id: generate_services_json
         if: |
-          steps.vars.outputs.images_built != 'false' &&
           (steps.vars.outputs.action == 'plan' || steps.vars.outputs.action == 'apply') &&
           steps.vars.outputs.module_path == '04-ecs-fargate'
         run: |
