@@ -59,3 +59,7 @@ safety-report.json
 npm-audit-report.json
 .eslintcache
 
+# Dhall cache (keep binaries for fallback, but ignore temp files)
+dhall/cache/binaries/*.tmp
+dhall/cache/binaries/*.tar.*
+
