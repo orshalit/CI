@@ -91,10 +91,34 @@ jobs:
           done || echo "No files found"
           echo "::endgroup::"
           
+          # Debug: Show environment variables before verification
+          echo "::group::Debug: Pre-verification environment check"
+          echo "DEVOPS_REPO_OWNER: '${DEVOPS_REPO_OWNER:-<not set>}'"
+          echo "DEVOPS_REPO_NAME: '${DEVOPS_REPO_NAME:-<not set>}'"
+          if [ -n "${DEVOPS_REPO_OWNER:-}" ]; then
+            echo "DEVOPS_REPO_OWNER length: ${#DEVOPS_REPO_OWNER}"
+          fi
+          if [ -n "${DEVOPS_REPO_NAME:-}" ]; then
+            echo "DEVOPS_REPO_NAME length: ${#DEVOPS_REPO_NAME}"
+          fi
+          echo "::endgroup::"
+          
+          # Test basic curl connectivity
+          echo "::group::Debug: Network connectivity pre-check"
+          echo "Testing connectivity to GitHub..."
+          if curl -s --max-time 5 -I https://raw.githubusercontent.com > /dev/null 2>&1; then
+            echo "✓ GitHub raw.githubusercontent.com is reachable"
+          else
+            echo "✗ GitHub raw.githubusercontent.com is NOT reachable"
+            echo "This may indicate a network connectivity issue"
+          fi
+          echo "::endgroup::"
+          
           chmod +x scripts/verify-dhall-imports.sh
           scripts/verify-dhall-imports.sh --retry 3 --timeout 10 || {
             echo "::error::Dhall import verification failed"
             echo "::error::This may be a network issue or repository name mismatch"
+            echo "::error::Check the debug output above for detailed error information"
             exit 1
           }
           echo "::notice::✓ All remote imports verified"

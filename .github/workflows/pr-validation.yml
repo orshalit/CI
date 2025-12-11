@@ -167,10 +167,18 @@ jobs:
           # Verify remote imports first (if verification script exists)
           if [ -f "scripts/verify-dhall-imports.sh" ]; then
             echo "::notice::Verifying remote imports..."
+            
+            # Debug: Show environment variables
+            echo "::group::Debug: Pre-verification environment check"
+            echo "DEVOPS_REPO_OWNER: '${DEVOPS_REPO_OWNER:-<not set>}'"
+            echo "DEVOPS_REPO_NAME: '${DEVOPS_REPO_NAME:-<not set>}'"
+            echo "::endgroup::"
+            
             chmod +x scripts/verify-dhall-imports.sh
             scripts/verify-dhall-imports.sh --retry 2 --timeout 8 || {
               echo "::error::Remote import verification failed!"
               echo "::error::Fix import issues before type-checking"
+              echo "::error::Check the debug output above for detailed error information"
               exit 1
             }
             echo "✓ Remote imports verified"
