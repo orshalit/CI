@@ -263,6 +263,21 @@ async def hello(request: Request):
 
 
 @app.get(
+    "/api/deploy-test-2",
+    response_model=HelloResponse,
+    tags=["testing"],
+    summary="Deployment test endpoint",
+    description="DEPLOY-TEST-2: Test endpoint to verify deployment pipeline",
+)
+@rate_limit()
+async def deploy_test_2(request: Request):
+    """DEPLOY-TEST-2: Test endpoint for deployment verification"""
+    return HelloResponse(
+        message="DEPLOY-TEST-2: Backend deployment successful! Timestamp: 2025-01-XX"
+    )
+
+
+@app.get(
     "/api/greet/{user}",
     response_model=GreetingResponse,
     tags=["greetings"],

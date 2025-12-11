@@ -12,9 +12,10 @@ function App() {
   // Version state (DEPLOY-TEST-1)
   const [versionInfo, setVersionInfo] = useState({ version: null, commit: null });
 
-  // API hooks for hello and greet endpoints
+  // API hooks for hello, deploy-test-2, and greet endpoints
   // Bind methods to ensure proper 'this' context
   const [callHelloApi, helloState] = useApi(apiService.callHello.bind(apiService));
+  const [callDeployTest2Api, deployTest2State] = useApi(apiService.callDeployTest2.bind(apiService));
   const [callGreetApi, greetState] = useApi(apiService.callGreet.bind(apiService));
 
   // Local state
@@ -61,6 +62,16 @@ function App() {
       logger.error('Hello button click failed', error);
     }
   }, [callHelloApi]);
+
+  // Handle deploy-test-2 button click
+  const handleDeployTest2 = useCallback(async () => {
+    try {
+      await callDeployTest2Api();
+    } catch (error) {
+      // Error is handled by useApi hook
+      logger.error('Deploy-test-2 button click failed', error);
+    }
+  }, [callDeployTest2Api]);
 
   // Handle greet button click
   const handleGreet = useCallback(async () => {
@@ -109,7 +120,7 @@ function App() {
   );
 
   // Determine if any operation is loading
-  const isLoading = helloState.loading || greetState.loading;
+  const isLoading = helloState.loading || deployTest2State.loading || greetState.loading;
 
   return (
     <div className="app">
@@ -151,6 +162,26 @@ function App() {
           {helloState.error && (
             <p className="result error" role="alert">
               Error: {helloState.error}
+            </p>
+          )}
+        </div>
+
+        <div className="card">
+          <h2>Deployment Test #2</h2>
+          <p className="deploy-info" style={{ color: '#ff6b6b', fontWeight: 'bold' }}>
+            🚀 DEPLOY-TEST-2: New endpoint to verify deployment pipeline
+          </p>
+          <button onClick={handleDeployTest2} disabled={isLoading}>
+            {deployTest2State.loading ? 'Loading...' : 'Call /api/deploy-test-2'}
+          </button>
+          {deployTest2State.data?.message && (
+            <p className="result success" style={{ fontWeight: 'bold', fontSize: '1.1em' }}>
+              ✅ {deployTest2State.data.message}
+            </p>
+          )}
+          {deployTest2State.error && (
+            <p className="result error" role="alert">
+              Error: {deployTest2State.error}
             </p>
           )}
         </div>
