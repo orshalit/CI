@@ -74,6 +74,7 @@ jobs:
       app-code: ${{ steps.filter.outputs.app-code }}
       backend-code: ${{ steps.filter.outputs.backend-code }}
       frontend-code: ${{ steps.filter.outputs.frontend-code }}
+      dhall-code: ${{ steps.filter.outputs.dhall-code }}
       app-structure-changed: ${{ steps.regenerate-compose.outputs.changed }}
     steps:
       - uses: actions/checkout@v4
@@ -280,6 +281,82 @@ jobs:
           head: ${{ github.event.pull_request.head.sha || github.sha }}
           extra_args: --only-verified
         continue-on-error: true
+
+  # ===========================================================================
+  # Dhall Configuration Validation
+  # ===========================================================================
+  
+  validate-dhall:
+    name: Validate Dhall Config
+    runs-on: ubuntu-latest
+    needs: [detect-changes]
+    # Run if dhall code changed, or on version tags, or manual dispatch
+    if: |
+      needs.detect-changes.outputs.dhall-code == 'true' ||
+      startsWith(github.ref, 'refs/tags/v') ||
+      github.event_name == 'workflow_dispatch'
+    
+    env:
+      DEVOPS_REPO_NAME: ${{ secrets.DEVOPS_REPO_NAME || 'projectdevops' }}
+      DEVOPS_REPO_OWNER: ${{ secrets.DEVOPS_REPO_OWNER || 'orshalit' }}
+    
+    steps:
+      - name: Checkout CI repository
+        uses: actions/checkout@v4
+
+      - name: Checkout DEVOPS repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.DEVOPS_REPO_OWNER }}/${{ env.DEVOPS_REPO_NAME }}
+          ssh-key: ${{ secrets.DEVOPS_REPO_KEY }}
+          path: DEVOPS
+          ref: main
+
+      - name: Verify DEVOPS checkout
+        run: |
+          if [ ! -f "DEVOPS/config/types/Service.dhall" ]; then
+            echo "::error::DEVOPS/config/types/Service.dhall not found!"
+            ls -la DEVOPS/ || echo "DEVOPS directory not found"
+            exit 1
+          fi
+          echo "::notice::✓ DEVOPS/config/types/Service.dhall found"
+
+      - name: Cache Dhall binaries
+        id: cache-dhall
+        uses: actions/cache@v4
+        with:
+          path: dhall/cache/binaries
+          key: dhall-binaries-${{ runner.os }}-1.41.2
+          restore-keys: |
+            dhall-binaries-${{ runner.os }}-
+
+      - name: Install Dhall
+        run: |
+          chmod +x scripts/install-dhall-with-fallback.sh
+          scripts/install-dhall-with-fallback.sh
+
+      - name: Type-check Dhall service definitions
+        run: |
+          echo "::notice::Type-checking dhall/services.dhall..."
+          dhall type --file dhall/services.dhall
+          echo "::notice::✓ Type-check passed"
+
+      - name: Validate JSON generation
+        run: |
+          echo "::notice::Validating JSON conversion..."
+          dhall-to-json --file dhall/services.dhall > /tmp/services.json
+          
+          if ! jq empty /tmp/services.json 2>/dev/null; then
+            echo "::error::Generated JSON is invalid"
+            cat /tmp/services.json
+            exit 1
+          fi
+          
+          SERVICE_COUNT=$(jq 'length' /tmp/services.json)
+          echo "::notice::✓ JSON conversion successful - $SERVICE_COUNT service(s)"
+          echo "::group::Generated JSON"
+          jq '.' /tmp/services.json
+          echo "::endgroup::"
 
   # ===========================================================================
   # Backend Testing
@@ -776,7 +853,7 @@ jobs:
   build-images:
     name: Build Docker Images
     runs-on: ubuntu-latest
-    needs: [code-quality, backend-tests, frontend-tests, app-backend-tests, prepare-build, detect-changes, filter-build-matrix]
+    needs: [code-quality, backend-tests, frontend-tests, app-backend-tests, prepare-build, detect-changes, filter-build-matrix, validate-dhall]
     # We must use `always()` so this job's `if` condition is evaluated even if upstream jobs are skipped.
     # The condition then checks that all necessary preceding jobs either succeeded or were skipped,
     # and most importantly, that the filter-build-matrix job has determined there are images to build.
@@ -789,6 +866,7 @@ jobs:
       (needs.code-quality.result == 'success' || needs.code-quality.result == 'skipped') &&
       (needs.backend-tests.result == 'success' || needs.backend-tests.result == 'skipped') &&
       (needs.frontend-tests.result == 'success' || needs.frontend-tests.result == 'skipped') &&
+      (needs.validate-dhall.result == 'success' || needs.validate-dhall.result == 'skipped') &&
       (needs.app-backend-tests.result == 'success' || needs.app-backend-tests.result == 'skipped') &&
       (needs.frontend-tests.result == 'success' || needs.frontend-tests.result == 'skipped')
     strategy:
@@ -1524,7 +1602,7 @@ jobs:
   summary:
     name: Build Summary
     runs-on: ubuntu-latest
-    needs: [e2e-tests, prepare-build, detect-changes, build-images, code-quality, backend-tests, frontend-tests, app-backend-tests, detect-app-images, filter-build-matrix]
+    needs: [e2e-tests, prepare-build, detect-changes, build-images, code-quality, backend-tests, frontend-tests, app-backend-tests, detect-app-images, filter-build-matrix, validate-dhall]
     if: always()
     
     steps:
