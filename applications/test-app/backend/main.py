@@ -289,7 +289,7 @@ async def deploy_test_3(request: Request):
     """DEPLOY-TEST-3: Latest test endpoint for deployment verification after fixes"""
     environment = os.getenv("ENVIRONMENT", "development")
     return HelloResponse(
-        message=f"DEPLOY-TEST-3: ✅ Backend deployed successfully! Environment: {environment} | Dhall syntax fixed | Ready for deployment test"
+        message=f"DEPLOY-TEST-3: ✅ Backend deployed successfully! Environment: {environment} | Duplicate content removed | Pipeline ready"
     )
 
 
