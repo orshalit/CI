@@ -217,7 +217,7 @@ jobs:
 
       - name: Update Dhall imports with dynamic repository name
         env:
-          DEVOPS_REPO_NAME: ${{ vars.DEVOPS_REPO_NAME || 'projectdevops' }}
+          DEVOPS_REPO_NAME: ${{ secrets.DEVOPS_REPO_NAME || 'projectdevops' }}
         run: |
           echo "::notice::Using repository: $DEVOPS_REPO_NAME"
           chmod +x scripts/update-dhall-repo-imports.sh

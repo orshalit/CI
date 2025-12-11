@@ -21,9 +21,8 @@ permissions:
   contents: read
 
 env:
-  # Dynamic repository configuration - can be overridden via repository variables/secrets
-  DEVOPS_REPO_NAME: ${{ vars.DEVOPS_REPO_NAME || 'projectdevops' }}
-  DEVOPS_REPO_OWNER: ${{ vars.DEVOPS_REPO_OWNER || 'orshalit' }}
+  # Dynamic repository configuration - uses existing repository secret
+  DEVOPS_REPO_NAME: ${{ secrets.DEVOPS_REPO_NAME || 'projectdevops' }}
 
 jobs:
   validate-dhall-services:
