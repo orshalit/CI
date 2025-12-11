@@ -640,28 +640,9 @@ jobs:
           retention-days: 7  # Keep artifact for 7 days for deployment workflows
           if-no-files-found: error  # Fail if file doesn't exist
 
-      - name: Export built images list
-        if: always()
-        run: |
-          # Export list of images that were successfully built
-          # This allows deployment to only deploy services whose images exist
-          BUILT_IMAGES_FILE="built-images.txt"
-          echo "# Images successfully built in this CI run" > "$BUILT_IMAGES_FILE"
-          echo "# Format: image_name (one per line)" >> "$BUILT_IMAGES_FILE"
-          echo "# Used by deployment workflow to filter services" >> "$BUILT_IMAGES_FILE"
-          
-          # Note: Individual build jobs will append their image names
-          # This file will be populated by the build-images job matrix
-          touch "$BUILT_IMAGES_FILE"
-
-      - name: Upload built images list artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: built-images
-          path: built-images.txt
-          retention-days: 7
-          if-no-files-found: warn  # Allow empty if no images built
+      # Note: built-images.txt is now created and uploaded by each matrix build job
+      # GitHub Actions will automatically merge artifacts with the same name when downloading
+      # This ensures the deployment workflow gets all successfully built images
 
   # ===========================================================================
   # Docker Image Building
@@ -888,9 +869,25 @@ jobs:
       - name: Record successfully built image
         if: success()
         run: |
+          # Create built-images.txt with header if it doesn't exist
+          if [ ! -f "built-images.txt" ]; then
+            echo "# Images successfully built in this CI run" > built-images.txt
+            echo "# Format: image_name (one per line)" >> built-images.txt
+            echo "# Used by deployment workflow to filter services" >> built-images.txt
+          fi
           # Append image name to built-images list (for deployment filtering)
           echo "${{ matrix.image_name }}" >> built-images.txt
           echo "::notice::✓ Built image: ${{ matrix.image_name }}"
+      
+      - name: Upload built images list artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: built-images
+          path: built-images.txt
+          retention-days: 7
+          if-no-files-found: ignore
+          merge-multiple: true  # Merge with other matrix jobs' artifacts
       
       - name: Export image for testing
         if: github.event_name == 'pull_request'
