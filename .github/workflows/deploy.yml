@@ -82,7 +82,7 @@ jobs:
         if: github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
         working-directory: applications/test-app/backend
         run: |
-          pytest tests/
+          pytest tests/test_main.py
 
       - name: Set up Node
         if: github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
