@@ -211,14 +211,34 @@ jobs:
       - name: Debug - Check repository secrets
         run: |
           echo "::notice::Checking repository secrets..."
-          echo "DEVOPS_REPO_OWNER exists: ${{ secrets.DEVOPS_REPO_OWNER != '' && 'yes' || 'no' }}"
-          echo "DEVOPS_REPO_NAME exists: ${{ secrets.DEVOPS_REPO_NAME != '' && 'yes' || 'no' }}"
-          echo "DEVOPS_REPO_OWNER length: ${{ length(secrets.DEVOPS_REPO_OWNER) }}"
-          echo "DEVOPS_REPO_NAME length: ${{ length(secrets.DEVOPS_REPO_NAME) }}"
-          REPO_FORMAT="${{ secrets.DEVOPS_REPO_OWNER || 'orshalit' }}/${{ secrets.DEVOPS_REPO_NAME || 'projectdevops' }}"
+          DEVOPS_REPO_OWNER="${{ secrets.DEVOPS_REPO_OWNER }}"
+          DEVOPS_REPO_NAME="${{ secrets.DEVOPS_REPO_NAME }}"
+          
+          if [ -n "$DEVOPS_REPO_OWNER" ]; then
+            echo "DEVOPS_REPO_OWNER exists: yes"
+            echo "DEVOPS_REPO_OWNER length: ${#DEVOPS_REPO_OWNER}"
+          else
+            echo "DEVOPS_REPO_OWNER exists: no"
+            echo "DEVOPS_REPO_OWNER length: 0"
+          fi
+          
+          if [ -n "$DEVOPS_REPO_NAME" ]; then
+            echo "DEVOPS_REPO_NAME exists: yes"
+            echo "DEVOPS_REPO_NAME length: ${#DEVOPS_REPO_NAME}"
+          else
+            echo "DEVOPS_REPO_NAME exists: no"
+            echo "DEVOPS_REPO_NAME length: 0"
+          fi
+          
+          REPO_OWNER="${DEVOPS_REPO_OWNER:-orshalit}"
+          REPO_NAME="${DEVOPS_REPO_NAME:-projectdevops}"
+          REPO_FORMAT="${REPO_OWNER}/${REPO_NAME}"
           echo "Computed repo format: $REPO_FORMAT"
-          if [ -z "${{ secrets.DEVOPS_REPO_OWNER }}" ] || [ -z "${{ secrets.DEVOPS_REPO_NAME }}" ]; then
+          
+          if [ -z "$DEVOPS_REPO_OWNER" ] || [ -z "$DEVOPS_REPO_NAME" ]; then
             echo "::error::Repository secrets are missing or empty!"
+            echo "::error::DEVOPS_REPO_OWNER: '${DEVOPS_REPO_OWNER:-<empty>}'"
+            echo "::error::DEVOPS_REPO_NAME: '${DEVOPS_REPO_NAME:-<empty>}'"
             echo "::error::Please set DEVOPS_REPO_OWNER and DEVOPS_REPO_NAME secrets in repository settings"
             exit 1
           fi
