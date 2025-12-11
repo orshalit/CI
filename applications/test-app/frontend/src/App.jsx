@@ -7,7 +7,10 @@ import { logger } from './services/logger.service';
 
 function App() {
   // Health check hook
-  const { healthStatus, checkHealth } = useHealthCheck();
+  const { healthStatus, checkHealth, healthData } = useHealthCheck();
+  
+  // Version state (DEPLOY-TEST-1)
+  const [versionInfo, setVersionInfo] = useState({ version: null, commit: null });
 
   // API hooks for hello and greet endpoints
   // Bind methods to ensure proper 'this' context
@@ -22,6 +25,32 @@ function App() {
   useEffect(() => {
     checkHealth();
   }, [checkHealth]);
+  
+  // Load version info from version.json (DEPLOY-TEST-1)
+  useEffect(() => {
+    fetch('/version.json')
+      .then((res) => res.json())
+      .then((data) => {
+        setVersionInfo({
+          version: data.version || 'unknown',
+          commit: data.commit || 'unknown',
+        });
+      })
+      .catch((err) => {
+        logger.warn('Failed to load version.json', err);
+        setVersionInfo({ version: 'unknown', commit: 'unknown' });
+      });
+  }, []);
+  
+  // Update version from health check if available
+  useEffect(() => {
+    if (healthData?.version) {
+      setVersionInfo((prev) => ({
+        version: healthData.version || prev.version,
+        commit: healthData.commit || prev.commit,
+      }));
+    }
+  }, [healthData]);
 
   // Handle hello button click
   const handleHello = useCallback(async () => {
@@ -86,6 +115,15 @@ function App() {
     <div className="app">
       <div className="container">
         <h1>Full-Stack Application</h1>
+        
+        {/* Version Badge - DEPLOY-TEST-1 */}
+        <div className="version-badge">
+          <span className="version-label">Version:</span>
+          <span className="version-value">{versionInfo.version || 'loading...'}</span>
+          {versionInfo.commit && versionInfo.commit !== 'unknown' && (
+            <span className="version-commit">({versionInfo.commit.substring(0, 7)})</span>
+          )}
+        </div>
 
         <div className="card">
           <h2>Health Check</h2>
@@ -95,6 +133,11 @@ function App() {
               {healthStatus}
             </span>
           </p>
+          {healthData?.version && (
+            <p className="version-info">
+              Backend: {healthData.version} ({healthData.commit?.substring(0, 7) || 'unknown'})
+            </p>
+          )}
         </div>
 
         <div className="card">

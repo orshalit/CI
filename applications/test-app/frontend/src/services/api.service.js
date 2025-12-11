@@ -21,19 +21,21 @@ class ApiService {
   }
 
   /**
-   * Health check endpoint
-   * @returns {Promise<{status: string, database?: string, error?: string}>}
+   * Health check endpoint (DEPLOY-TEST-1)
+   * @returns {Promise<{status: string, database?: string, error?: string, version?: string, commit?: string}>}
    */
   async checkHealth() {
     try {
       logger.debug('Checking health status');
       const data = await httpClient.get(`${this.baseUrl}/health`);
 
-      logger.info('Health check completed', { status: data.status });
+      logger.info('Health check completed', { status: data.status, version: data.version });
       return {
         status: data.status || 'unhealthy',
         database: data.database,
         error: data.error,
+        version: data.version, // DEPLOY-TEST-1: Include version info
+        commit: data.commit, // DEPLOY-TEST-1: Include commit info
       };
     } catch (error) {
       logger.error('Health check failed', error);

@@ -100,27 +100,64 @@ app.add_middleware(
     response_model=HealthResponse,
     tags=["health"],
     summary="Health check endpoint",
-    description="Check the health status of the API and database connectivity",
+    description="Check the health status of the API and database connectivity (DEPLOY-TEST-1)",
 )
 async def health_check():
-    """Health check endpoint with database connectivity check"""
+    """Health check endpoint with database connectivity check and version info"""
+    # Get version info for response
+    version_file = PathLib("/app/version.json")
+    version_info = {"version": None, "commit": None}
+    
+    if version_file.exists():
+        try:
+            with open(version_file) as f:
+                version_data = json.load(f)
+                version_info["version"] = version_data.get("version", os.getenv("APP_VERSION"))
+                version_info["commit"] = version_data.get("commit", os.getenv("GIT_COMMIT"))
+        except (json.JSONDecodeError, OSError):
+            version_info["version"] = os.getenv("APP_VERSION")
+            version_info["commit"] = os.getenv("GIT_COMMIT")
+    else:
+        version_info["version"] = os.getenv("APP_VERSION")
+        version_info["commit"] = os.getenv("GIT_COMMIT")
+    
     # Check if database is available
     if not database_available:
-        return HealthResponse(status="healthy", database="unavailable")
+        return HealthResponse(
+            status="healthy", 
+            database="unavailable",
+            version=version_info["version"],
+            commit=version_info["commit"]
+        )
 
     # Test database connection if available
     try:
         db = next(get_db())
         db.execute(text("SELECT 1"))
         db.close()
-        return HealthResponse(status="healthy", database="connected")
+        return HealthResponse(
+            status="healthy", 
+            database="connected",
+            version=version_info["version"],
+            commit=version_info["commit"]
+        )
     except SQLAlchemyError as e:
         logger.error(f"Database health check failed: {e}", exc_info=True)
-        return HealthResponse(status="unhealthy", database="disconnected", error=str(e))
+        return HealthResponse(
+            status="unhealthy", 
+            database="disconnected", 
+            error=str(e),
+            version=version_info["version"],
+            commit=version_info["commit"]
+        )
     except Exception as e:
         logger.error(f"Unexpected error in health check: {e}", exc_info=True)
         return HealthResponse(
-            status="unhealthy", database="unknown", error="Internal error"
+            status="unhealthy", 
+            database="unknown", 
+            error="Internal error",
+            version=version_info["version"],
+            commit=version_info["commit"]
         )
 
 

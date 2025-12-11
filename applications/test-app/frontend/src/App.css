@@ -15,8 +15,45 @@
 h1 {
   text-align: center;
   color: #333;
-  margin-bottom: 30px;
+  margin-bottom: 20px;
   font-size: 2.5em;
+}
+
+/* Version Badge - DEPLOY-TEST-1 */
+.version-badge {
+  text-align: center;
+  margin-bottom: 25px;
+  padding: 10px 20px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border-radius: 20px;
+  display: inline-block;
+  font-size: 0.9em;
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+}
+
+.version-label {
+  font-weight: 600;
+  margin-right: 8px;
+}
+
+.version-value {
+  font-weight: bold;
+  font-family: 'Courier New', monospace;
+  margin-right: 8px;
+}
+
+.version-commit {
+  font-size: 0.85em;
+  opacity: 0.9;
+  font-family: 'Courier New', monospace;
+}
+
+.version-info {
+  margin-top: 10px;
+  font-size: 0.9em;
+  color: #666;
+  font-family: 'Courier New', monospace;
 }
 
 .card {

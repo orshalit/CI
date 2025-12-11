@@ -35,6 +35,8 @@ class HealthResponse(BaseModel):
     status: str
     database: str
     error: str | None = None
+    version: str | None = Field(None, description="Application version (DEPLOY-TEST-1)")
+    commit: str | None = Field(None, description="Git commit SHA")
 
 
 class HelloResponse(BaseModel):

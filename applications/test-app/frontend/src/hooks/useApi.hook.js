@@ -47,11 +47,12 @@ export function useApi(apiFunction) {
 }
 
 /**
- * Custom hook for health check
+ * Custom hook for health check (DEPLOY-TEST-1)
  */
 export function useHealthCheck() {
   const [healthStatus, setHealthStatus] = useState('checking...');
   const [error, setError] = useState(null);
+  const [healthData, setHealthData] = useState(null);
 
   const checkHealth = useCallback(async () => {
     try {
@@ -60,6 +61,7 @@ export function useHealthCheck() {
       const result = await apiService.checkHealth();
       setHealthStatus(result.status || 'unhealthy');
       setError(result.error || null);
+      setHealthData(result); // Store full health data including version
       return result;
     } catch (err) {
       logger.error('Health check failed', err);
@@ -69,5 +71,5 @@ export function useHealthCheck() {
     }
   }, []);
 
-  return { healthStatus, error, checkHealth };
+  return { healthStatus, error, healthData, checkHealth };
 }
