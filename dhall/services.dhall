@@ -1,4 +1,5 @@
--- DEPLOY-TEST-1: Service definitions for test-app
+-- Aggregates all service definitions into a map
+-- Used by services.tfvarsJSON.dhall to generate Terraform configuration
 let Prelude = https://prelude.dhall-lang.org/v21.0.0/package.dhall
 
 let Service =
@@ -18,3 +19,4 @@ let servicesEntries =
         servicesList
 
 in  Prelude.Map.fromList Service servicesEntries
+
