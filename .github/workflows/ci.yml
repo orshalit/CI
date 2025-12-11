@@ -958,9 +958,10 @@ jobs:
           done
           
           # Get all services from docker-compose (dynamic)
-          ALL_SERVICES=$(docker compose $COMPOSE_FILES config --services | grep -v "^database$" || echo "")
-          BACKEND_SERVICES=$(echo "$ALL_SERVICES" | grep -E "-backend$" || echo "")
-          FRONTEND_SERVICES=$(echo "$ALL_SERVICES" | grep -E "-frontend$" || echo "")
+          # Convert newlines to spaces for GitHub Actions output (doesn't support multi-line)
+          ALL_SERVICES=$(docker compose $COMPOSE_FILES config --services | grep -v "^database$" | tr '\n' ' ' | sed 's/ $//' || echo "")
+          BACKEND_SERVICES=$(echo "$ALL_SERVICES" | tr ' ' '\n' | grep -E "-backend$" | tr '\n' ' ' | sed 's/ $//' || echo "")
+          FRONTEND_SERVICES=$(echo "$ALL_SERVICES" | tr ' ' '\n' | grep -E "-frontend$" | tr '\n' ' ' | sed 's/ $//' || echo "")
           
           echo "backend_services=$BACKEND_SERVICES" >> $GITHUB_OUTPUT
           echo "frontend_services=$FRONTEND_SERVICES" >> $GITHUB_OUTPUT
@@ -991,8 +992,10 @@ jobs:
           COMPOSE_FILES="${{ steps.detect-services.outputs.compose_files }}"
           
           # Wait for all backend services (dynamic)
+          # Services are space-separated (converted from newlines for GitHub Actions)
           BACKEND_SERVICES="${{ steps.detect-services.outputs.backend_services }}"
           if [ -n "$BACKEND_SERVICES" ]; then
+            # Convert space-separated to array for iteration
             for BACKEND_SERVICE in $BACKEND_SERVICES; do
               echo "=== Waiting for $BACKEND_SERVICE ==="
               timeout 120 bash -c "
@@ -1008,8 +1011,10 @@ jobs:
           fi
           
           # Wait for all frontend services (dynamic)
+          # Services are space-separated (converted from newlines for GitHub Actions)
           FRONTEND_SERVICES="${{ steps.detect-services.outputs.frontend_services }}"
           if [ -n "$FRONTEND_SERVICES" ]; then
+            # Convert space-separated to array for iteration
             for FRONTEND_SERVICE in $FRONTEND_SERVICES; do
               echo "=== Waiting for $FRONTEND_SERVICE ==="
               echo "Container status before wait:"
@@ -1151,24 +1156,44 @@ jobs:
       - name: Show service logs on failure
         if: failure()
         run: |
+          # Build compose file list (same as detect-services step)
+          COMPOSE_FILES="-f docker-compose.base.yml"
+          for APP_COMPOSE in applications/*/docker-compose.yml; do
+            if [ -f "$APP_COMPOSE" ]; then
+              COMPOSE_FILES="$COMPOSE_FILES -f $APP_COMPOSE"
+            fi
+          done
+          
           echo "=== Container Status ==="
-          docker compose ps -a
+          docker compose $COMPOSE_FILES ps -a || echo "Failed to get container status"
           
           echo -e "\n=== Container Health Details ==="
-          for service in database backend frontend; do
+          ALL_SERVICES=$(docker compose $COMPOSE_FILES config --services 2>/dev/null || echo "")
+          for service in $ALL_SERVICES; do
             echo "--- $service health ---"
-            docker inspect --format="{{json .State.Health}}" $service 2>/dev/null | jq . || echo "No health info for $service"
+            docker inspect --format="{{json .State.Health}}" "$service" 2>/dev/null | jq . || echo "No health info for $service"
           done
           
           echo -e "\n=== Full Docker Compose Logs ==="
-          docker compose logs --no-color
+          docker compose $COMPOSE_FILES logs --no-color || echo "Failed to get logs"
           
-          echo -e "\n=== Frontend Container Inspect ==="
-          docker inspect frontend 2>/dev/null | jq '.[0].State' || echo "Frontend container not found"
+          echo -e "\n=== Service Container States ==="
+          for service in $ALL_SERVICES; do
+            echo "--- $service state ---"
+            docker inspect "$service" 2>/dev/null | jq '.[0].State' || echo "Container $service not found"
+          done
       
       - name: Stop services
         if: always()
-        run: docker compose down -v
+        run: |
+          # Build compose file list (same as detect-services step)
+          COMPOSE_FILES="-f docker-compose.base.yml"
+          for APP_COMPOSE in applications/*/docker-compose.yml; do
+            if [ -f "$APP_COMPOSE" ]; then
+              COMPOSE_FILES="$COMPOSE_FILES -f $APP_COMPOSE"
+            fi
+          done
+          docker compose $COMPOSE_FILES down -v || echo "Failed to stop services (non-critical)"
 
   # ===========================================================================
   # Security Scanning

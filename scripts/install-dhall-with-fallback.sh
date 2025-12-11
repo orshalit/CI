@@ -79,8 +79,23 @@ install_from_github() {
         # Note: dhall-json has its own versioning (e.g., 1.7.11) but is released with dhall-haskell
         local api_response=$(curl -s "https://api.github.com/repos/dhall-lang/dhall-haskell/releases/tags/${version}" 2>/dev/null)
         
+        # Check if API response is valid JSON
         if [ -z "$api_response" ] || [ "$api_response" = "null" ]; then
             log_warn "Failed to fetch GitHub API response for dhall-json"
+            return 1
+        fi
+        
+        # Validate JSON response
+        if ! echo "$api_response" | jq empty 2>/dev/null; then
+            log_warn "GitHub API response is not valid JSON"
+            log_warn "Response preview: $(echo "$api_response" | head -c 200)"
+            return 1
+        fi
+        
+        # Check if release exists
+        if echo "$api_response" | jq -e '.message' >/dev/null 2>&1; then
+            local error_msg=$(echo "$api_response" | jq -r '.message' 2>/dev/null)
+            log_warn "GitHub API error: $error_msg"
             return 1
         fi
         
@@ -91,7 +106,11 @@ install_from_github() {
         if [ -z "$json_url" ] || [ "$json_url" = "null" ] || [ "$json_url" = "" ]; then
             log_warn "Could not find dhall-json download URL in GitHub release"
             log_warn "Available assets:"
-            echo "$api_response" | jq -r '.assets[].name' 2>/dev/null | grep -i "dhall-json.*linux" | head -5 || echo "  (could not parse)"
+            if echo "$api_response" | jq -e '.assets' >/dev/null 2>&1; then
+                echo "$api_response" | jq -r '.assets[].name' 2>/dev/null | grep -i "linux" | head -10 || echo "  (no Linux assets found)"
+            else
+                echo "  (no assets array in response)"
+            fi
             return 1
         fi
         
