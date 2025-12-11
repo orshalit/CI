@@ -63,3 +63,7 @@ npm-audit-report.json
 dhall/cache/binaries/*.tmp
 dhall/cache/binaries/*.tar.*
 
+# Workflow checkouts (checked out by GitHub Actions, not committed)
+DEVOPS/
+CI/
+
