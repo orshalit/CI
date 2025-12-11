@@ -115,6 +115,10 @@ suggest_fix() {
     local url="$1"
     local http_code="$2"
     
+    # Get dynamic values from environment
+    local expected_owner="${DEVOPS_REPO_OWNER:-orshalit}"
+    local expected_repo="${DEVOPS_REPO_NAME:-projectdevops}"
+    
     # Extract repository and commit from URL
     if [[ "$url" =~ https://raw\.githubusercontent\.com/([^/]+)/([^/]+)/([^/]+)/(.+) ]]; then
         local owner="${BASH_REMATCH[1]}"
@@ -130,21 +134,19 @@ suggest_fix() {
             echo ""
             echo "  Possible fixes:"
             
-            # Check if it's a DEVOPS import
-            if [[ "$repo" =~ ^(DEVOPS|projectdevops)$ ]]; then
-                echo "  1. Verify commit exists: git log --oneline -5 (in DEVOPS repo)"
+            # Check if it's a DEVOPS import (matches expected owner)
+            if [ "$owner" = "$expected_owner" ]; then
+                echo "  1. Verify commit exists: git log --oneline -5 (in $owner/$repo repo)"
                 echo "  2. Verify commit is pushed: git log origin/main --oneline -5"
-                echo "  3. Check repository name matches GitHub"
-                echo "  4. Try alternative repo name:"
-                if [ "$repo" = "DEVOPS" ]; then
-                    echo "     → Try: projectdevops"
-                else
-                    echo "     → Try: DEVOPS"
+                echo "  3. Check repository name matches GitHub (expected: $expected_repo, found: $repo)"
+                if [ "$repo" != "$expected_repo" ]; then
+                    echo "     → Repository mismatch! Update: DEVOPS_REPO_NAME=$expected_repo ./scripts/update-dhall-repo-imports.sh"
                 fi
+                echo "  4. Update repository: DEVOPS_REPO_NAME=$expected_repo DEVOPS_REPO_OWNER=$expected_owner ./scripts/update-dhall-repo-imports.sh"
                 echo "  5. Update imports: ./scripts/update-dhall-imports.sh [commit-hash] --verify"
             else
                 echo "  1. Verify commit/branch exists on remote"
-                echo "  2. Check repository name is correct"
+                echo "  2. Check repository name is correct (expected: $expected_owner/$expected_repo)"
                 echo "  3. Verify file path is correct"
             fi
         elif [ "$http_code" = "403" ]; then
@@ -205,8 +207,8 @@ if [ $FAILED -gt 0 ]; then
     echo "1. Run: ./scripts/verify-dhall-imports.sh --retry 5 --timeout 15"
     echo "2. Check network connectivity"
     echo "3. Verify commits exist on remote repositories"
-    echo "4. Check repository names match GitHub"
-    echo "5. For DEVOPS imports: ./scripts/fix-dhall-imports-repo-name.sh"
+    echo "4. Check repository names match GitHub (expected: ${DEVOPS_REPO_OWNER:-orshalit}/${DEVOPS_REPO_NAME:-projectdevops})"
+    echo "5. Update repository: DEVOPS_REPO_NAME=${DEVOPS_REPO_NAME:-projectdevops} DEVOPS_REPO_OWNER=${DEVOPS_REPO_OWNER:-orshalit} ./scripts/update-dhall-repo-imports.sh"
     exit 1
 fi
 

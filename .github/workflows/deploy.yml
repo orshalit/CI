@@ -200,7 +200,7 @@ jobs:
       - name: Terraform Setup
         uses: ./.github/actions/terraform-setup
         with:
-          devops_repo: ${{ secrets.DEVOPS_REPO_NAME || 'orshalit/DEVOPS' }}
+          devops_repo: ${{ secrets.DEVOPS_REPO_OWNER || 'orshalit' }}/${{ secrets.DEVOPS_REPO_NAME || 'projectdevops' }}
           devops_repo_key: ${{ secrets.DEVOPS_REPO_KEY }}
           aws_role_arn: ${{ secrets.AWS_ROLE_ARN }}
           aws_region: ${{ secrets.AWS_REGION }}
@@ -218,10 +218,11 @@ jobs:
       - name: Update Dhall imports with dynamic repository name
         env:
           DEVOPS_REPO_NAME: ${{ secrets.DEVOPS_REPO_NAME || 'projectdevops' }}
+          DEVOPS_REPO_OWNER: ${{ secrets.DEVOPS_REPO_OWNER || 'orshalit' }}
         run: |
-          echo "::notice::Using repository: $DEVOPS_REPO_NAME"
+          echo "::notice::Using repository: $DEVOPS_REPO_OWNER/$DEVOPS_REPO_NAME"
           chmod +x scripts/update-dhall-repo-imports.sh
-          DEVOPS_REPO_NAME="$DEVOPS_REPO_NAME" ./scripts/update-dhall-repo-imports.sh
+          DEVOPS_REPO_NAME="$DEVOPS_REPO_NAME" DEVOPS_REPO_OWNER="$DEVOPS_REPO_OWNER" ./scripts/update-dhall-repo-imports.sh
 
       - name: Install Dhall, dhall-json, and jq
         run: |

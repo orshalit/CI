@@ -35,7 +35,7 @@ jobs:
       - name: Checkout DEVOPS repository
         uses: actions/checkout@v4
         with:
-          repository: ${{ secrets.DEVOPS_REPO_NAME || 'orshalit/DEVOPS' }}
+          repository: ${{ secrets.DEVOPS_REPO_OWNER || 'orshalit' }}/${{ secrets.DEVOPS_REPO_NAME || 'projectdevops' }}
           token: ${{ secrets.DEVOPS_REPO_KEY }}
           path: DEVOPS
           fetch-depth: 0

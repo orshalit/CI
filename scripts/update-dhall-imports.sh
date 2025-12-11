@@ -85,13 +85,17 @@ if [ "$VERIFY" = true ]; then
     fi
 fi
 
-echo "Updating Dhall imports to use DEVOPS commit: $COMMIT_HASH"
+echo "Updating Dhall imports to use commit: $COMMIT_HASH"
 
-# Find all Dhall files with DEVOPS imports
-FILES=$(grep -r "https://raw.githubusercontent.com/orshalit/DEVOPS/" "$REPO_ROOT/dhall" --include="*.dhall" -l || true)
+# Get repository name and owner from environment (for dynamic updates)
+DEVOPS_REPO_NAME="${DEVOPS_REPO_NAME:-projectdevops}"
+DEVOPS_REPO_OWNER="${DEVOPS_REPO_OWNER:-orshalit}"
+
+# Find all Dhall files with DEVOPS repository imports (any owner/repo)
+FILES=$(grep -r "https://raw.githubusercontent.com/$DEVOPS_REPO_OWNER/$DEVOPS_REPO_NAME/" "$REPO_ROOT/dhall" --include="*.dhall" -l 2>/dev/null || true)
 
 if [ -z "$FILES" ]; then
-    echo "No Dhall files with DEVOPS imports found"
+    echo "No Dhall files with $DEVOPS_REPO_OWNER/$DEVOPS_REPO_NAME imports found"
     exit 0
 fi
 
@@ -99,9 +103,9 @@ fi
 UPDATED=0
 FAILED=0
 for file in $FILES; do
-    # Use sed to replace any DEVOPS commit hash or branch with the new commit hash
-    # Pattern: .../DEVOPS/[hash-or-branch]/... -> .../DEVOPS/[new-hash]/...
-    if sed -i.bak "s|https://raw.githubusercontent.com/orshalit/DEVOPS/[^/]*/|https://raw.githubusercontent.com/orshalit/DEVOPS/$COMMIT_HASH/|g" "$file"; then
+    # Use sed to replace commit hash or branch with the new commit hash
+    # Pattern: .../[owner]/[repo]/[hash-or-branch]/... -> .../[owner]/[repo]/[new-hash]/...
+    if sed -i.bak "s|https://raw\.githubusercontent\.com/$DEVOPS_REPO_OWNER/$DEVOPS_REPO_NAME/[^/]*/|https://raw.githubusercontent.com/$DEVOPS_REPO_OWNER/$DEVOPS_REPO_NAME/$COMMIT_HASH/|g" "$file"; then
         rm -f "${file}.bak"
         echo "✓ Updated: $file"
         UPDATED=$((UPDATED + 1))

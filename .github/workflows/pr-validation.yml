@@ -148,14 +148,15 @@ jobs:
         if: steps.check_dhall_changes.outputs.changed == 'true'
         env:
           DEVOPS_REPO_NAME: ${{ secrets.DEVOPS_REPO_NAME || 'projectdevops' }}
+          DEVOPS_REPO_OWNER: ${{ secrets.DEVOPS_REPO_OWNER || 'orshalit' }}
         run: |
           echo "Validating Dhall service definitions..."
           
           # Update imports with dynamic repository name
           if [ -f "scripts/update-dhall-repo-imports.sh" ]; then
-            echo "::notice::Updating imports to use repository: $DEVOPS_REPO_NAME"
+            echo "::notice::Updating imports to use repository: $DEVOPS_REPO_OWNER/$DEVOPS_REPO_NAME"
             chmod +x scripts/update-dhall-repo-imports.sh
-            DEVOPS_REPO_NAME="$DEVOPS_REPO_NAME" ./scripts/update-dhall-repo-imports.sh
+            DEVOPS_REPO_NAME="$DEVOPS_REPO_NAME" DEVOPS_REPO_OWNER="$DEVOPS_REPO_OWNER" ./scripts/update-dhall-repo-imports.sh
           fi
           
           # Install Dhall

@@ -21,8 +21,9 @@ permissions:
   contents: read
 
 env:
-  # Dynamic repository configuration - uses existing repository secret
+  # Dynamic repository configuration - uses existing repository secrets
   DEVOPS_REPO_NAME: ${{ secrets.DEVOPS_REPO_NAME || 'projectdevops' }}
+  DEVOPS_REPO_OWNER: ${{ secrets.DEVOPS_REPO_OWNER || 'orshalit' }}
 
 jobs:
   validate-dhall-services:
@@ -43,10 +44,11 @@ jobs:
       - name: Update Dhall imports with dynamic repository name
         env:
           DEVOPS_REPO_NAME: ${{ env.DEVOPS_REPO_NAME }}
+          DEVOPS_REPO_OWNER: ${{ env.DEVOPS_REPO_OWNER }}
         run: |
-          echo "::notice::Using repository: $DEVOPS_REPO_NAME"
+          echo "::notice::Using repository: $DEVOPS_REPO_OWNER/$DEVOPS_REPO_NAME"
           chmod +x scripts/update-dhall-repo-imports.sh
-          DEVOPS_REPO_NAME="$DEVOPS_REPO_NAME" ./scripts/update-dhall-repo-imports.sh
+          DEVOPS_REPO_NAME="$DEVOPS_REPO_NAME" DEVOPS_REPO_OWNER="$DEVOPS_REPO_OWNER" ./scripts/update-dhall-repo-imports.sh
 
       - name: Cache Dhall binaries
         id: cache-dhall

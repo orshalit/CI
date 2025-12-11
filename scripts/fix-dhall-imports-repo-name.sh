@@ -20,12 +20,14 @@ else
         exit 1
     fi
     
-    # Extract repo name from remote URL
+    # Extract repo name from remote URL (supports any owner)
     REMOTE_URL=$(cd "$DEVOPS_DIR" && git remote get-url origin)
-    if [[ "$REMOTE_URL" =~ git@github.com:orshalit/(.+)\.git ]]; then
-        REPO_NAME="${BASH_REMATCH[1]}"
-    elif [[ "$REMOTE_URL" =~ https://github.com/orshalit/(.+)\.git ]]; then
-        REPO_NAME="${BASH_REMATCH[1]}"
+    if [[ "$REMOTE_URL" =~ git@github.com:([^/]+)/(.+)\.git ]]; then
+        REPO_OWNER="${BASH_REMATCH[1]}"
+        REPO_NAME="${BASH_REMATCH[2]}"
+    elif [[ "$REMOTE_URL" =~ https://github.com/([^/]+)/(.+)\.git ]]; then
+        REPO_OWNER="${BASH_REMATCH[1]}"
+        REPO_NAME="${BASH_REMATCH[2]}"
     else
         echo "Error: Could not parse repository name from: $REMOTE_URL" >&2
         exit 1
@@ -35,19 +37,22 @@ fi
 echo "Updating Dhall imports to use repository: $REPO_NAME"
 echo ""
 
-# Find all Dhall files with DEVOPS imports
-FILES=$(grep -r "https://raw.githubusercontent.com/orshalit/DEVOPS/" "$REPO_ROOT/dhall" --include="*.dhall" -l || true)
+# Get owner from environment or detect from remote
+DEVOPS_REPO_OWNER="${DEVOPS_REPO_OWNER:-orshalit}"
+
+# Find all Dhall files with DEVOPS repository imports (any repo name)
+FILES=$(grep -r "https://raw.githubusercontent.com/$DEVOPS_REPO_OWNER/" "$REPO_ROOT/dhall" --include="*.dhall" -l 2>/dev/null || true)
 
 if [ -z "$FILES" ]; then
-    echo "No Dhall files with DEVOPS imports found"
+    echo "No Dhall files with $DEVOPS_REPO_OWNER/* imports found"
     exit 0
 fi
 
 # Update each file
 UPDATED=0
 for file in $FILES; do
-    # Replace DEVOPS with actual repo name
-    if sed -i.bak "s|https://raw.githubusercontent.com/orshalit/DEVOPS/|https://raw.githubusercontent.com/orshalit/$REPO_NAME/|g" "$file"; then
+    # Replace any repo name with the correct one (keeps owner)
+    if sed -i.bak "s|https://raw\.githubusercontent\.com/$DEVOPS_REPO_OWNER/[^/]*/|https://raw.githubusercontent.com/$DEVOPS_REPO_OWNER/$REPO_NAME/|g" "$file"; then
         rm -f "${file}.bak"
         echo "✓ Updated: $file"
         UPDATED=$((UPDATED + 1))
