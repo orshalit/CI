@@ -1,4 +1,4 @@
-let Service = https://raw.githubusercontent.com/orshalit/DEVOPS/b593194afb2c3be99edb55e6cd93c1494e20dc06/config/types/Service.dhall
+let Service = https://raw.githubusercontent.com/orshalit/projectdevops/b593194afb2c3be99edb55e6cd93c1494e20dc06/config/types/Service.dhall
 
 in Service::{
     , name = "test-app-api"

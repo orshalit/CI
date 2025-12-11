@@ -215,6 +215,14 @@ jobs:
           restore-keys: |
             dhall-binaries-${{ runner.os }}-
 
+      - name: Update Dhall imports with dynamic repository name
+        env:
+          DEVOPS_REPO_NAME: ${{ vars.DEVOPS_REPO_NAME || 'projectdevops' }}
+        run: |
+          echo "::notice::Using repository: $DEVOPS_REPO_NAME"
+          chmod +x scripts/update-dhall-repo-imports.sh
+          DEVOPS_REPO_NAME="$DEVOPS_REPO_NAME" ./scripts/update-dhall-repo-imports.sh
+
       - name: Install Dhall, dhall-json, and jq
         run: |
           sudo apt-get update && sudo apt-get install -y jq

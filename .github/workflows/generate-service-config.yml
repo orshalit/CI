@@ -20,6 +20,11 @@ on:
 permissions:
   contents: read
 
+env:
+  # Dynamic repository configuration - can be overridden via repository variables/secrets
+  DEVOPS_REPO_NAME: ${{ vars.DEVOPS_REPO_NAME || 'projectdevops' }}
+  DEVOPS_REPO_OWNER: ${{ vars.DEVOPS_REPO_OWNER || 'orshalit' }}
+
 jobs:
   validate-dhall-services:
     name: Validate Dhall Service Definitions
@@ -35,6 +40,14 @@ jobs:
     steps:
       - name: Checkout CI repository
         uses: actions/checkout@v4
+
+      - name: Update Dhall imports with dynamic repository name
+        env:
+          DEVOPS_REPO_NAME: ${{ env.DEVOPS_REPO_NAME }}
+        run: |
+          echo "::notice::Using repository: $DEVOPS_REPO_NAME"
+          chmod +x scripts/update-dhall-repo-imports.sh
+          DEVOPS_REPO_NAME="$DEVOPS_REPO_NAME" ./scripts/update-dhall-repo-imports.sh
 
       - name: Cache Dhall binaries
         id: cache-dhall
