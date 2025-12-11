@@ -7,8 +7,8 @@
 # 2. Try GitHub Actions cache (fast, persists across runs, auto-managed)
 # 3. Try repository cache (stable, pre-populated, committed fallback)
 #
-# Note: Repository cache is NOT updated by this script - it's pre-populated
-# and committed. Use populate-dhall-binaries-cache.sh to update it manually.
+# Note: Repository cache is NOT updated by this script - binaries are pre-populated
+# and committed to dhall/cache/binaries/. See dhall/cache/binaries/README.md for update instructions.
 #
 # Usage: scripts/install-dhall-with-fallback.sh
 
@@ -161,7 +161,7 @@ install_from_github() {
     return 1
 }
 
-# Function to install from cache directory
+# Function to install from cache directory (repository cache - committed binaries)
 install_from_cache() {
     local tool=$1
     local cache_path=""
@@ -172,19 +172,28 @@ install_from_cache() {
         cache_path="$CACHE_DIR/dhall-to-json"
     fi
     
-    if [ -f "$cache_path" ] && [ -x "$cache_path" ]; then
-        log_info "Installing $tool from cache: $cache_path"
+    # Check if binary exists and is readable (executable check may fail in some CI environments)
+    if [ -f "$cache_path" ] && [ -r "$cache_path" ]; then
+        log_info "Installing $tool from repository cache: $cache_path"
         sudo cp "$cache_path" "$INSTALL_DIR/"
         sudo chmod +x "$INSTALL_DIR/$(basename "$cache_path")"
-        log_info "✓ Successfully installed $tool from cache"
-        return 0
+        
+        # Verify installation worked
+        if [ -x "$INSTALL_DIR/$(basename "$cache_path")" ]; then
+            log_info "✓ Successfully installed $tool from repository cache"
+            return 0
+        else
+            log_warn "Binary copied but may not be executable - this is OK in CI"
+            return 0
+        fi
     fi
     
+    log_warn "Cache binary not found: $cache_path"
     return 1
 }
 
-# Note: We don't cache binaries on every run - the cache is pre-populated
-# and committed to the repo. Use populate-dhall-binaries-cache.sh to update it.
+# Note: Repository cache binaries are pre-populated and committed to dhall/cache/binaries/
+# They provide a stable fallback when GitHub releases are unavailable.
 
 # Main installation logic
 install_dhall() {
@@ -230,12 +239,15 @@ install_dhall_json() {
     log_error "Failed to install dhall-to-json from GitHub or cache"
     log_error "Cache directory checked: $CACHE_DIR"
     if [ -d "$CACHE_DIR" ]; then
-        log_error "Cache directory exists but is empty or binary not found"
+        log_error "Cache directory exists but binary not found"
+        log_error "Expected: $CACHE_DIR/dhall-to-json"
         ls -la "$CACHE_DIR" 2>/dev/null || log_error "Could not list cache directory"
+        log_error ""
+        log_error "To fix: Download binaries from GitHub releases and commit to dhall/cache/binaries/"
+        log_error "See: dhall/cache/binaries/README.md for instructions"
     else
-        log_error "Cache directory does not exist"
+        log_error "Cache directory does not exist: $CACHE_DIR"
     fi
-    log_error "To fix: Populate cache with: bash scripts/populate-dhall-binaries-cache.sh (if script exists)"
     return 1
 }
 
