@@ -76,6 +76,7 @@ install_from_github() {
         fi
     elif [ "$tool" = "dhall-json" ]; then
         # Try to find the correct dhall-json asset
+        # Note: dhall-json has its own versioning (e.g., 1.7.11) but is released with dhall-haskell
         local api_response=$(curl -s "https://api.github.com/repos/dhall-lang/dhall-haskell/releases/tags/${version}" 2>/dev/null)
         
         if [ -z "$api_response" ] || [ "$api_response" = "null" ]; then
@@ -83,12 +84,14 @@ install_from_github() {
             return 1
         fi
         
-        local json_url=$(echo "$api_response" | jq -r '.assets[] | select(.name | contains("dhall-json") and contains("x86_64-linux")) | .browser_download_url' 2>/dev/null | head -1)
+        # Match dhall-json asset (case-insensitive for Linux/Linux)
+        # Asset format: dhall-json-1.7.11-x86_64-Linux.tar.bz2 (note: capital L in Linux)
+        local json_url=$(echo "$api_response" | jq -r '.assets[] | select(.name | test("dhall-json.*x86_64.*linux"; "i")) | .browser_download_url' 2>/dev/null | head -1)
         
         if [ -z "$json_url" ] || [ "$json_url" = "null" ] || [ "$json_url" = "" ]; then
             log_warn "Could not find dhall-json download URL in GitHub release"
             log_warn "Available assets:"
-            echo "$api_response" | jq -r '.assets[].name' 2>/dev/null | grep -i linux | head -5 || echo "  (could not parse)"
+            echo "$api_response" | jq -r '.assets[].name' 2>/dev/null | grep -i "dhall-json.*linux" | head -5 || echo "  (could not parse)"
             return 1
         fi
         
