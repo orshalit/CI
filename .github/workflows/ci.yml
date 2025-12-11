@@ -887,7 +887,8 @@ jobs:
           path: built-images.txt
           retention-days: 7
           if-no-files-found: ignore
-          merge-multiple: true  # Merge with other matrix jobs' artifacts
+          # Note: GitHub Actions automatically merges artifacts with the same name
+          # No need for merge-multiple parameter (not supported in v4)
       
       - name: Export image for testing
         if: github.event_name == 'pull_request'
