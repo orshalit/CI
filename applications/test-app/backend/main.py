@@ -238,7 +238,10 @@ def rate_limit():
 @rate_limit()
 async def hello(request: Request):
     """Simple hello endpoint (DEPLOY-TEST-1: Version info added)"""
-    return HelloResponse(message="hello from backend")
+    # DEPLOY-TEST-1: Added timestamp for deployment verification
+    import datetime
+    timestamp = datetime.datetime.utcnow().isoformat() + "Z"
+    return HelloResponse(message=f"hello from backend (deployed at {timestamp})")
 
 
 @app.get(

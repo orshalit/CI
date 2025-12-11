@@ -143,6 +143,7 @@ function App() {
 
         <div className="card">
           <h2>Hello Endpoint</h2>
+          <p className="deploy-info">DEPLOY-TEST-1: Version badge and enhanced hello endpoint</p>
           <button onClick={handleHello} disabled={isLoading}>
             {helloState.loading ? 'Loading...' : 'Call /api/hello'}
           </button>

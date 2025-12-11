@@ -56,6 +56,17 @@ h1 {
   font-family: 'Courier New', monospace;
 }
 
+.deploy-info {
+  font-size: 0.85em;
+  color: #667eea;
+  font-style: italic;
+  margin-bottom: 10px;
+  padding: 8px;
+  background: #f0f4ff;
+  border-radius: 4px;
+  border-left: 3px solid #667eea;
+}
+
 .card {
   margin-bottom: 25px;
   padding: 20px;
