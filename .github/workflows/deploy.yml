@@ -221,7 +221,7 @@ jobs:
           chmod +x scripts/install-dhall-with-fallback.sh
           scripts/install-dhall-with-fallback.sh
 
-      - name: Generate services.generated.json from Dhall (on-demand)
+      - name: Generate services.generated.json from Dhall (Terraform JSON format)
         id: generate_services_json
         if: |
           (steps.vars.outputs.action == 'plan' || steps.vars.outputs.action == 'apply') &&
@@ -229,24 +229,28 @@ jobs:
         run: |
           PLAN_DIR="DEVOPS/live/${{ steps.vars.outputs.environment }}/04-ecs-fargate"
           SERVICES_JSON="$PLAN_DIR/services.generated.json"
-          CI_DHALL_FILE="dhall/services.dhall"
+          SERVICES_TFVARS_JSON_DHALL="dhall/services.tfvarsJSON.dhall"
           
-          echo "::notice::Generating services.generated.json from Dhall definitions (on-demand)..."
+          echo "::notice::Generating services.generated.json from Dhall (Terraform JSON format)..."
           
-          # Check if Dhall file exists in CI repo
-          if [ ! -f "$CI_DHALL_FILE" ]; then
-            echo "::error::Dhall services file not found at $CI_DHALL_FILE"
-            echo "::error::Cannot generate services.generated.json without source Dhall definitions."
-            echo "::error::"
-            echo "::error::This file should exist in the CI repository at dhall/services.dhall"
+          # Check if Dhall converter exists
+          if [ ! -f "$SERVICES_TFVARS_JSON_DHALL" ]; then
+            echo "::error::Dhall JSON converter not found at $SERVICES_TFVARS_JSON_DHALL"
+            echo "::error::This file should exist in the CI repository"
             echo "::error::Ensure the CI repository has been checked out and contains Dhall service definitions."
             exit 1
           fi
           
-          # Generate JSON from Dhall (type-checked and validated automatically by dhall-to-json)
+          # Generate Terraform-compatible JSON (with "services" key)
+          # Uses dhall-to-json for native JSON output - no string templates!
           mkdir -p "$PLAN_DIR"
-          echo "::notice::Converting Dhall to JSON (this validates types automatically)..."
-          dhall-to-json --file "$CI_DHALL_FILE" > "$SERVICES_JSON"
+          echo "::notice::Converting Dhall to Terraform JSON format (validates types automatically)..."
+          dhall-to-json --file "$SERVICES_TFVARS_JSON_DHALL" > "$SERVICES_JSON" || {
+            echo "::error::Failed to generate Terraform JSON from Dhall"
+            echo "::error::Checking Dhall file..."
+            dhall type --file "$SERVICES_TFVARS_JSON_DHALL" || true
+            exit 1
+          }
           
           if [ ! -f "$SERVICES_JSON" ] || [ ! -s "$SERVICES_JSON" ]; then
             echo "::error::Failed to generate services.generated.json"
@@ -261,42 +265,10 @@ jobs:
             exit 1
           fi
           
-          echo "::notice::✓ Generated $SERVICES_JSON"
+          echo "::notice::✓ Generated $SERVICES_JSON (Terraform JSON format)"
           echo "::group::Generated services.generated.json (preview)"
-          cat "$SERVICES_JSON" | jq 'keys | length' | xargs -I {} echo "Services count: {}"
-          cat "$SERVICES_JSON" | jq 'keys' | head -20
-          echo "::endgroup::"
-          
-          # Generate Terraform tfvars directly from Dhall (native, type-safe)
-          SERVICES_TFVARS="$PLAN_DIR/services.generated.tfvars"
-          SERVICES_TFVARS_DHALL="dhall/services.tfvars.dhall"
-          
-          echo "::notice::Generating Terraform tfvars directly from Dhall (native, type-safe)..."
-          
-          if [ ! -f "$SERVICES_TFVARS_DHALL" ]; then
-            echo "::error::Dhall tfvars template not found at $SERVICES_TFVARS_DHALL"
-            exit 1
-          fi
-          
-          # Use dhall to evaluate Text expression and generate tfvars format directly
-          # Dhall expressions that evaluate to Text can be output directly with --plain flag
-          # This is the native Dhall way - no Python script needed!
-          dhall --file "$SERVICES_TFVARS_DHALL" --plain > "$SERVICES_TFVARS" || {
-            echo "::error::Failed to generate tfvars from Dhall"
-            echo "::error::Dhall expression should evaluate to Text"
-            echo "::error::Checking Dhall file..."
-            dhall type --file "$SERVICES_TFVARS_DHALL" || true
-            exit 1
-          }
-          
-          if [ ! -f "$SERVICES_TFVARS" ] || [ ! -s "$SERVICES_TFVARS" ]; then
-            echo "::error::Failed to generate services.generated.tfvars from Dhall"
-            exit 1
-          fi
-          
-          echo "::notice::✓ Generated $SERVICES_TFVARS (directly from Dhall)"
-          echo "::group::Generated services.generated.tfvars (preview)"
-          head -30 "$SERVICES_TFVARS"
+          cat "$SERVICES_JSON" | jq '.services | keys | length' | xargs -I {} echo "Services count: {}"
+          cat "$SERVICES_JSON" | jq '.services | keys' | head -20
           echo "::endgroup::"
           echo "services_json_generated=true" >> $GITHUB_OUTPUT
 
@@ -540,13 +512,13 @@ jobs:
             echo "tfvars_exists=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Check for services.generated.tfvars
-        id: check_services_tfvars
+      - name: Check for services.generated.json
+        id: check_services_json
         run: |
-          if [ -f "DEVOPS/live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}/services.generated.tfvars" ]; then
-            echo "services_tfvars_exists=true" >> $GITHUB_OUTPUT
+          if [ -f "DEVOPS/live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}/services.generated.json" ]; then
+            echo "services_json_exists=true" >> $GITHUB_OUTPUT
           else
-            echo "services_tfvars_exists=false" >> $GITHUB_OUTPUT
+            echo "services_json_exists=false" >> $GITHUB_OUTPUT
           fi
 
       - name: Filter services by application and built images (modular & resilient)
@@ -606,17 +578,18 @@ jobs:
           fi
           
           # Filter services.generated.json by application first
+          # Note: services.generated.json has structure {services: {...}}
           FILTERED_JSON=$(mktemp)
           if [ "$APPLICATION" != "all" ] && [ -n "$APPLICATION" ]; then
             echo "::notice::Filtering by application: $APPLICATION"
-            jq --arg app "$APPLICATION" 'to_entries | map(select(.value.application == $app)) | from_entries' \
+            jq --arg app "$APPLICATION" '.services | to_entries | map(select(.value.application == $app)) | from_entries' \
               "$SERVICES_JSON" > "$FILTERED_JSON" || {
               echo "::error::Failed to filter services by application"
               exit 1
             }
           else
             echo "::notice::Application filter: all (deploying all applications)"
-            cp "$SERVICES_JSON" "$FILTERED_JSON"
+            jq '.services' "$SERVICES_JSON" > "$FILTERED_JSON"
           fi
           
           # Now filter by built images (modular: only services whose images exist)
@@ -635,9 +608,9 @@ jobs:
             FILTER_PARTS=""
             for IMG in $BUILT_IMAGES; do
               if [ -z "$FILTER_PARTS" ]; then
-                FILTER_PARTS="(.value.image_repo | split(\"/\") | .[-1] == \"$IMG\")"
+                FILTER_PARTS="(.value.container_image | split(\"/\") | .[-1] == \"$IMG\")"
               else
-                FILTER_PARTS="$FILTER_PARTS or (.value.image_repo | split(\"/\") | .[-1] == \"$IMG\")"
+                FILTER_PARTS="$FILTER_PARTS or (.value.container_image | split(\"/\") | .[-1] == \"$IMG\")"
               fi
             done
             
@@ -653,8 +626,8 @@ jobs:
               echo "::error::No services match built images!"
               echo "::error::Built images:"
               echo "$BUILT_IMAGES" | sed 's/^/  - /'
-              echo "::error::Available services (image_repo):"
-              jq -r '.[].image_repo' "$FILTERED_JSON" | sed 's/^/  - /' || echo "  (none)"
+              echo "::error::Available services (container_image):"
+              jq -r '.[].container_image' "$FILTERED_JSON" | sed 's/^/  - /' || echo "  (none)"
               exit 1
             fi
             
@@ -676,128 +649,40 @@ jobs:
             fi
           fi
           
-          # Get filtered service keys
-          FILTERED_KEYS=$(jq -r 'keys[]' "$FILTERED_JSON" 2>/dev/null || echo "")
+          # Convert filtered JSON to Terraform format (with "services" key)
+          FILTERED_FILE="$PLAN_DIR/services.generated.json.filtered"
+          FILTERED_COUNT=$(jq 'length' "$FILTERED_JSON" 2>/dev/null || echo "0")
           
-          if [ -z "$FILTERED_KEYS" ]; then
+          if [ "$FILTERED_COUNT" -eq 0 ]; then
             echo "::error::No services to deploy after filtering"
             exit 1
           fi
           
-          # Filter tfvars file to only include services in filtered keys
-          BASE_TFVARS="$PLAN_DIR/services.generated.tfvars"
-          if [ ! -f "$BASE_TFVARS" ]; then
-            echo "::error::Base tfvars file not found: $BASE_TFVARS"
+          # Wrap filtered services in "services" key for Terraform
+          jq '{services: .}' "$FILTERED_JSON" > "$FILTERED_FILE" || {
+            echo "::error::Failed to convert filtered JSON to Terraform format"
+            exit 1
+          }
+          
+          FILTERED_KEYS=$(jq -r '.services | keys[]' "$FILTERED_FILE" 2>/dev/null || echo "")
+          
+          # Validate the filtered file
+          if ! jq empty "$FILTERED_FILE" 2>/dev/null; then
+            echo "::error::Filtered JSON file is invalid"
+            cat "$FILTERED_FILE"
             exit 1
           fi
           
-          FILTERED_FILE="$PLAN_DIR/services.generated.tfvars.filtered"
-          
-          # Extract service blocks for filtered keys using Python-like approach but in bash
-          # Use awk to extract service blocks
-          FILTERED_TFVARS=$(mktemp)
-          echo "# Generated from Dhall service definitions (filtered by built images - modular deployment)" > "$FILTERED_TFVARS"
-          echo "# DO NOT EDIT MANUALLY" >> "$FILTERED_TFVARS"
-          echo "" >> "$FILTERED_TFVARS"
-          echo "services = {" >> "$FILTERED_TFVARS"
-          
-          for KEY in $FILTERED_KEYS; do
-            # Extract service block matching this key
-            awk -v key="$KEY" '
-              BEGIN { in_block=0; brace_count=0 }
-              /^[[:space:]]*"'"$KEY"'"\s*=\s*\{/ {
-                print
-                in_block=1
-                brace_count=1
-                next
-              }
-              in_block {
-                print
-                if (/\{/) brace_count++
-                if (/\}/) brace_count--
-                if (brace_count == 0) {
-                  in_block=0
-                  exit
-                }
-              }
-            ' "$BASE_TFVARS" >> "$FILTERED_TFVARS" || {
-              echo "::warning::Could not extract service block for: $KEY"
-            }
-          done
-          
-          echo "}" >> "$FILTERED_TFVARS"
-          
-          FILTERED_COUNT=$(grep -cE '^\s+"[^"]+::[^"]+"\s*=\s*\{' "$FILTERED_TFVARS" 2>/dev/null || echo "0")
-          
-          if [ "$FILTERED_COUNT" -eq 0 ]; then
-            echo "::error::No services extracted to filtered tfvars file"
-            exit 1
-          fi
-          
-          mv "$FILTERED_TFVARS" "$FILTERED_FILE"
-          
-          echo "filtered_services_file=services.generated.tfvars.filtered" >> $GITHUB_OUTPUT
+          echo "filtered_services_file=services.generated.json.filtered" >> $GITHUB_OUTPUT
           echo "services_count=$FILTERED_COUNT" >> $GITHUB_OUTPUT
           
           echo "::group::Services to deploy (modular)"
           echo "$FILTERED_KEYS" | sed 's/^/  - /'
           echo "::endgroup::"
           
-          # Generate filtered tfvars directly from Dhall (native, type-safe)
-          FILTERED_FILE="$PLAN_DIR/services.generated.tfvars.filtered"
-          FILTERED_DHALL="dhall/services.tfvars.filtered.dhall"
-          
-          echo "::notice::Filtering services for application: $APPLICATION (using native Dhall)"
-          
-          if [ ! -f "$FILTERED_DHALL" ]; then
-            echo "::error::Dhall filtered template not found at $FILTERED_DHALL"
-            exit 1
-          fi
-          
-          # Generate filtered tfvars with application as Dhall argument (native, type-safe)
-          dhall --file "$FILTERED_DHALL" --argstr application "$APPLICATION" --plain > "$FILTERED_FILE" || {
-            echo "::error::Failed to generate filtered tfvars from Dhall"
-            echo "::error::Check that application '$APPLICATION' has services defined in Dhall"
-            exit 1
-          }
-          
-          if [ ! -f "$FILTERED_FILE" ] || [ ! -s "$FILTERED_FILE" ]; then
-            echo "::error::Filtered services file is empty or invalid"
-            exit 1
-          fi
-          
-          # Validate filtered file has services
-          SERVICE_COUNT=$(grep -cE '^\s+"[^"]+::[^"]+"\s*=\s*\{' "$FILTERED_FILE" || echo "0")
-          
-          if [ "$SERVICE_COUNT" -eq 0 ]; then
-            echo "::error::No services found for application: $APPLICATION"
-            echo "::error::Available applications in Dhall:"
-            # Extract applications from services.dhall (from JSON we generated earlier)
-            SERVICES_JSON="$PLAN_DIR/services.generated.json"
-            if [ -f "$SERVICES_JSON" ]; then
-              jq -r '.[].application' "$SERVICES_JSON" | sort -u | sed 's/^/  - /' || echo "  (could not parse)"
-            fi
-            exit 1
-          fi
-          
-          echo "::notice::✓ Generated filtered tfvars with $SERVICE_COUNT service(s) for application: $APPLICATION"
+          echo "::notice::✓ Created filtered services JSON with $FILTERED_COUNT service(s)"
           echo "::group::Filtered services preview"
-          head -40 "$FILTERED_FILE"
-          echo "::endgroup::"
-          
-          echo "filtered_services_file=services.generated.tfvars.filtered" >> $GITHUB_OUTPUT
-          echo "services_count=$SERVICE_COUNT" >> $GITHUB_OUTPUT
-          echo "::notice::✓ Created filtered services file with $EXPECTED_COUNT service(s) for application: $APPLICATION"
-          echo "::notice::✓ Validation passed: All services have correct application field"
-          
-          # Show summary
-          echo ""
-          echo "::group::Filtered Services Summary"
-          echo "Application: $APPLICATION"
-          echo "Services to deploy:"
-          for SERVICE_NAME in $SERVICE_NAMES; do
-            echo "  - $SERVICE_NAME"
-          done
+          cat "$FILTERED_FILE" | jq '.services | keys' | head -20
           echo "::endgroup::"
 
       - name: Check if services is empty
@@ -806,23 +691,20 @@ jobs:
         run: |
           PLAN_DIR="DEVOPS/live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}"
           
-          # Check if services.generated.tfvars exists and has non-empty services
-          if [ -f "$PLAN_DIR/services.generated.tfvars" ]; then
-            # Check if services map is empty (services = {})
-            # An empty services map will have "services = {}" on a single line or just "{}" after "services ="
-            # Service keys may be quoted (e.g., "legacy::api") or unquoted (e.g., legacy::api)
-            if grep -qE "^\s*services\s*=\s*\{\}\s*$" "$PLAN_DIR/services.generated.tfvars" || \
-               (grep -qE "^\s*services\s*=\s*\{$" "$PLAN_DIR/services.generated.tfvars" && \
-                ! grep -A 10 "services = {" "$PLAN_DIR/services.generated.tfvars" | grep -qE "^\s+(\"[^\"]+::[^\"]+\"|[a-zA-Z0-9_-]+::[a-zA-Z0-9_-]+)\s*=\s*\{"); then
+          # Check if services.generated.json exists and has non-empty services
+          if [ -f "$PLAN_DIR/services.generated.json" ]; then
+            # Check if services map is empty using jq
+            SERVICE_COUNT=$(jq '.services | length' "$PLAN_DIR/services.generated.json" 2>/dev/null || echo "0")
+            if [ "$SERVICE_COUNT" -eq 0 ]; then
               echo "services_empty=true" >> $GITHUB_OUTPUT
-              echo "::notice::Services map is empty (services = {}), will exclude from var files to avoid Terraform crash"
+              echo "::notice::Services map is empty, will exclude from var files to avoid Terraform crash"
             else
               echo "services_empty=false" >> $GITHUB_OUTPUT
-              echo "::notice::Services map has content"
+              echo "::notice::Services map has $SERVICE_COUNT service(s)"
             fi
           else
             echo "services_empty=true" >> $GITHUB_OUTPUT
-            echo "::notice::services.generated.tfvars not found"
+            echo "::notice::services.generated.json not found"
           fi
 
       - name: Terraform Validate
@@ -955,7 +837,7 @@ jobs:
             exit 0
           fi
           
-          # Use the same var files logic as plan (which excludes empty services.generated.tfvars)
+          # Use the same var files logic as plan (which excludes empty services.generated.json)
           # This prevents Terraform crash when services = {} (empty services map)
           VAR_FILES="${{ steps.build_var_files.outputs.var_files }}"
           
@@ -1059,9 +941,9 @@ jobs:
           # Get services from state
           STATE_SERVICES=$(terraform state list -no-color 2>/dev/null | grep "aws_ecs_service.services\[" | sed 's/aws_ecs_service.services\["\(.*\)"\]/\1/' || echo "")
           
-          # Get services from config (parse services.generated.tfvars)
-          if [ -f "$PLAN_DIR/services.generated.tfvars" ]; then
-            CONFIG_SERVICES=$(grep -E '^\s+"[^"]+::[^"]+"\s*=\s*\{' "$PLAN_DIR/services.generated.tfvars" | sed 's/^\s*"\([^"]*\)".*/\1/' || echo "")
+          # Get services from config (parse services.generated.json)
+          if [ -f "$PLAN_DIR/services.generated.json" ]; then
+            CONFIG_SERVICES=$(jq -r '.services | keys[]' "$PLAN_DIR/services.generated.json" 2>/dev/null || echo "")
           else
             CONFIG_SERVICES=""
           fi
@@ -1135,13 +1017,12 @@ jobs:
           echo "::notice::📊 State Validation Summary:"
           
           # Get expected service keys
-          if [ ! -f "$PLAN_DIR/services.generated.tfvars" ]; then
-            echo "::notice::No services.generated.tfvars found"
+          if [ ! -f "$PLAN_DIR/services.generated.json" ]; then
+            echo "::notice::No services.generated.json found"
             exit 0
           fi
           
-          EXPECTED_KEYS=$(grep -E '^\s+"[^"]+::[^"]+"\s*=\s*\{' "$PLAN_DIR/services.generated.tfvars" | \
-            sed 's/^\s*"\([^"]*\)".*/\1/' || echo "")
+          EXPECTED_KEYS=$(jq -r '.services | keys[]' "$PLAN_DIR/services.generated.json" 2>/dev/null || echo "")
           
           if [ -z "$EXPECTED_KEYS" ]; then
             echo "::notice::No service keys found in config"
@@ -1708,12 +1589,12 @@ jobs:
           if [ "${{ steps.check_tfvars.outputs.tfvars_exists }}" == "true" ]; then
             VAR_FILES="terraform.tfvars"
           fi
-          # For destroy, include services.generated.tfvars even if empty (needed for proper cleanup)
-          if [ "${{ steps.check_services_tfvars.outputs.services_tfvars_exists }}" == "true" ]; then
+          # For destroy, include services.generated.json even if empty (needed for proper cleanup)
+          if [ "${{ steps.check_services_json.outputs.services_json_exists }}" == "true" ]; then
             if [ -n "$VAR_FILES" ]; then
-              VAR_FILES="$VAR_FILES services.generated.tfvars"
+              VAR_FILES="$VAR_FILES services.generated.json"
             else
-              VAR_FILES="services.generated.tfvars"
+              VAR_FILES="services.generated.json"
             fi
           fi
           echo "var_files=$VAR_FILES" >> $GITHUB_OUTPUT

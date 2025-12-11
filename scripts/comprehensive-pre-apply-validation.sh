@@ -29,11 +29,12 @@ VAR_FILES=""
 if [ -f "$PLAN_DIR/terraform.tfvars" ]; then
   VAR_FILES="terraform.tfvars"
 fi
-if [ -f "$PLAN_DIR/services.generated.tfvars" ]; then
+# Check for JSON format (new design)
+if [ -f "$PLAN_DIR/services.generated.json" ]; then
   if [ -n "$VAR_FILES" ]; then
-    VAR_FILES="$VAR_FILES services.generated.tfvars"
+    VAR_FILES="$VAR_FILES services.generated.json"
   else
-    VAR_FILES="services.generated.tfvars"
+    VAR_FILES="services.generated.json"
   fi
 fi
 
@@ -134,16 +135,16 @@ fi
 # ============================================================================
 echo "::notice::Checking ECS service desired count drift..."
 
-if [ -f "$PLAN_DIR/services.generated.tfvars" ]; then
+# Check for services file (JSON format)
+if [ -f "$PLAN_DIR/services.generated.json" ]; then
   # Get cluster name
   CLUSTER_NAME=$(terraform -chdir="$PLAN_DIR" output -raw ecs_cluster_name 2>/dev/null || \
     terraform -chdir="$PLAN_DIR" state show 'module.ecs_fargate.aws_ecs_cluster.this' 2>/dev/null | \
     grep -E '^\s+name\s+=' | awk '{print $3}' | tr -d '"' || echo "")
   
   if [ -n "$CLUSTER_NAME" ]; then
-    # Get expected service keys
-    EXPECTED_KEYS=$(grep -E '^\s+"[^"]+::[^"]+"\s*=\s*\{' "$PLAN_DIR/services.generated.tfvars" | \
-      sed 's/^\s*"\([^"]*\)".*/\1/' || echo "")
+    # Get expected service keys from JSON
+    EXPECTED_KEYS=$(jq -r '.services | keys[]' "$PLAN_DIR/services.generated.json" 2>/dev/null || echo "")
     
     # Get desired counts from plan (more accurate than parsing tfvars)
     PLAN_OUTPUT=$(terraform -chdir="$PLAN_DIR" show -no-color tfplan 2>&1 || echo "")
@@ -195,9 +196,10 @@ fi
 # ============================================================================
 echo "::notice::Checking task definition revision accumulation..."
 
-if [ -f "$PLAN_DIR/services.generated.tfvars" ]; then
-  EXPECTED_KEYS=$(grep -E '^\s+"[^"]+::[^"]+"\s*=\s*\{' "$PLAN_DIR/services.generated.tfvars" | \
-    sed 's/^\s*"\([^"]*\)".*/\1/' || echo "")
+# Check for services file (JSON format)
+if [ -f "$PLAN_DIR/services.generated.json" ]; then
+  # Get expected service keys from JSON
+  EXPECTED_KEYS=$(jq -r '.services | keys[]' "$PLAN_DIR/services.generated.json" 2>/dev/null || echo "")
   
   for tf_key in $EXPECTED_KEYS; do
     APP=$(echo "$tf_key" | sed 's/::.*//')
@@ -242,9 +244,9 @@ fi
 echo "::notice::Checking resource naming conflicts..."
 
 # Check for duplicate service names (same name after sanitization)
-if [ -f "$PLAN_DIR/services.generated.tfvars" ]; then
-  EXPECTED_KEYS=$(grep -E '^\s+"[^"]+::[^"]+"\s*=\s*\{' "$PLAN_DIR/services.generated.tfvars" | \
-    sed 's/^\s*"\([^"]*\)".*/\1/' || echo "")
+if [ -f "$PLAN_DIR/services.generated.json" ]; then
+  # Get expected service keys from JSON
+  EXPECTED_KEYS=$(jq -r '.services | keys[]' "$PLAN_DIR/services.generated.json" 2>/dev/null || echo "")
   
   # Extract sanitized names (part after ::)
   SANITIZED_NAMES=""

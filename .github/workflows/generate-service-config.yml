@@ -30,7 +30,7 @@ jobs:
     # - Service definitions match application structure
     # - No syntax or type errors in Dhall files
     #
-    # Note: services.generated.json/tfvars are generated on-demand during deployment,
+    # Note: services.generated.json is generated on-demand during deployment (JSON format),
     # but this validation catches issues early in the development cycle.
     steps:
       - name: Checkout CI repository
@@ -84,7 +84,9 @@ jobs:
         run: |
           echo "::notice::Validating service definitions match application structure..."
           
-          # Extract all image_repo values from generated JSON
+          # Extract all container_image values from generated JSON (Terraform format)
+          # Note: The raw services.dhall has image_repo, but Terraform format uses container_image
+          # For validation, we check the raw Dhall format which has image_repo
           IMAGE_REPOS=$(jq -r '.[].image_repo' /tmp/services.generated.json | sort -u)
           
           if [ -z "$IMAGE_REPOS" ]; then

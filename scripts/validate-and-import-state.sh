@@ -30,11 +30,12 @@ VAR_FILES=""
 if [ -f "$PLAN_DIR/terraform.tfvars" ]; then
   VAR_FILES="terraform.tfvars"
 fi
-if [ -f "$PLAN_DIR/services.generated.tfvars" ]; then
+# Check for JSON format (new design)
+if [ -f "$PLAN_DIR/services.generated.json" ]; then
   if [ -n "$VAR_FILES" ]; then
-    VAR_FILES="$VAR_FILES services.generated.tfvars"
+    VAR_FILES="$VAR_FILES services.generated.json"
   else
-    VAR_FILES="services.generated.tfvars"
+    VAR_FILES="services.generated.json"
   fi
 fi
 
@@ -62,12 +63,11 @@ MISSING_COUNT=0
 ERRORS=0
 
 # Validate Service Discovery Services
-if [ -n "$NAMESPACE_ID" ] && [ -f "$PLAN_DIR/services.generated.tfvars" ]; then
+if [ -n "$NAMESPACE_ID" ] && [ -f "$PLAN_DIR/services.generated.json" ]; then
   echo "::notice::Validating Service Discovery services..."
   
-  # Get expected service keys
-  EXPECTED_KEYS=$(grep -E '^\s+"[^"]+::[^"]+"\s*=\s*\{' "$PLAN_DIR/services.generated.tfvars" | \
-    sed 's/^\s*"\([^"]*\)".*/\1/' || echo "")
+  # Get expected service keys from JSON
+  EXPECTED_KEYS=$(jq -r '.services | keys[]' "$PLAN_DIR/services.generated.json" 2>/dev/null || echo "")
   
   if [ -n "$EXPECTED_KEYS" ]; then
     # Get services in state
@@ -182,7 +182,7 @@ if [ -n "$NAMESPACE_ID" ] && [ -f "$PLAN_DIR/services.generated.tfvars" ]; then
 fi
 
 # Validate ECS Services (check if they exist in AWS but not in state)
-if [ -f "$PLAN_DIR/services.generated.tfvars" ]; then
+if [ -f "$PLAN_DIR/services.generated.json" ]; then
   echo "::notice::Validating ECS services..."
   
   # Get cluster name from state
@@ -191,9 +191,8 @@ if [ -f "$PLAN_DIR/services.generated.tfvars" ]; then
     grep -E '^\s+name\s+=' | awk '{print $3}' | tr -d '"' || echo "")
   
   if [ -n "$CLUSTER_NAME" ]; then
-    # Get expected service keys
-    EXPECTED_KEYS=$(grep -E '^\s+"[^"]+::[^"]+"\s*=\s*\{' "$PLAN_DIR/services.generated.tfvars" | \
-      sed 's/^\s*"\([^"]*\)".*/\1/' || echo "")
+    # Get expected service keys from JSON
+    EXPECTED_KEYS=$(jq -r '.services | keys[]' "$PLAN_DIR/services.generated.json" 2>/dev/null || echo "")
     
     # Get ECS services in state
     STATE_ECS=$(terraform -chdir="$PLAN_DIR" state list 2>/dev/null | \

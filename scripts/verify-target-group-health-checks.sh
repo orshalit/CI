@@ -158,7 +158,12 @@ compare_health_check_paths() {
         echo ""
         echo "To fix this, run:"
         echo "  cd $tf_dir"
-        echo "  terraform refresh -var-file=terraform.tfvars -var-file=services.generated.tfvars"
+        # Check for JSON format
+        if [ -f "services.generated.json" ]; then
+          echo "  terraform refresh -var-file=terraform.tfvars -var-file=services.generated.json"
+        else
+          echo "  terraform refresh -var-file=terraform.tfvars"
+        fi
         return 1
     else
         print_success "No state drift detected. Terraform state matches AWS."
