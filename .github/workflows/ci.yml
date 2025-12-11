@@ -1229,10 +1229,30 @@ jobs:
           if [ -n "$BACKEND_SERVICES" ]; then
             # Get first backend service (space-separated format)
             FIRST_BACKEND=$(echo "$BACKEND_SERVICES" | awk '{print $1}')
-            BACKEND_PORT=$(docker compose $COMPOSE_FILES config | grep -A 30 "^  ${FIRST_BACKEND}:" | grep -E "^\s+-.*:8000" | head -1 | sed -E 's/.*:([0-9]+):8000/\1/' || echo "8000")
+            
+            # Extract port - handle both variable expansion and direct port formats
+            BACKEND_PORT=$(docker compose $COMPOSE_FILES config 2>/dev/null | \
+              grep -A 30 "^  ${FIRST_BACKEND}:" | \
+              grep -E "^\s+-\s+.*:8000" | \
+              head -1 | \
+              sed -E 's/.*:([0-9]+):8000/\1/' || echo "8000")
+            
+            # Fallback: if port extraction failed, try alternative pattern
+            if [ -z "$BACKEND_PORT" ] || [ "$BACKEND_PORT" = "8000" ]; then
+              # Try to get port from actual running container
+              BACKEND_PORT=$(docker compose $COMPOSE_FILES ps --format json 2>/dev/null | \
+                jq -r ".[] | select(.Service == \"$FIRST_BACKEND\") | .Publishers[0].PublishedPort // empty" 2>/dev/null || echo "")
+              if [ -z "$BACKEND_PORT" ]; then
+                BACKEND_PORT="8000"  # Default fallback
+                echo "::warning::Could not extract backend port, using default: $BACKEND_PORT"
+              else
+                echo "::notice::Extracted backend port from running container: $BACKEND_PORT"
+              fi
+            fi
+            
             BACKEND_URL="http://localhost:${BACKEND_PORT}"
             
-            echo "=== Verify Backend Version (${FIRST_BACKEND}) ==="
+            echo "=== Verify Backend Version (${FIRST_BACKEND} on port ${BACKEND_PORT}) ==="
             response=$(curl -s "${BACKEND_URL}/version")
             echo "$response" | jq .
             echo "$response" | jq -e '.version == "${{ needs.prepare-build.outputs.version }}"'
@@ -1242,10 +1262,30 @@ jobs:
           if [ -n "$FRONTEND_SERVICES" ]; then
             # Get first frontend service (space-separated format)
             FIRST_FRONTEND=$(echo "$FRONTEND_SERVICES" | awk '{print $1}')
-            FRONTEND_PORT=$(docker compose $COMPOSE_FILES config | grep -A 30 "^  ${FIRST_FRONTEND}:" | grep -E "^\s+-.*:3000" | head -1 | sed -E 's/.*:([0-9]+):3000/\1/' || echo "3000")
+            
+            # Extract port - handle both variable expansion and direct port formats
+            FRONTEND_PORT=$(docker compose $COMPOSE_FILES config 2>/dev/null | \
+              grep -A 30 "^  ${FIRST_FRONTEND}:" | \
+              grep -E "^\s+-\s+.*:3000" | \
+              head -1 | \
+              sed -E 's/.*:([0-9]+):3000/\1/' || echo "3000")
+            
+            # Fallback: if port extraction failed, try alternative pattern
+            if [ -z "$FRONTEND_PORT" ] || [ "$FRONTEND_PORT" = "3000" ]; then
+              # Try to get port from actual running container
+              FRONTEND_PORT=$(docker compose $COMPOSE_FILES ps --format json 2>/dev/null | \
+                jq -r ".[] | select(.Service == \"$FIRST_FRONTEND\") | .Publishers[0].PublishedPort // empty" 2>/dev/null || echo "")
+              if [ -z "$FRONTEND_PORT" ]; then
+                FRONTEND_PORT="3000"  # Default fallback
+                echo "::warning::Could not extract frontend port, using default: $FRONTEND_PORT"
+              else
+                echo "::notice::Extracted frontend port from running container: $FRONTEND_PORT"
+              fi
+            fi
+            
             FRONTEND_URL="http://localhost:${FRONTEND_PORT}"
             
-            echo "=== Verify Frontend Version (${FIRST_FRONTEND}) ==="
+            echo "=== Verify Frontend Version (${FIRST_FRONTEND} on port ${FRONTEND_PORT}) ==="
             response=$(curl -s "${FRONTEND_URL}/version.json")
             echo "$response" | jq .
             echo "$response" | jq -e '.version == "${{ needs.prepare-build.outputs.version }}"'
