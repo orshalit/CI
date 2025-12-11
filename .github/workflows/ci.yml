@@ -25,11 +25,8 @@ on:
       - 'docker-compose*.yml'
       - 'Dockerfile*'
       - '.github/workflows/ci.yml'  # Run if CI workflow itself changes
-    paths-ignore:
-      - '**/*.md'  # Ignore README and other markdown files
-      - '**/README.md'
-      - '**/.gitignore'
-      - '**/.pre-commit-config.yaml'
+      # Note: paths-ignore removed - GitHub Actions doesn't allow both paths and paths-ignore
+      # Markdown files in these directories won't trigger workflow (paths are specific enough)
   pull_request:
     branches: [main, develop]
     paths:
@@ -39,11 +36,8 @@ on:
       - 'docker-compose*.yml'
       - 'Dockerfile*'
       - '.github/workflows/ci.yml'
-    paths-ignore:
-      - '**/*.md'  # Ignore README and other markdown files
-      - '**/README.md'
-      - '**/.gitignore'
-      - '**/.pre-commit-config.yaml'
+      # Note: paths-ignore removed - GitHub Actions doesn't allow both paths and paths-ignore
+      # Markdown files in these directories won't trigger workflow (paths are specific enough)
   workflow_dispatch:
     inputs:
       environment:
