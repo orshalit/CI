@@ -989,8 +989,17 @@ jobs:
           echo "::endgroup::"
           
           # Filter backend/frontend services (ensure we filter before converting to spaces)
-          BACKEND_SERVICES_RAW=$(echo "$ALL_SERVICES_RAW" | grep -E "-backend$" || echo "")
-          FRONTEND_SERVICES_RAW=$(echo "$ALL_SERVICES_RAW" | grep -E "-frontend$" || echo "")
+          # Use -- to prevent grep from interpreting patterns starting with - as options
+          BACKEND_SERVICES_RAW=$(echo "$ALL_SERVICES_RAW" | grep -E -- "-backend$" || true)
+          FRONTEND_SERVICES_RAW=$(echo "$ALL_SERVICES_RAW" | grep -E -- "-frontend$" || true)
+          
+          # Ensure empty strings if no matches found
+          if [ -z "$BACKEND_SERVICES_RAW" ]; then
+            BACKEND_SERVICES_RAW=""
+          fi
+          if [ -z "$FRONTEND_SERVICES_RAW" ]; then
+            FRONTEND_SERVICES_RAW=""
+          fi
           
           BACKEND_SERVICES=$(echo "$BACKEND_SERVICES_RAW" | tr '\n' ' ' | sed 's/ $//' || echo "")
           FRONTEND_SERVICES=$(echo "$FRONTEND_SERVICES_RAW" | tr '\n' ' ' | sed 's/ $//' || echo "")
