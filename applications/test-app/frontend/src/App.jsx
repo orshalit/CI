@@ -115,6 +115,7 @@ function App() {
     <div className="app">
       <div className="container">
         <h1>Full-Stack Application</h1>
+        {/* DEPLOY-TEST-1: Version badge added for deployment verification */}
         
         {/* Version Badge - DEPLOY-TEST-1 */}
         <div className="version-badge">

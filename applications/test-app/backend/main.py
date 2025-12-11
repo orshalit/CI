@@ -237,7 +237,7 @@ def rate_limit():
 )
 @rate_limit()
 async def hello(request: Request):
-    """Simple hello endpoint"""
+    """Simple hello endpoint (DEPLOY-TEST-1: Version info added)"""
     return HelloResponse(message="hello from backend")
 
 
