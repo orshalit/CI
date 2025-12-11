@@ -95,28 +95,55 @@ jobs:
           path: .
         continue-on-error: true
 
-      - name: Verify build version artifact exists
+      - name: Check if images were built (skip deployment if not)
         if: |
           github.event_name == 'workflow_run' &&
           github.event.workflow_run.conclusion == 'success'
+        id: check_images_built
         run: |
           CI_WORKFLOW_ID="${{ github.event.workflow_run.id }}"
           
-          # Verify build-version.txt exists (proves images were built)
+          # Check if build-version.txt exists (proves images were built)
           if [ ! -f "build-version.txt" ]; then
-            echo "::error::build-version.txt artifact not found from CI workflow"
-            echo "::error::This means no images were built. Deployment cannot proceed."
-            echo "::error::CI workflow run: https://github.com/${{ github.repository }}/actions/runs/$CI_WORKFLOW_ID"
-            exit 1
+            echo "::notice::build-version.txt artifact not found from CI workflow"
+            echo "::notice::This means no images were built (likely only workflow/config files changed)"
+            echo "::notice::Skipping deployment - no ECS resources to deploy"
+            echo "::notice::CI workflow run: https://github.com/${{ github.repository }}/actions/runs/$CI_WORKFLOW_ID"
+            echo "images_built=false" >> $GITHUB_OUTPUT
+            exit 0  # Exit successfully - this is expected, not an error
+          fi
+          
+          # Also check if built-images.txt has any actual images
+          if [ -f "built-images.txt" ]; then
+            IMAGE_COUNT=$(grep -v '^#' built-images.txt | grep -v '^$' | wc -l | tr -d ' ')
+            if [ "$IMAGE_COUNT" -eq 0 ]; then
+              echo "::notice::built-images.txt is empty - no images were built"
+              echo "::notice::Skipping deployment - no ECS resources to deploy"
+              echo "images_built=false" >> $GITHUB_OUTPUT
+              exit 0  # Exit successfully - this is expected
+            fi
+          else
+            # built-images.txt missing - assume no images built
+            echo "::notice::built-images.txt not found - assuming no images were built"
+            echo "::notice::Skipping deployment - no ECS resources to deploy"
+            echo "images_built=false" >> $GITHUB_OUTPUT
+            exit 0
           fi
           
           BUILD_VERSION=$(cat build-version.txt)
           echo "::notice::✓ Build version artifact found: $BUILD_VERSION"
           echo "::notice::✓ Images were built successfully in CI workflow"
+          echo "images_built=true" >> $GITHUB_OUTPUT
 
       - name: Set up dynamic variables
+        if: |
+          github.event_name == 'workflow_dispatch' ||
+          (github.event_name == 'workflow_run' && steps.check_images_built.outputs.images_built == 'true')
         id: vars
         run: |
+          # This step only runs if:
+          # - Manual trigger (workflow_dispatch), OR
+          # - Automatic trigger (workflow_run) AND images were built
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "::notice::Manual workflow dispatch trigger"
             echo "environment=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
@@ -197,6 +224,7 @@ jobs:
       - name: Generate services.generated.json from Dhall (on-demand)
         id: generate_services_json
         if: |
+          steps.vars.outputs.images_built != 'false' &&
           (steps.vars.outputs.action == 'plan' || steps.vars.outputs.action == 'apply') &&
           steps.vars.outputs.module_path == '04-ecs-fargate'
         run: |
