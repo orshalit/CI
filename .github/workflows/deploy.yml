@@ -57,7 +57,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          path: CI-REPO
 
       - name: Download build version from CI workflow
         if: github.event_name == 'workflow_run'
@@ -184,7 +183,7 @@ jobs:
         run: |
           PLAN_DIR="DEVOPS/live/${{ steps.vars.outputs.environment }}/04-ecs-fargate"
           SERVICES_JSON="$PLAN_DIR/services.generated.json"
-          CI_DHALL_FILE="CI-REPO/dhall/services.dhall"
+          CI_DHALL_FILE="dhall/services.dhall"
           
           echo "::notice::Generating services.generated.json from Dhall definitions (on-demand)..."
           
@@ -224,7 +223,7 @@ jobs:
           
           # Generate Terraform tfvars directly from Dhall (native, type-safe)
           SERVICES_TFVARS="$PLAN_DIR/services.generated.tfvars"
-          SERVICES_TFVARS_DHALL="CI-REPO/dhall/services.tfvars.dhall"
+          SERVICES_TFVARS_DHALL="dhall/services.tfvars.dhall"
           
           echo "::notice::Generating Terraform tfvars directly from Dhall (native, type-safe)..."
           
@@ -525,7 +524,7 @@ jobs:
           
           # Generate filtered tfvars directly from Dhall (native, type-safe)
           FILTERED_FILE="$PLAN_DIR/services.generated.tfvars.filtered"
-          FILTERED_DHALL="CI-REPO/dhall/services.tfvars.filtered.dhall"
+          FILTERED_DHALL="dhall/services.tfvars.filtered.dhall"
           
           echo "::notice::Filtering services for application: $APPLICATION (using native Dhall)"
           

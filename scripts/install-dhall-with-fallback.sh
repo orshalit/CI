@@ -76,36 +76,63 @@ install_from_github() {
         fi
     elif [ "$tool" = "dhall-json" ]; then
         # Try to find the correct dhall-json asset
-        local json_url=$(curl -s "https://api.github.com/repos/dhall-lang/dhall-haskell/releases/tags/${version}" 2>/dev/null | \
-            jq -r '.assets[] | select(.name | contains("dhall-json") and contains("x86_64-linux")) | .browser_download_url' | head -1)
+        local api_response=$(curl -s "https://api.github.com/repos/dhall-lang/dhall-haskell/releases/tags/${version}" 2>/dev/null)
         
-        if [ -n "$json_url" ] && [ "$json_url" != "null" ]; then
-            log_info "Found dhall-json at: $json_url"
-            cd "$temp_dir"
-            if echo "$json_url" | grep -q "\.tar\.bz2"; then
-                if curl -L -f "$json_url" -o "$temp_dir/dhall-json.tar.bz2" 2>/dev/null; then
-                    if tar -xjf dhall-json.tar.bz2 2>/dev/null; then
-                        if [ -f ./bin/dhall-to-json ]; then
-                            sudo mv ./bin/dhall-to-json "$INSTALL_DIR/"
-                            log_info "✓ Successfully installed dhall-to-json from GitHub"
-                            cd - > /dev/null
-                            return 0
-                        fi
-                    fi
-                fi
-            elif echo "$json_url" | grep -q "\.tar\.gz"; then
-                if curl -L -f "$json_url" -o "$temp_dir/dhall-json.tar.gz" 2>/dev/null; then
-                    if tar -xzf dhall-json.tar.gz 2>/dev/null; then
-                        if [ -f ./bin/dhall-to-json ]; then
-                            sudo mv ./bin/dhall-to-json "$INSTALL_DIR/"
-                            log_info "✓ Successfully installed dhall-to-json from GitHub"
-                            cd - > /dev/null
-                            return 0
-                        fi
-                    fi
-                fi
-            fi
+        if [ -z "$api_response" ] || [ "$api_response" = "null" ]; then
+            log_warn "Failed to fetch GitHub API response for dhall-json"
+            return 1
+        fi
+        
+        local json_url=$(echo "$api_response" | jq -r '.assets[] | select(.name | contains("dhall-json") and contains("x86_64-linux")) | .browser_download_url' 2>/dev/null | head -1)
+        
+        if [ -z "$json_url" ] || [ "$json_url" = "null" ] || [ "$json_url" = "" ]; then
+            log_warn "Could not find dhall-json download URL in GitHub release"
+            log_warn "Available assets:"
+            echo "$api_response" | jq -r '.assets[].name' 2>/dev/null | grep -i linux | head -5 || echo "  (could not parse)"
+            return 1
+        fi
+        
+        log_info "Found dhall-json at: $json_url"
+        cd "$temp_dir"
+        
+        local download_file=""
+        local extract_cmd=""
+        
+        if echo "$json_url" | grep -q "\.tar\.bz2"; then
+            download_file="dhall-json.tar.bz2"
+            extract_cmd="tar -xjf"
+        elif echo "$json_url" | grep -q "\.tar\.gz"; then
+            download_file="dhall-json.tar.gz"
+            extract_cmd="tar -xzf"
+        else
+            log_warn "Unknown archive format: $json_url"
             cd - > /dev/null
+            return 1
+        fi
+        
+        if ! curl -L -f "$json_url" -o "$temp_dir/$download_file" 2>/dev/null; then
+            log_warn "Failed to download dhall-json from: $json_url"
+            cd - > /dev/null
+            return 1
+        fi
+        
+        if ! $extract_cmd "$temp_dir/$download_file" 2>/dev/null; then
+            log_warn "Failed to extract dhall-json archive"
+            cd - > /dev/null
+            return 1
+        fi
+        
+        if [ -f ./bin/dhall-to-json ]; then
+            sudo mv ./bin/dhall-to-json "$INSTALL_DIR/"
+            log_info "✓ Successfully installed dhall-to-json from GitHub"
+            cd - > /dev/null
+            return 0
+        else
+            log_warn "dhall-to-json binary not found after extraction"
+            log_warn "Contents of extracted directory:"
+            ls -la ./bin/ 2>/dev/null || ls -la ./ 2>/dev/null || echo "  (directory not found)"
+            cd - > /dev/null
+            return 1
         fi
     fi
     
@@ -173,12 +200,20 @@ install_dhall_json() {
     
     log_warn "GitHub download failed, trying cache..."
     
-    # Fallback to cache
+    # Fallback to cache (GitHub Actions cache or repository cache)
     if install_from_cache "dhall-json"; then
         return 0
     fi
     
     log_error "Failed to install dhall-to-json from GitHub or cache"
+    log_error "Cache directory checked: $CACHE_DIR"
+    if [ -d "$CACHE_DIR" ]; then
+        log_error "Cache directory exists but is empty or binary not found"
+        ls -la "$CACHE_DIR" 2>/dev/null || log_error "Could not list cache directory"
+    else
+        log_error "Cache directory does not exist"
+    fi
+    log_error "To fix: Populate cache with: bash scripts/populate-dhall-binaries-cache.sh (if script exists)"
     return 1
 }
 
