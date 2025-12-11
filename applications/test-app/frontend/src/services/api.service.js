@@ -81,6 +81,23 @@ class ApiService {
   }
 
   /**
+   * DEPLOY-TEST-3: Latest deployment test endpoint
+   * @returns {Promise<{message: string}>}
+   */
+  async callDeployTest3() {
+    try {
+      logger.debug('Calling deploy-test-3 endpoint');
+      const data = await httpClient.get(`${this.baseUrl}/api/deploy-test-3`);
+
+      logger.info('Deploy-test-3 endpoint called successfully', { message: data.message });
+      return data;
+    } catch (error) {
+      logger.error('Deploy-test-3 endpoint failed', error);
+      throw new Error(error.message || 'Failed to call deploy-test-3 endpoint');
+    }
+  }
+
+  /**
    * Greet endpoint with validation
    * @param {string} userName - User name to greet
    * @returns {Promise<{message: string, id?: number, created_at?: string}>}

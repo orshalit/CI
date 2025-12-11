@@ -278,6 +278,22 @@ async def deploy_test_2(request: Request):
 
 
 @app.get(
+    "/api/deploy-test-3",
+    response_model=HelloResponse,
+    tags=["testing"],
+    summary="Deployment test endpoint #3",
+    description="DEPLOY-TEST-3: Latest test endpoint to verify CI/CD fixes",
+)
+@rate_limit()
+async def deploy_test_3(request: Request):
+    """DEPLOY-TEST-3: Latest test endpoint for deployment verification after fixes"""
+    environment = os.getenv("ENVIRONMENT", "development")
+    return HelloResponse(
+        message=f"DEPLOY-TEST-3: ✅ Backend deployed successfully! Environment: {environment}"
+    )
+
+
+@app.get(
     "/api/greet/{user}",
     response_model=GreetingResponse,
     tags=["greetings"],

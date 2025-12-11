@@ -12,10 +12,11 @@ function App() {
   // Version state (DEPLOY-TEST-1)
   const [versionInfo, setVersionInfo] = useState({ version: null, commit: null });
 
-  // API hooks for hello, deploy-test-2, and greet endpoints
+  // API hooks for hello, deploy-test-2, deploy-test-3, and greet endpoints
   // Bind methods to ensure proper 'this' context
   const [callHelloApi, helloState] = useApi(apiService.callHello.bind(apiService));
   const [callDeployTest2Api, deployTest2State] = useApi(apiService.callDeployTest2.bind(apiService));
+  const [callDeployTest3Api, deployTest3State] = useApi(apiService.callDeployTest3.bind(apiService));
   const [callGreetApi, greetState] = useApi(apiService.callGreet.bind(apiService));
 
   // Local state
@@ -73,6 +74,16 @@ function App() {
     }
   }, [callDeployTest2Api]);
 
+  // Handle deploy-test-3 button click
+  const handleDeployTest3 = useCallback(async () => {
+    try {
+      await callDeployTest3Api();
+    } catch (error) {
+      // Error is handled by useApi hook
+      logger.error('Deploy-test-3 button click failed', error);
+    }
+  }, [callDeployTest3Api]);
+
   // Handle greet button click
   const handleGreet = useCallback(async () => {
     // Clear previous errors
@@ -120,7 +131,7 @@ function App() {
   );
 
   // Determine if any operation is loading
-  const isLoading = helloState.loading || deployTest2State.loading || greetState.loading;
+  const isLoading = helloState.loading || deployTest2State.loading || deployTest3State.loading || greetState.loading;
 
   return (
     <div className="app">
@@ -182,6 +193,26 @@ function App() {
           {deployTest2State.error && (
             <p className="result error" role="alert">
               Error: {deployTest2State.error}
+            </p>
+          )}
+        </div>
+
+        <div className="card">
+          <h2>Deployment Test #3 - CI/CD Fixes</h2>
+          <p className="deploy-info" style={{ color: '#4ecdc4', fontWeight: 'bold', fontSize: '1.05em' }}>
+            🎯 DEPLOY-TEST-3: Testing after E2E and deploy workflow fixes
+          </p>
+          <button onClick={handleDeployTest3} disabled={isLoading} style={{ backgroundColor: '#4ecdc4', color: 'white', fontWeight: 'bold' }}>
+            {deployTest3State.loading ? 'Loading...' : 'Call /api/deploy-test-3'}
+          </button>
+          {deployTest3State.data?.message && (
+            <p className="result success" style={{ fontWeight: 'bold', fontSize: '1.15em', color: '#4ecdc4' }}>
+              🎉 {deployTest3State.data.message}
+            </p>
+          )}
+          {deployTest3State.error && (
+            <p className="result error" role="alert">
+              Error: {deployTest3State.error}
             </p>
           )}
         </div>
