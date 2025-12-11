@@ -978,8 +978,15 @@ jobs:
           
           # Convert newlines to spaces for GitHub Actions output (doesn't support multi-line)
           ALL_SERVICES=$(echo "$ALL_SERVICES_RAW" | tr '\n' ' ' | sed 's/ $//')
-          BACKEND_SERVICES=$(echo "$ALL_SERVICES_RAW" | grep -E "-backend$" | tr '\n' ' ' | sed 's/ $//' || echo "")
-          FRONTEND_SERVICES=$(echo "$ALL_SERVICES_RAW" | grep -E "-frontend$" | tr '\n' ' ' | sed 's/ $//' || echo "")
+          # Filter backend/frontend services (grep returns empty on no match, which is fine)
+          BACKEND_SERVICES=$(echo "$ALL_SERVICES_RAW" | grep -E "-backend$" 2>/dev/null | tr '\n' ' ' | sed 's/ $//' || echo "")
+          FRONTEND_SERVICES=$(echo "$ALL_SERVICES_RAW" | grep -E "-frontend$" 2>/dev/null | tr '\n' ' ' | sed 's/ $//' || echo "")
+          
+          # Debug output
+          echo "::notice::Service detection results:"
+          echo "  All services: '$ALL_SERVICES'"
+          echo "  Backend services: '$BACKEND_SERVICES'"
+          echo "  Frontend services: '$FRONTEND_SERVICES'"
           
           echo "backend_services=$BACKEND_SERVICES" >> $GITHUB_OUTPUT
           echo "frontend_services=$FRONTEND_SERVICES" >> $GITHUB_OUTPUT
