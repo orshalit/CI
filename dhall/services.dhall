@@ -18,14 +18,5 @@ let servicesEntries =
         (\(service : Service) -> { mapKey = service.name, mapValue = service })
         servicesList
 
-in  Prelude.List.fold
-      { mapKey : Text, mapValue : Service }
-      servicesEntries
-      (Prelude.Map.Type Text Service)
-      (\(entry : { mapKey : Text, mapValue : Service }) ->
-        \(acc : Prelude.Map.Type Text Service) ->
-          Prelude.Map.insert Text Service entry.mapKey entry.mapValue acc
-      )
-      ({=} : Prelude.Map.Type Text Service)
-      
+in  Prelude.Map.fromList Text Service servicesEntries
 

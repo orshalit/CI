@@ -107,7 +107,7 @@ async def health_check():
     # Get version info for response
     version_file = PathLib("/app/version.json")
     version_info = {"version": None, "commit": None}
-    
+
     if version_file.exists():
         try:
             with open(version_file) as f:
@@ -124,7 +124,7 @@ async def health_check():
     # Check if database is available
     if not database_available:
         return HealthResponse(
-            status="healthy", 
+            status="healthy",
             database="unavailable",
             version=version_info["version"],
             commit=version_info["commit"]
@@ -136,7 +136,7 @@ async def health_check():
         db.execute(text("SELECT 1"))
         db.close()
         return HealthResponse(
-            status="healthy", 
+            status="healthy",
             database="connected",
             version=version_info["version"],
             commit=version_info["commit"]
@@ -144,8 +144,8 @@ async def health_check():
     except SQLAlchemyError as e:
         logger.error(f"Database health check failed: {e}", exc_info=True)
         return HealthResponse(
-            status="unhealthy", 
-            database="disconnected", 
+            status="unhealthy",
+            database="disconnected",
             error=str(e),
             version=version_info["version"],
             commit=version_info["commit"]
@@ -153,8 +153,8 @@ async def health_check():
     except Exception as e:
         logger.error(f"Unexpected error in health check: {e}", exc_info=True)
         return HealthResponse(
-            status="unhealthy", 
-            database="unknown", 
+            status="unhealthy",
+            database="unknown",
             error="Internal error",
             version=version_info["version"],
             commit=version_info["commit"]
@@ -241,7 +241,7 @@ async def hello(request: Request):
     # DEPLOY-TEST-1: Show build info only in non-production environments
     # For security: Don't expose deployment timestamps in production
     environment = os.getenv("ENVIRONMENT", "development")
-    
+
     if environment.lower() != "production":
         # In dev/staging: Show build date for verification (less sensitive than current timestamp)
         version_file = PathLib("/app/version.json")
@@ -255,7 +255,7 @@ async def hello(request: Request):
                     build_info = f" (build: {commit_short}, {build_date})"
             except (json.JSONDecodeError, OSError):
                 pass
-        
+
         return HelloResponse(message=f"hello from backend{build_info}")
     else:
         # In production: Keep it simple, no build info
