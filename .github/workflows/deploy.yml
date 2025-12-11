@@ -34,7 +34,8 @@ on:
     branches: [main]
     types:
       - completed
-    # Only trigger if CI workflow succeeded (not on failure/cancellation)
+    # Note: workflow_run triggers on ANY completion (success/failure/cancelled)
+    # We check the conclusion inside the job and exit early if CI failed
     # This ensures we only deploy when images are actually built
 
 concurrency:
@@ -46,6 +47,10 @@ jobs:
   deploy:
     name: ${{ github.event_name == 'workflow_dispatch' && format('{0} - {1}', github.event.inputs.action, github.event.inputs.module_path) || 'Deploy Application' }}
     runs-on: ubuntu-latest
+    # Only run if CI workflow succeeded (for workflow_run triggers)
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
     
     permissions:
       id-token: write
@@ -64,12 +69,18 @@ jobs:
         if: github.event_name == 'workflow_run'
         run: |
           CI_WORKFLOW_STATUS="${{ github.event.workflow_run.conclusion }}"
+          CI_WORKFLOW_ID="${{ github.event.workflow_run.id }}"
+          echo "::notice::CI workflow ID: $CI_WORKFLOW_ID"
+          echo "::notice::CI workflow conclusion: $CI_WORKFLOW_STATUS"
           if [ "$CI_WORKFLOW_STATUS" != "success" ]; then
-            echo "::notice::CI workflow status: $CI_WORKFLOW_STATUS - skipping deployment"
-            echo "::notice::Deployment only runs when CI workflow succeeds"
-            exit 0  # Exit successfully to skip deployment
+            echo "::warning::CI workflow status: $CI_WORKFLOW_STATUS - skipping deployment"
+            echo "::warning::Deployment only runs when CI workflow succeeds"
+            echo "::warning::CI workflow URL: https://github.com/${{ github.repository }}/actions/runs/$CI_WORKFLOW_ID"
+            # Exit with code 0 to mark job as successful (but skipped)
+            # This prevents the workflow from showing as failed when CI fails
+            exit 0
           fi
-          echo "::notice::CI workflow succeeded - proceeding with deployment"
+          echo "::notice::✓ CI workflow succeeded - proceeding with deployment"
 
       - name: Download artifacts from CI workflow
         if: |
@@ -197,17 +208,32 @@ jobs:
             echo "application=all" >> $GITHUB_OUTPUT
           fi
 
+      - name: Debug - Check repository secrets
+        run: |
+          echo "::notice::Checking repository secrets..."
+          echo "DEVOPS_REPO_OWNER exists: ${{ secrets.DEVOPS_REPO_OWNER != '' && 'yes' || 'no' }}"
+          echo "DEVOPS_REPO_NAME exists: ${{ secrets.DEVOPS_REPO_NAME != '' && 'yes' || 'no' }}"
+          echo "DEVOPS_REPO_OWNER length: ${{ length(secrets.DEVOPS_REPO_OWNER) }}"
+          echo "DEVOPS_REPO_NAME length: ${{ length(secrets.DEVOPS_REPO_NAME) }}"
+          REPO_FORMAT="${{ secrets.DEVOPS_REPO_OWNER || 'orshalit' }}/${{ secrets.DEVOPS_REPO_NAME || 'projectdevops' }}"
+          echo "Computed repo format: $REPO_FORMAT"
+          if [ -z "${{ secrets.DEVOPS_REPO_OWNER }}" ] || [ -z "${{ secrets.DEVOPS_REPO_NAME }}" ]; then
+            echo "::error::Repository secrets are missing or empty!"
+            echo "::error::Please set DEVOPS_REPO_OWNER and DEVOPS_REPO_NAME secrets in repository settings"
+            exit 1
+          fi
+
       - name: Terraform Setup
         uses: ./.github/actions/terraform-setup
         with:
-          devops_repo: ${{ secrets.DEVOPS_REPO_OWNER }}/${{ secrets.DEVOPS_REPO_NAME }}
+          devops_repo: ${{ secrets.DEVOPS_REPO_OWNER || 'orshalit' }}/${{ secrets.DEVOPS_REPO_NAME || 'projectdevops' }}
           devops_repo_key: ${{ secrets.DEVOPS_REPO_KEY }}
           aws_role_arn: ${{ secrets.AWS_ROLE_ARN }}
           aws_region: ${{ secrets.AWS_REGION }}
           terraform_version: '1.6.0'
         env:
-          DEVOPS_REPO_OWNER: ${{ secrets.DEVOPS_REPO_OWNER }}
-          DEVOPS_REPO_NAME: ${{ secrets.DEVOPS_REPO_NAME }}
+          DEVOPS_REPO_OWNER: ${{ secrets.DEVOPS_REPO_OWNER || 'orshalit' }}
+          DEVOPS_REPO_NAME: ${{ secrets.DEVOPS_REPO_NAME || 'projectdevops' }}
 
       - name: Cache Dhall binaries
         id: cache-dhall
