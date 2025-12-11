@@ -1199,8 +1199,7 @@ jobs:
           echo "=== Testing Hello Endpoint (${FIRST_BACKEND} on port ${BACKEND_PORT}) ==="
           response=$(curl -s "${BACKEND_URL}/api/hello")
           echo "$response" | jq .
-          # Message now includes build info, so use startswith check
-          echo "$response" | jq -e '.message | startswith("hello from backend")'
+          echo "$response" | jq -e '.message == "hello from backend"'
           
           echo "=== Testing Greet Endpoint ==="
           response=$(curl -s "${BACKEND_URL}/api/greet/E2ETest")

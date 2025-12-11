@@ -41,23 +41,50 @@ jobs:
       - name: Checkout CI repository
         uses: actions/checkout@v4
 
-      - name: Update Dhall imports with dynamic repository name
-        env:
-          DEVOPS_REPO_NAME: ${{ env.DEVOPS_REPO_NAME }}
-          DEVOPS_REPO_OWNER: ${{ env.DEVOPS_REPO_OWNER }}
+      - name: Checkout DEVOPS repository (for Dhall type imports)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.DEVOPS_REPO_OWNER }}/${{ env.DEVOPS_REPO_NAME }}
+          ssh-key: ${{ secrets.DEVOPS_REPO_KEY }}
+          path: DEVOPS
+          ref: main
+
+      - name: Update Dhall imports to use local DEVOPS checkout
         run: |
-          echo "::notice::Checking repository secrets for Dhall imports..."
-          echo "DEVOPS_REPO_OWNER: $DEVOPS_REPO_OWNER"
-          echo "DEVOPS_REPO_NAME: $DEVOPS_REPO_NAME"
-          if [ -z "$DEVOPS_REPO_OWNER" ] || [ -z "$DEVOPS_REPO_NAME" ]; then
-            echo "::error::Repository secrets are missing or empty!"
-            echo "::error::DEVOPS_REPO_OWNER: '$DEVOPS_REPO_OWNER'"
-            echo "::error::DEVOPS_REPO_NAME: '$DEVOPS_REPO_NAME'"
+          echo "::notice::DEVOPS repository checked out to ./DEVOPS"
+          echo "::notice::Updating Dhall imports to use local paths..."
+          
+          # Verify DEVOPS checkout
+          if [ ! -f "DEVOPS/config/types/Service.dhall" ]; then
+            echo "::error::DEVOPS/config/types/Service.dhall not found!"
+            echo "::error::DEVOPS checkout may have failed"
+            ls -la DEVOPS/ || echo "DEVOPS directory not found"
             exit 1
           fi
-          echo "::notice::Using repository: $DEVOPS_REPO_OWNER/$DEVOPS_REPO_NAME"
-          chmod +x scripts/update-dhall-repo-imports.sh
-          DEVOPS_REPO_NAME="$DEVOPS_REPO_NAME" DEVOPS_REPO_OWNER="$DEVOPS_REPO_OWNER" ./scripts/update-dhall-repo-imports.sh
+          echo "::notice::✓ DEVOPS/config/types/Service.dhall found"
+          
+          # Update Dhall files to use local DEVOPS path instead of remote URL
+          # Replace remote imports with local paths
+          find dhall -name "*.dhall" -type f | while read -r file; do
+            if grep -q "raw.githubusercontent.com.*projectdevops" "$file" 2>/dev/null; then
+              echo "Updating: $file"
+              # Calculate relative path from file to DEVOPS
+              FILE_DIR=$(dirname "$file")
+              # Count directory depth from dhall/
+              DEPTH=$(echo "$FILE_DIR" | tr '/' '\n' | wc -l)
+              # Build relative path back to root then to DEVOPS
+              REL_PATH=""
+              for i in $(seq 1 $DEPTH); do REL_PATH="../$REL_PATH"; done
+              
+              # Replace remote URL with local path
+              sed -i "s|https://raw.githubusercontent.com/[^/]*/projectdevops/[^/]*/config/|${REL_PATH}DEVOPS/config/|g" "$file"
+            fi
+          done
+          
+          echo "::notice::✓ Dhall imports updated to use local DEVOPS checkout"
+          echo "::group::Updated Dhall files"
+          grep -r "DEVOPS/config" dhall --include="*.dhall" || echo "No files updated (may already be local)"
+          echo "::endgroup::"
 
       - name: Cache Dhall binaries
         id: cache-dhall
@@ -73,55 +100,25 @@ jobs:
           chmod +x scripts/install-dhall-with-fallback.sh
           scripts/install-dhall-with-fallback.sh
 
-      - name: Verify Dhall remote imports are accessible
+      - name: Verify local DEVOPS imports are accessible
         run: |
-          echo "::notice::Verifying remote imports before type-checking..."
-          echo "::group::Debug: Environment variables"
-          echo "DEVOPS_REPO_OWNER: '$DEVOPS_REPO_OWNER'"
-          echo "DEVOPS_REPO_NAME: '$DEVOPS_REPO_NAME'"
-          echo "DEVOPS_REPO_OWNER length: ${#DEVOPS_REPO_OWNER}"
-          echo "DEVOPS_REPO_NAME length: ${#DEVOPS_REPO_NAME}"
-          echo "::endgroup::"
+          echo "::notice::Verifying local DEVOPS imports..."
           
-          # List all Dhall files with remote imports
-          echo "::group::Debug: Dhall files with remote imports"
-          grep -r "https://raw.githubusercontent.com" dhall --include="*.dhall" -l 2>/dev/null | while read -r file; do
-            echo "Found: $file"
-            grep "https://raw.githubusercontent.com" "$file" | head -1
-          done || echo "No files found"
-          echo "::endgroup::"
-          
-          # Debug: Show environment variables before verification
-          echo "::group::Debug: Pre-verification environment check"
-          echo "DEVOPS_REPO_OWNER: '${DEVOPS_REPO_OWNER:-<not set>}'"
-          echo "DEVOPS_REPO_NAME: '${DEVOPS_REPO_NAME:-<not set>}'"
-          if [ -n "${DEVOPS_REPO_OWNER:-}" ]; then
-            echo "DEVOPS_REPO_OWNER length: ${#DEVOPS_REPO_OWNER}"
-          fi
-          if [ -n "${DEVOPS_REPO_NAME:-}" ]; then
-            echo "DEVOPS_REPO_NAME length: ${#DEVOPS_REPO_NAME}"
-          fi
-          echo "::endgroup::"
-          
-          # Test basic curl connectivity
-          echo "::group::Debug: Network connectivity pre-check"
-          echo "Testing connectivity to GitHub..."
-          if curl -s --max-time 5 -I https://raw.githubusercontent.com > /dev/null 2>&1; then
-            echo "✓ GitHub raw.githubusercontent.com is reachable"
+          # Check that Service.dhall exists
+          if [ -f "DEVOPS/config/types/Service.dhall" ]; then
+            echo "✓ DEVOPS/config/types/Service.dhall exists"
+            head -5 DEVOPS/config/types/Service.dhall
           else
-            echo "✗ GitHub raw.githubusercontent.com is NOT reachable"
-            echo "This may indicate a network connectivity issue"
+            echo "::error::DEVOPS/config/types/Service.dhall not found!"
+            exit 1
           fi
+          
+          # Show current Dhall import paths
+          echo "::group::Dhall import paths after update"
+          grep -r "Service" dhall --include="*.dhall" | grep -E "(let Service|import)" | head -10 || true
           echo "::endgroup::"
           
-          chmod +x scripts/verify-dhall-imports.sh
-          scripts/verify-dhall-imports.sh --retry 3 --timeout 10 || {
-            echo "::error::Dhall import verification failed"
-            echo "::error::This may be a network issue or repository name mismatch"
-            echo "::error::Check the debug output above for detailed error information"
-            exit 1
-          }
-          echo "::notice::✓ All remote imports verified"
+          echo "::notice::✓ Local imports verified"
 
       - name: Type-check Dhall service definitions
         run: |

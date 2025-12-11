@@ -264,14 +264,33 @@ jobs:
           restore-keys: |
             dhall-binaries-${{ runner.os }}-
 
-      - name: Update Dhall imports with dynamic repository name
-        env:
-          DEVOPS_REPO_NAME: ${{ secrets.DEVOPS_REPO_NAME || 'projectdevops' }}
-          DEVOPS_REPO_OWNER: ${{ secrets.DEVOPS_REPO_OWNER || 'orshalit' }}
+      - name: Update Dhall imports to use local DEVOPS checkout
         run: |
-          echo "::notice::Using repository: $DEVOPS_REPO_OWNER/$DEVOPS_REPO_NAME"
-          chmod +x scripts/update-dhall-repo-imports.sh
-          DEVOPS_REPO_NAME="$DEVOPS_REPO_NAME" DEVOPS_REPO_OWNER="$DEVOPS_REPO_OWNER" ./scripts/update-dhall-repo-imports.sh
+          echo "::notice::DEVOPS repository is checked out to ./DEVOPS"
+          echo "::notice::Updating Dhall imports to use local paths..."
+          
+          # Verify DEVOPS checkout
+          if [ ! -f "DEVOPS/config/types/Service.dhall" ]; then
+            echo "::error::DEVOPS/config/types/Service.dhall not found!"
+            echo "::error::DEVOPS checkout may have failed"
+            ls -la DEVOPS/ || echo "DEVOPS directory not found"
+            exit 1
+          fi
+          echo "✓ DEVOPS/config/types/Service.dhall found"
+          
+          # Update Dhall files to use local DEVOPS path instead of remote URL
+          find dhall -name "*.dhall" -type f | while read -r file; do
+            if grep -q "raw.githubusercontent.com.*projectdevops" "$file" 2>/dev/null; then
+              echo "Updating: $file"
+              FILE_DIR=$(dirname "$file")
+              DEPTH=$(echo "$FILE_DIR" | tr '/' '\n' | wc -l)
+              REL_PATH=""
+              for i in $(seq 1 $DEPTH); do REL_PATH="../$REL_PATH"; done
+              sed -i "s|https://raw.githubusercontent.com/[^/]*/projectdevops/[^/]*/config/|${REL_PATH}DEVOPS/config/|g" "$file"
+            fi
+          done
+          
+          echo "✓ Dhall imports updated to use local DEVOPS checkout"
 
       - name: Install Dhall, dhall-json, and jq
         run: |
