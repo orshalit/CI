@@ -200,7 +200,7 @@ function App() {
         <div className="card">
           <h2>Deployment Test #3 - CI/CD Fixes</h2>
           <p className="deploy-info" style={{ color: '#4ecdc4', fontWeight: 'bold', fontSize: '1.05em' }}>
-            🎯 DEPLOY-TEST-3: Testing after E2E and deploy workflow fixes | Port extraction fallback added | Version metadata test fixed
+            🎯 DEPLOY-TEST-3: Testing after E2E and deploy workflow fixes | Dhall syntax fixed | Ready for deployment test
           </p>
           <button onClick={handleDeployTest3} disabled={isLoading} style={{ backgroundColor: '#4ecdc4', color: 'white', fontWeight: 'bold' }}>
             {deployTest3State.loading ? 'Loading...' : 'Call /api/deploy-test-3'}
