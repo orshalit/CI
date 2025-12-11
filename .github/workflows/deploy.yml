@@ -536,23 +536,46 @@ jobs:
           # GitHub Actions merges artifacts with the same name from matrix jobs
           BUILT_IMAGES_FILE="built-images.txt"
           BUILT_IMAGES=""
+          IMAGE_COUNT=0
+          
           if [ -f "$BUILT_IMAGES_FILE" ]; then
             BUILT_IMAGES=$(grep -v '^#' "$BUILT_IMAGES_FILE" | grep -v '^$' | sort -u || echo "")
             IMAGE_COUNT=$(echo "$BUILT_IMAGES" | grep -v '^$' | wc -l | tr -d ' ')
-            if [ "$IMAGE_COUNT" -eq 0 ]; then
-              echo "::warning::Built images list is empty (all builds may have failed)"
-              echo "::warning::This is a safety check - deployment will proceed with all services"
-              echo "::warning::Review CI workflow logs to verify which images were actually built"
+          fi
+          
+          # Fail-safe behavior: Different handling for workflow_run vs workflow_dispatch
+          # workflow_run: CI workflow should have built images - fail if missing/empty
+          # workflow_dispatch: Manual deployment - allow fallback with warnings
+          if [ "${{ github.event_name }}" == "workflow_run" ]; then
+            if [ ! -f "$BUILT_IMAGES_FILE" ] || [ "$IMAGE_COUNT" -eq 0 ]; then
+              echo "::error::Built images list required for workflow_run deployment"
+              echo "::error::CI workflow should have built images. This indicates:"
+              echo "::error::  1. All builds failed (check CI workflow logs)"
+              echo "::error::  2. Artifact download failed (retry deployment)"
+              echo "::error::  3. CI workflow didn't build any images (fix CI workflow)"
+              echo "::error::"
+              echo "::error::Deployment cannot proceed without knowing which images were built."
+              echo "::error::This prevents deploying services with missing images."
+              exit 1
+            fi
+            echo "::notice::Found $IMAGE_COUNT built image(s) from CI workflow:"
+            echo "$BUILT_IMAGES" | sed 's/^/  - /'
+          else
+            # workflow_dispatch (manual deployment)
+            if [ ! -f "$BUILT_IMAGES_FILE" ] || [ "$IMAGE_COUNT" -eq 0 ]; then
+              echo "::warning::Built images list not found or empty (manual deployment)"
+              echo "::warning::This will deploy all services using existing images in registry"
+              echo "::warning::⚠️  WARNING: Images may be outdated if CI workflow didn't run"
+              echo "::warning::"
+              echo "::warning::To deploy with fresh images:"
+              echo "::warning::  1. Run CI workflow first to build images"
+              echo "::warning::  2. Then run this deployment workflow"
+              echo "::warning::"
+              echo "::warning::Proceeding with deployment of all services..."
             else
               echo "::notice::Found $IMAGE_COUNT built image(s):"
               echo "$BUILT_IMAGES" | sed 's/^/  - /'
             fi
-          else
-            echo "::warning::Built images list not found - will deploy all services (not modular)"
-            echo "::warning::This may happen if:"
-            echo "::warning::  1. CI workflow didn't build any images"
-            echo "::warning::  2. Artifact download failed"
-            echo "::warning::  3. Manual deployment without CI workflow"
           fi
           
           # Filter services.generated.json by application first
@@ -570,9 +593,9 @@ jobs:
           fi
           
           # Now filter by built images (modular: only services whose images exist)
-          # Edge case: Empty BUILT_IMAGES means either no images built or all builds failed
-          # In this case, we fall back to deploying all services (with warning)
-          if [ -n "$BUILT_IMAGES" ] && [ "$(echo "$BUILT_IMAGES" | grep -v '^$' | wc -l | tr -d ' ')" -gt 0 ]; then
+          # For workflow_run: We already validated images exist above (would have failed)
+          # For workflow_dispatch: May proceed without images (manual override)
+          if [ "$IMAGE_COUNT" -gt 0 ] && [ -n "$BUILT_IMAGES" ]; then
             echo "::notice::Filtering services to only those whose images were built (modular deployment)"
             
             # Match image_repo against built images
@@ -611,17 +634,18 @@ jobs:
             echo "::notice::✓ Modular filtering: $FILTERED_COUNT/$BASE_COUNT service(s) match built images"
             mv "$FILTERED_JSON_TEMP" "$FILTERED_JSON"
           else
-            # Edge cases handled:
-            # 1. Empty built images list (all builds failed) → deploy all (with warning)
-            # 2. Built images list missing → deploy all (with warning)
-            # 3. Manual deployment without CI → deploy all (expected)
+            # No built images available - fallback behavior
+            # For workflow_run: This should never happen (we fail above)
+            # For workflow_dispatch: User explicitly triggered, allow fallback
             FILTERED_COUNT=$(jq 'length' "$FILTERED_JSON" 2>/dev/null || echo "0")
-            if [ -f "$BUILT_IMAGES_FILE" ]; then
-              echo "::warning::Built images list is empty - deploying all services (not modular)"
-              echo "::warning::This may indicate all builds failed. Review CI workflow logs."
+            if [ "${{ github.event_name }}" == "workflow_run" ]; then
+              # This should never execute (we fail above), but safety check
+              echo "::error::Internal error: workflow_run should have failed above"
+              exit 1
             else
-              echo "::warning::Built images list not found - deploying all services (not modular)"
-              echo "::warning::This is expected for manual deployments or if CI workflow didn't run."
+              echo "::warning::No built images available - deploying all services (not modular)"
+              echo "::warning::This is expected for manual deployments without CI workflow"
+              echo "::warning::Services will use existing images in registry (may be outdated)"
             fi
           fi
           
