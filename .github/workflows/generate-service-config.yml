@@ -46,6 +46,15 @@ jobs:
           DEVOPS_REPO_NAME: ${{ env.DEVOPS_REPO_NAME }}
           DEVOPS_REPO_OWNER: ${{ env.DEVOPS_REPO_OWNER }}
         run: |
+          echo "::notice::Checking repository secrets for Dhall imports..."
+          echo "DEVOPS_REPO_OWNER: $DEVOPS_REPO_OWNER"
+          echo "DEVOPS_REPO_NAME: $DEVOPS_REPO_NAME"
+          if [ -z "$DEVOPS_REPO_OWNER" ] || [ -z "$DEVOPS_REPO_NAME" ]; then
+            echo "::error::Repository secrets are missing or empty!"
+            echo "::error::DEVOPS_REPO_OWNER: '$DEVOPS_REPO_OWNER'"
+            echo "::error::DEVOPS_REPO_NAME: '$DEVOPS_REPO_NAME'"
+            exit 1
+          fi
           echo "::notice::Using repository: $DEVOPS_REPO_OWNER/$DEVOPS_REPO_NAME"
           chmod +x scripts/update-dhall-repo-imports.sh
           DEVOPS_REPO_NAME="$DEVOPS_REPO_NAME" DEVOPS_REPO_OWNER="$DEVOPS_REPO_OWNER" ./scripts/update-dhall-repo-imports.sh
