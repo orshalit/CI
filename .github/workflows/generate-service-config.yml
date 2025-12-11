@@ -36,17 +36,47 @@ jobs:
       - name: Checkout CI repository
         uses: actions/checkout@v4
 
-      - name: Install Dhall
+      - name: Install Dhall and dhall-json
         run: |
           # Install core dhall interpreter
           curl -L https://github.com/dhall-lang/dhall-haskell/releases/download/1.41.2/dhall-1.41.2-x86_64-linux.tar.bz2 | tar -xj
           sudo mv ./bin/dhall /usr/local/bin/
           dhall --version
 
-          # Install dhall-json for dhall-to-json
-          curl -L https://github.com/dhall-lang/dhall-haskell/releases/download/1.41.2/dhall-json-1.41.2-x86_64-linux.tar.bz2 | tar -xj
-          sudo mv ./bin/dhall-to-json /usr/local/bin/
-          dhall-to-json --version
+          # Install dhall-json for dhall-to-json conversion
+          # dhall-json is packaged as a separate binary in the same release
+          # Check available assets and download the correct one
+          echo "::notice::Checking available dhall-json releases..."
+          JSON_URL=$(curl -s https://api.github.com/repos/dhall-lang/dhall-haskell/releases/tags/1.41.2 | \
+            jq -r '.assets[] | select(.name | contains("dhall-json") and contains("x86_64-linux")) | .browser_download_url' | head -1)
+          
+          if [ -z "$JSON_URL" ] || [ "$JSON_URL" = "null" ]; then
+            echo "::error::Could not find dhall-json release for version 1.41.2"
+            echo "::error::Available assets:"
+            curl -s https://api.github.com/repos/dhall-lang/dhall-haskell/releases/tags/1.41.2 | jq -r '.assets[].name' | grep -i linux || true
+            exit 1
+          fi
+          
+          echo "::notice::Downloading dhall-json from: $JSON_URL"
+          # Download and extract (handle both .tar.bz2 and .tar.gz)
+          if echo "$JSON_URL" | grep -q "\.tar\.bz2"; then
+            curl -L "$JSON_URL" | tar -xj
+          elif echo "$JSON_URL" | grep -q "\.tar\.gz"; then
+            curl -L "$JSON_URL" | tar -xz
+          else
+            echo "::error::Unknown archive format: $JSON_URL"
+            exit 1
+          fi
+          
+          if [ -f ./bin/dhall-to-json ]; then
+            sudo mv ./bin/dhall-to-json /usr/local/bin/
+            dhall-to-json --version
+          else
+            echo "::error::dhall-to-json binary not found after extraction"
+            echo "::error::Contents of extracted directory:"
+            ls -la ./bin/ 2>/dev/null || ls -la ./
+            exit 1
+          fi
 
       - name: Type-check Dhall service definitions
         run: |
@@ -161,7 +191,7 @@ jobs:
           echo "::notice::✓ Docker image validation complete"
 
       - name: Summary
-        if: always()
+        if: success()
         run: |
           echo "## Dhall Validation Complete ✅" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
