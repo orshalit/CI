@@ -815,21 +815,7 @@ jobs:
           
           # Only check for ECS Fargate module
           if [[ "${{ steps.vars.outputs.module_path }}" == "04-ecs-fargate" ]]; then
-            echo "::notice::Checking for state drift in target group health check paths..."
-            
-            if [ -f "scripts/verify-target-group-health-checks.sh" ]; then
-              chmod +x scripts/verify-target-group-health-checks.sh
-              export TERRAFORM_DIR="$PLAN_DIR"
-              export ENVIRONMENT="${{ steps.vars.outputs.environment }}"
-              
-              if scripts/verify-target-group-health-checks.sh; then
-                echo "::notice::No state drift detected"
-              else
-                echo "::warning::State drift detected! Consider running terraform refresh manually."
-              fi
-            else
-              echo "::notice::State drift detection script not found, skipping..."
-            fi
+            echo "::notice::Target group health check validation is included in comprehensive pre-apply validation"
           else
             echo "::notice::State drift detection only runs for ECS Fargate module"
           fi
