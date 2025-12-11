@@ -978,11 +978,37 @@ jobs:
           
           # Convert newlines to spaces for GitHub Actions output (doesn't support multi-line)
           ALL_SERVICES=$(echo "$ALL_SERVICES_RAW" | tr '\n' ' ' | sed 's/ $//')
+          
+          # Debug: Show raw services before filtering
+          echo "::group::Debug: Raw service detection"
+          echo "ALL_SERVICES_RAW (newline-separated):"
+          echo "$ALL_SERVICES_RAW" | while read -r service; do
+            echo "  - '$service'"
+          done
+          echo "ALL_SERVICES (space-separated): '$ALL_SERVICES'"
+          echo "::endgroup::"
+          
           # Filter backend/frontend services (ensure we filter before converting to spaces)
-          BACKEND_SERVICES=$(echo "$ALL_SERVICES_RAW" | grep -E "-backend$" | tr '\n' ' ' | sed 's/ $//' || echo "")
-          FRONTEND_SERVICES=$(echo "$ALL_SERVICES_RAW" | grep -E "-frontend$" | tr '\n' ' ' | sed 's/ $//' || echo "")
+          BACKEND_SERVICES_RAW=$(echo "$ALL_SERVICES_RAW" | grep -E "-backend$" || echo "")
+          FRONTEND_SERVICES_RAW=$(echo "$ALL_SERVICES_RAW" | grep -E "-frontend$" || echo "")
+          
+          BACKEND_SERVICES=$(echo "$BACKEND_SERVICES_RAW" | tr '\n' ' ' | sed 's/ $//' || echo "")
+          FRONTEND_SERVICES=$(echo "$FRONTEND_SERVICES_RAW" | tr '\n' ' ' | sed 's/ $//' || echo "")
           
           # Debug output
+          echo "::group::Debug: Service filtering results"
+          echo "BACKEND_SERVICES_RAW (newline-separated):"
+          if [ -n "$BACKEND_SERVICES_RAW" ]; then
+            echo "$BACKEND_SERVICES_RAW" | while read -r service; do
+              echo "  - '$service'"
+            done
+          else
+            echo "  (empty)"
+          fi
+          echo "BACKEND_SERVICES (space-separated): '$BACKEND_SERVICES'"
+          echo "FRONTEND_SERVICES (space-separated): '$FRONTEND_SERVICES'"
+          echo "::endgroup::"
+          
           echo "::notice::Service detection results:"
           echo "  All services: '$ALL_SERVICES'"
           echo "  Backend services: '$BACKEND_SERVICES'"

@@ -76,8 +76,27 @@ jobs:
       - name: Verify Dhall remote imports are accessible
         run: |
           echo "::notice::Verifying remote imports before type-checking..."
+          echo "::group::Debug: Environment variables"
+          echo "DEVOPS_REPO_OWNER: '$DEVOPS_REPO_OWNER'"
+          echo "DEVOPS_REPO_NAME: '$DEVOPS_REPO_NAME'"
+          echo "DEVOPS_REPO_OWNER length: ${#DEVOPS_REPO_OWNER}"
+          echo "DEVOPS_REPO_NAME length: ${#DEVOPS_REPO_NAME}"
+          echo "::endgroup::"
+          
+          # List all Dhall files with remote imports
+          echo "::group::Debug: Dhall files with remote imports"
+          grep -r "https://raw.githubusercontent.com" dhall --include="*.dhall" -l 2>/dev/null | while read -r file; do
+            echo "Found: $file"
+            grep "https://raw.githubusercontent.com" "$file" | head -1
+          done || echo "No files found"
+          echo "::endgroup::"
+          
           chmod +x scripts/verify-dhall-imports.sh
-          scripts/verify-dhall-imports.sh --retry 3 --timeout 10
+          scripts/verify-dhall-imports.sh --retry 3 --timeout 10 || {
+            echo "::error::Dhall import verification failed"
+            echo "::error::This may be a network issue or repository name mismatch"
+            exit 1
+          }
           echo "::notice::✓ All remote imports verified"
 
       - name: Type-check Dhall service definitions
