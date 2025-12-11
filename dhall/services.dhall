@@ -1,4 +1,4 @@
-// Triggering the workflow with a trivial change.
+-- DEPLOY-TEST-1: Service definitions for test-app
 let Prelude = https://prelude.dhall-lang.org/v21.0.0/package.dhall
 
 let Service =

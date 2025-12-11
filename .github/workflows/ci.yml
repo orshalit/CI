@@ -958,10 +958,28 @@ jobs:
           done
           
           # Get all services from docker-compose (dynamic)
+          echo "::group::Service Detection Debug"
+          echo "Compose files: $COMPOSE_FILES"
+          echo "Raw services output:"
+          docker compose $COMPOSE_FILES config --services || echo "Failed to get services"
+          echo "::endgroup::"
+          
+          # Get all services (excluding database)
+          ALL_SERVICES_RAW=$(docker compose $COMPOSE_FILES config --services 2>/dev/null | grep -v "^database$" || echo "")
+          
+          if [ -z "$ALL_SERVICES_RAW" ]; then
+            echo "::warning::No services found in docker-compose files"
+            echo "backend_services=" >> $GITHUB_OUTPUT
+            echo "frontend_services=" >> $GITHUB_OUTPUT
+            echo "all_services=" >> $GITHUB_OUTPUT
+            echo "compose_files=$COMPOSE_FILES" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
           # Convert newlines to spaces for GitHub Actions output (doesn't support multi-line)
-          ALL_SERVICES=$(docker compose $COMPOSE_FILES config --services | grep -v "^database$" | tr '\n' ' ' | sed 's/ $//' || echo "")
-          BACKEND_SERVICES=$(echo "$ALL_SERVICES" | tr ' ' '\n' | grep -E "-backend$" | tr '\n' ' ' | sed 's/ $//' || echo "")
-          FRONTEND_SERVICES=$(echo "$ALL_SERVICES" | tr ' ' '\n' | grep -E "-frontend$" | tr '\n' ' ' | sed 's/ $//' || echo "")
+          ALL_SERVICES=$(echo "$ALL_SERVICES_RAW" | tr '\n' ' ' | sed 's/ $//')
+          BACKEND_SERVICES=$(echo "$ALL_SERVICES_RAW" | grep -E "-backend$" | tr '\n' ' ' | sed 's/ $//' || echo "")
+          FRONTEND_SERVICES=$(echo "$ALL_SERVICES_RAW" | grep -E "-frontend$" | tr '\n' ' ' | sed 's/ $//' || echo "")
           
           echo "backend_services=$BACKEND_SERVICES" >> $GITHUB_OUTPUT
           echo "frontend_services=$FRONTEND_SERVICES" >> $GITHUB_OUTPUT
@@ -969,6 +987,7 @@ jobs:
           echo "compose_files=$COMPOSE_FILES" >> $GITHUB_OUTPUT
           
           echo "::notice::Detected services:"
+          echo "  All: $ALL_SERVICES"
           echo "  Backend: $BACKEND_SERVICES"
           echo "  Frontend: $FRONTEND_SERVICES"
 
@@ -1090,15 +1109,21 @@ jobs:
       
       - name: Run E2E API tests
         run: |
+          # Build compose file list (same as detect-services step)
+          COMPOSE_FILES="${{ steps.detect-services.outputs.compose_files }}"
+          
           # Get first backend service and its port (dynamic)
           BACKEND_SERVICES="${{ steps.detect-services.outputs.backend_services }}"
           if [ -z "$BACKEND_SERVICES" ]; then
             echo "::error::No backend services found for E2E tests"
+            echo "::error::Detected services output: '$BACKEND_SERVICES'"
+            echo "::error::All services: '${{ steps.detect-services.outputs.all_services }}'"
             exit 1
           fi
           
-          FIRST_BACKEND=$(echo "$BACKEND_SERVICES" | head -1)
-          BACKEND_PORT=$(docker compose config | grep -A 30 "^  ${FIRST_BACKEND}:" | grep -E "^\s+-.*:8000" | head -1 | sed -E 's/.*:([0-9]+):8000/\1/' || echo "8000")
+          # Get first backend service (space-separated format)
+          FIRST_BACKEND=$(echo "$BACKEND_SERVICES" | awk '{print $1}')
+          BACKEND_PORT=$(docker compose $COMPOSE_FILES config | grep -A 30 "^  ${FIRST_BACKEND}:" | grep -E "^\s+-.*:8000" | head -1 | sed -E 's/.*:([0-9]+):8000/\1/' || echo "8000")
           BACKEND_URL="http://localhost:${BACKEND_PORT}"
           
           echo "=== Testing Hello Endpoint (${FIRST_BACKEND} on port ${BACKEND_PORT}) ==="
@@ -1131,7 +1156,8 @@ jobs:
           FRONTEND_SERVICES="${{ steps.detect-services.outputs.frontend_services }}"
           
           if [ -n "$BACKEND_SERVICES" ]; then
-            FIRST_BACKEND=$(echo "$BACKEND_SERVICES" | head -1)
+            # Get first backend service (space-separated format)
+            FIRST_BACKEND=$(echo "$BACKEND_SERVICES" | awk '{print $1}')
             BACKEND_PORT=$(docker compose $COMPOSE_FILES config | grep -A 30 "^  ${FIRST_BACKEND}:" | grep -E "^\s+-.*:8000" | head -1 | sed -E 's/.*:([0-9]+):8000/\1/' || echo "8000")
             BACKEND_URL="http://localhost:${BACKEND_PORT}"
             
@@ -1143,7 +1169,8 @@ jobs:
           fi
           
           if [ -n "$FRONTEND_SERVICES" ]; then
-            FIRST_FRONTEND=$(echo "$FRONTEND_SERVICES" | head -1)
+            # Get first frontend service (space-separated format)
+            FIRST_FRONTEND=$(echo "$FRONTEND_SERVICES" | awk '{print $1}')
             FRONTEND_PORT=$(docker compose $COMPOSE_FILES config | grep -A 30 "^  ${FIRST_FRONTEND}:" | grep -E "^\s+-.*:3000" | head -1 | sed -E 's/.*:([0-9]+):3000/\1/' || echo "3000")
             FRONTEND_URL="http://localhost:${FRONTEND_PORT}"
             
