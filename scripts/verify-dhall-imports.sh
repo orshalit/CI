@@ -68,12 +68,21 @@ if [ -z "$IMPORTS" ]; then
 fi
 
 # Extract unique URLs (handle both single-line and multi-line imports)
-UNIQUE_URLS=$(echo "$IMPORTS" | grep -oE "https://raw\.githubusercontent\.com/[^\"' ]+" | sort -u)
+# Trim whitespace and newlines from URLs to prevent curl errors
+UNIQUE_URLS=$(echo "$IMPORTS" | grep -oE "https://raw\.githubusercontent\.com/[^\"' ]+" | tr -d '\r\n' | sed 's/[[:space:]]*$//' | sort -u)
 
 if [ -z "$UNIQUE_URLS" ]; then
     echo "No valid import URLs found"
     exit 0
 fi
+
+# Debug: Show extracted URLs (one per line for clarity)
+echo "::group::Debug: Extracted unique URLs"
+echo "$UNIQUE_URLS" | while IFS= read -r url; do
+    [ -n "$url" ] && echo "  URL: '$url' (length: ${#url})"
+done
+echo "::endgroup::"
+echo ""
 
 # Debug: Show found imports
 echo "::group::Debug: Dhall files with remote imports"
@@ -251,8 +260,18 @@ FAILED_URLS=()
 echo "Found $(echo "$UNIQUE_URLS" | wc -l) unique import URL(s)"
 echo ""
 
-for url in $UNIQUE_URLS; do
+# Process URLs line by line to handle any remaining whitespace issues
+echo "$UNIQUE_URLS" | while IFS= read -r url || [ -n "$url" ]; do
+    # Trim any remaining whitespace/newlines
+    url=$(echo "$url" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    
+    # Skip empty URLs
+    [ -z "$url" ] && continue
+    
     echo -n "Checking: $url ... "
+    
+    # Debug: Show URL before processing
+    echo "::debug::Processing URL: '$url' (length: ${#url})" >&2
     
     # Debug: Parse URL components
     if [[ "$url" =~ https://raw\.githubusercontent\.com/([^/]+)/([^/]+)/([^/]+)/(.+) ]]; then
@@ -305,7 +324,7 @@ for url in $UNIQUE_URLS; do
         suggest_fix "$url" "$HTTP_CODE"
         echo ""
     fi
-done
+done <<< "$UNIQUE_URLS"
 
 echo ""
 echo "Results: $SUCCESS succeeded, $FAILED failed"

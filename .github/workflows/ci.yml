@@ -1165,9 +1165,37 @@ jobs:
           
           # Get first backend service (space-separated format)
           FIRST_BACKEND=$(echo "$BACKEND_SERVICES" | awk '{print $1}')
-          BACKEND_PORT=$(docker compose $COMPOSE_FILES config | grep -A 30 "^  ${FIRST_BACKEND}:" | grep -E "^\s+-.*:8000" | head -1 | sed -E 's/.*:([0-9]+):8000/\1/' || echo "8000")
+          
+          # Debug: Show docker compose config for port extraction
+          echo "::group::Debug: Port extraction for $FIRST_BACKEND"
+          echo "Docker compose config for service:"
+          docker compose $COMPOSE_FILES config | grep -A 30 "^  ${FIRST_BACKEND}:" || echo "Service not found in config"
+          echo "::endgroup::"
+          
+          # Extract port - handle both variable expansion and direct port formats
+          # Format can be: "8000:8000" or "${VAR:-8000}:8000" (after docker compose config expansion)
+          BACKEND_PORT=$(docker compose $COMPOSE_FILES config 2>/dev/null | \
+            grep -A 30 "^  ${FIRST_BACKEND}:" | \
+            grep -E "^\s+-\s+.*:8000" | \
+            head -1 | \
+            sed -E 's/.*:([0-9]+):8000/\1/' || echo "8000")
+          
+          # Fallback: if port extraction failed, try alternative pattern
+          if [ -z "$BACKEND_PORT" ] || [ "$BACKEND_PORT" = "8000" ]; then
+            # Try to get port from actual running container
+            BACKEND_PORT=$(docker compose $COMPOSE_FILES ps --format json 2>/dev/null | \
+              jq -r ".[] | select(.Service == \"$FIRST_BACKEND\") | .Publishers[0].PublishedPort // empty" 2>/dev/null || echo "")
+            if [ -z "$BACKEND_PORT" ]; then
+              BACKEND_PORT="8000"  # Default fallback
+              echo "::warning::Could not extract port, using default: $BACKEND_PORT"
+            else
+              echo "::notice::Extracted port from running container: $BACKEND_PORT"
+            fi
+          fi
+          
           BACKEND_URL="http://localhost:${BACKEND_PORT}"
           
+          echo "::notice::Using backend: $FIRST_BACKEND on port $BACKEND_PORT"
           echo "=== Testing Hello Endpoint (${FIRST_BACKEND} on port ${BACKEND_PORT}) ==="
           response=$(curl -s "${BACKEND_URL}/api/hello")
           echo "$response" | jq .
