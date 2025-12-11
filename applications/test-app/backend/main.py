@@ -289,7 +289,7 @@ async def deploy_test_3(request: Request):
     """DEPLOY-TEST-3: Latest test endpoint for deployment verification after fixes"""
     environment = os.getenv("ENVIRONMENT", "development")
     return HelloResponse(
-        message=f"DEPLOY-TEST-3: ✅ Backend deployed successfully! Environment: {environment} | Prelude.Map.Type fix | Artifact upload fixed | Full pipeline test"
+        message=f"DEPLOY-TEST-3: ✅ Backend deployed successfully! Environment: {environment} | Fold arg order fixed | Built-images merge fixed | Full pipeline run"
     )
 
 
