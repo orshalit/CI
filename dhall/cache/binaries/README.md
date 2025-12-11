@@ -27,20 +27,14 @@ This directory contains cached Dhall binaries (`dhall` and `dhall-to-json`) as a
 
 To update the cached binaries to a new version:
 
-```bash
-# 1. Check the latest version on GitHub releases:
-#    https://github.com/dhall-lang/dhall-haskell/releases
-
-# 2. Update the version in scripts/install-dhall-with-fallback.sh
-#    (if different from current)
-
-# 3. Run the populate script (requires Linux/WSL):
-bash scripts/populate-dhall-binaries-cache.sh
-
-# 4. Commit the updated binaries:
-git add dhall/cache/binaries/{dhall,dhall-to-json}
-git commit -m "chore: Update Dhall binaries cache to vX.Y.Z"
-```
+1. Check the latest version on GitHub releases: https://github.com/dhall-lang/dhall-haskell/releases
+2. Download the new binaries manually from the release page
+3. Replace the binaries in this directory
+4. Commit the updated binaries:
+   ```bash
+   git add dhall/cache/binaries/{dhall,dhall-to-json}
+   git commit -m "chore: Update Dhall binaries cache to vX.Y.Z"
+   ```
 
 The populate script downloads binaries directly from the official GitHub releases, matching the official installation documentation.
 
