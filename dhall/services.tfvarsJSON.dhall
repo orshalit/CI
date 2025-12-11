@@ -7,7 +7,7 @@
 let Prelude = https://prelude.dhall-lang.org/v21.0.0/package.dhall
 
 let Service =
-      https://raw.githubusercontent.com/orshalit/projectdevops/main/config/types/Service.dhall
+      ../DEVOPS/config/types/Service.dhall
 
 let toTerraformJSON = ./toTerraformJSON.dhall
 

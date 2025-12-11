@@ -2,8 +2,7 @@
 -- Used by services.tfvarsJSON.dhall to generate Terraform configuration
 let Prelude = https://prelude.dhall-lang.org/v21.0.0/package.dhall
 
-let Service =
-      https://raw.githubusercontent.com/orshalit/projectdevops/main/config/types/Service.dhall
+let Service = ../DEVOPS/config/types/Service.dhall
 
 let servicesList =
       [ ./applications/test-app/api.dhall
