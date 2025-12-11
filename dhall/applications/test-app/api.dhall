@@ -12,14 +12,8 @@ in  { name = "test-app-api"
     , cpu = 256
     , memory = 512
     , desired_count = 2
-    , env =
-        Prelude.Map.fromList
-          Text
-          Text
-          [ { mapKey = "LOG_LEVEL", mapValue = "INFO" }
-          , { mapKey = "DATABASE_URL", mapValue = "" }
-          ]
-    , secrets = Prelude.Map.empty Text Text
+    , env = toMap { LOG_LEVEL = "INFO", DATABASE_URL = "" }
+    , secrets = toMap {=}
     , service_discovery_name = None Text
     , alb = { health_check_path = Some "/health"
             , health_check_port = None Text

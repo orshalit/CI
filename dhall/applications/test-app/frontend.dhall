@@ -12,14 +12,8 @@ in  { name = "test-app-frontend"
     , cpu = 256
     , memory = 512
     , desired_count = 2
-    , env =
-        Prelude.Map.fromList
-          Text
-          Text
-          [ { mapKey = "LOG_LEVEL", mapValue = "INFO" }
-          , { mapKey = "BACKEND_API_URL", mapValue = "https://test-api.app.dev.light-solutions.org" }
-          ]
-    , secrets = Prelude.Map.empty Text Text
+    , env = toMap { LOG_LEVEL = "INFO", BACKEND_API_URL = "https://test-api.app.dev.light-solutions.org" }
+    , secrets = toMap {=}
     , service_discovery_name = None Text
     , alb = { health_check_path = None Text
             , health_check_port = None Text
