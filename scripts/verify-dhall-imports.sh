@@ -120,6 +120,7 @@ suggest_fix() {
     local expected_repo="${DEVOPS_REPO_NAME:-projectdevops}"
     
     # Extract repository and commit from URL
+    # URL format: https://raw.githubusercontent.com/owner/repo/ref/path/to/file.dhall
     if [[ "$url" =~ https://raw\.githubusercontent\.com/([^/]+)/([^/]+)/([^/]+)/(.+) ]]; then
         local owner="${BASH_REMATCH[1]}"
         local repo="${BASH_REMATCH[2]}"
@@ -178,10 +179,29 @@ for url in $UNIQUE_URLS; do
         echo "✓ OK"
         SUCCESS=$((SUCCESS + 1))
     else
-        ERROR=$(check_url "$url" 2>&1 || true)
-        HTTP_CODE=$(echo "$ERROR" | grep -oE "[0-9]{3}" | head -1 || echo "000")
+        # Get error message (check_url outputs error to stdout when it fails)
+        HTTP_CODE="000"
+        ERROR_MSG="Network error/timeout"
+        
+        # Try to get HTTP code from check_url output
+        CHECK_RESULT=$(check_url "$url" 2>&1 || true)
+        if echo "$CHECK_RESULT" | grep -qE "^[0-9]{3}$"; then
+            HTTP_CODE="$CHECK_RESULT"
+            if [ "$HTTP_CODE" = "404" ]; then
+                ERROR_MSG="Not found (404)"
+            elif [ "$HTTP_CODE" = "403" ]; then
+                ERROR_MSG="Forbidden (403)"
+            elif [ "$HTTP_CODE" = "429" ]; then
+                ERROR_MSG="Rate limited (429)"
+            else
+                ERROR_MSG="HTTP $HTTP_CODE"
+            fi
+        else
+            ERROR_MSG="$CHECK_RESULT"
+        fi
+        
         echo "✗ FAILED"
-        echo "  Error: $ERROR"
+        echo "  Error: $ERROR_MSG"
         FAILED=$((FAILED + 1))
         FAILED_URLS+=("$url|$HTTP_CODE")
         

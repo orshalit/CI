@@ -38,7 +38,7 @@ runs:
   using: 'composite'
   steps:
     - name: Checkout DEVOPS repository
-      if: inputs.devops_repo != ''
+      if: inputs.devops_repo != '' && inputs.devops_repo != 'null/null'
       uses: actions/checkout@v4
       with:
         repository: ${{ inputs.devops_repo }}
