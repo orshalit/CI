@@ -641,15 +641,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      
       - name: Detect images to build
         id: set-matrix
         run: |
-          python scripts/detect-app-images.py --format matrix > matrix.json
+          chmod +x scripts/detect-app-images.sh
+          scripts/detect-app-images.sh --format matrix > matrix.json
           echo "matrix<<EOF" >> $GITHUB_OUTPUT
           cat matrix.json >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
