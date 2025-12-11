@@ -20,22 +20,24 @@ on:
       - 'v*'  # Always run on version tags
     paths:
       - 'applications/**'  # All application code
-      - 'scripts/**'
-      - 'dhall/**'  # Dhall configuration files
+      - 'dhall/**'  # Dhall configuration files (service definitions affect deployments)
       - 'docker-compose*.yml'
       - 'Dockerfile*'
       - '.github/workflows/ci.yml'  # Run if CI workflow itself changes
+      # Note: scripts/** removed - script changes don't require CI/CD runs
+      # Scripts are validated via pre-commit hooks and can be tested manually
       # Note: paths-ignore removed - GitHub Actions doesn't allow both paths and paths-ignore
       # Markdown files in these directories won't trigger workflow (paths are specific enough)
   pull_request:
     branches: [main, develop]
     paths:
       - 'applications/**'  # All application code
-      - 'scripts/**'
-      - 'dhall/**'  # Dhall configuration files
+      - 'dhall/**'  # Dhall configuration files (service definitions affect deployments)
       - 'docker-compose*.yml'
       - 'Dockerfile*'
       - '.github/workflows/ci.yml'
+      # Note: scripts/** removed - script changes don't require CI/CD runs
+      # Scripts are validated via pre-commit hooks and can be tested manually
       # Note: paths-ignore removed - GitHub Actions doesn't allow both paths and paths-ignore
       # Markdown files in these directories won't trigger workflow (paths are specific enough)
   workflow_dispatch:
