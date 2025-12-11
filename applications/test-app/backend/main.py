@@ -120,7 +120,7 @@ async def health_check():
     else:
         version_info["version"] = os.getenv("APP_VERSION")
         version_info["commit"] = os.getenv("GIT_COMMIT")
-    
+
     # Check if database is available
     if not database_available:
         return HealthResponse(
@@ -251,7 +251,8 @@ async def hello(request: Request):
                 with open(version_file) as f:
                     version_data = json.load(f)
                     build_date = version_data.get("build_date", "unknown")
-                    commit_short = version_data.get("commit", "unknown")[:7] if version_data.get("commit") != "unknown" else "unknown"
+                    commit_val = version_data.get("commit", "unknown")
+                    commit_short = commit_val[:7] if commit_val != "unknown" else "unknown"
                     build_info = f" (build: {commit_short}, {build_date})"
             except (json.JSONDecodeError, OSError):
                 pass
