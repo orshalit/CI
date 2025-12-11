@@ -13,7 +13,7 @@ in  { name = "test-app-frontend"
     , memory = 512
     , desired_count = 2
     , env = toMap { LOG_LEVEL = "INFO", BACKEND_API_URL = "https://test-api.app.dev.light-solutions.org" }
-    , secrets = toMap {=}
+    , secrets = [] : List { mapKey : Text, mapValue : Text }
     , service_discovery_name = None Text
     , alb = { health_check_path = None Text
             , health_check_port = None Text

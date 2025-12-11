@@ -13,7 +13,7 @@ in  { name = "test-app-api"
     , memory = 512
     , desired_count = 2
     , env = toMap { LOG_LEVEL = "INFO", DATABASE_URL = "" }
-    , secrets = toMap {=}
+    , secrets = [] : List { mapKey : Text, mapValue : Text }
     , service_discovery_name = None Text
     , alb = { health_check_path = Some "/health"
             , health_check_port = None Text
