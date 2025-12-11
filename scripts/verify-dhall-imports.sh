@@ -69,7 +69,8 @@ fi
 
 # Extract unique URLs (handle both single-line and multi-line imports)
 # Trim whitespace and newlines from URLs to prevent curl errors
-UNIQUE_URLS=$(echo "$IMPORTS" | grep -oE "https://raw\.githubusercontent\.com/[^\"' ]+" | tr -d '\r\n' | sed 's/[[:space:]]*$//' | sort -u)
+# Use xargs to trim and handle newlines properly
+UNIQUE_URLS=$(echo "$IMPORTS" | grep -oE "https://raw\.githubusercontent\.com/[^\"' \r\n]+" | xargs -n1 printf '%s\n' | sort -u)
 
 if [ -z "$UNIQUE_URLS" ]; then
     echo "No valid import URLs found"
@@ -270,8 +271,16 @@ echo "$UNIQUE_URLS" | while IFS= read -r url || [ -n "$url" ]; do
     
     echo -n "Checking: $url ... "
     
-    # Debug: Show URL before processing
+    # Debug: Show URL before processing (with hexdump to detect hidden chars)
     echo "::debug::Processing URL: '$url' (length: ${#url})" >&2
+    echo "::debug::URL hexdump (first 100 chars): $(echo -n "$url" | head -c 100 | xxd -p 2>/dev/null || echo 'xxd not available')" >&2
+    # Check for newlines/carriage returns
+    if echo "$url" | grep -q $'\r'; then
+        echo "::warning::URL contains carriage return (\\r)" >&2
+    fi
+    if echo "$url" | grep -q $'\n'; then
+        echo "::warning::URL contains newline (\\n)" >&2
+    fi
     
     # Debug: Parse URL components
     if [[ "$url" =~ https://raw\.githubusercontent\.com/([^/]+)/([^/]+)/([^/]+)/(.+) ]]; then
