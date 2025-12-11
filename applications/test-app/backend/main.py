@@ -46,6 +46,7 @@ limiter = Limiter(key_func=get_remote_address)
 async def lifespan(app: FastAPI):
     """Lifespan event handler for startup and shutdown"""
     # Startup: Initialize database only if available and not in testing mode
+    # CI/CD Pipeline Test: Full pipeline validation with Dhall fixes
     if not settings.TESTING and database_available:
         logger.info("Initializing database...")
         try:
