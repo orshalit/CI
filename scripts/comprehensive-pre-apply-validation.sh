@@ -277,7 +277,53 @@ if [ "$TERRAFORM_VERSION" != "1.6.0" ]; then
 fi
 
 # ============================================================================
-# 8. Check VPC/Subnet Changes (Low Priority)
+# 8. Check Target Group Health Check Path Drift (Medium Priority)
+# ============================================================================
+echo "::notice::Checking target group health check path drift..."
+
+REGION="${AWS_REGION:-us-east-1}"
+DRIFT_DETECTED=false
+
+# Get all target groups from Terraform state
+TF_TGS=$(terraform -chdir="$PLAN_DIR" state list 2>/dev/null | \
+  grep "aws_lb_target_group" || echo "")
+
+if [ -n "$TF_TGS" ]; then
+  for tg_resource in $TF_TGS; do
+    TG_OUTPUT=$(terraform -chdir="$PLAN_DIR" state show "$tg_resource" 2>/dev/null || echo "")
+    
+    if [ -n "$TG_OUTPUT" ]; then
+      TG_NAME=$(echo "$TG_OUTPUT" | grep -E "^\s*name\s*=" | head -1 | \
+        sed -E 's/.*name\s*=\s*"?([^"]+)"?.*/\1/' | tr -d ' ' || echo "")
+      HC_BLOCK=$(echo "$TG_OUTPUT" | sed -n '/health_check {/,/}/p')
+      TF_PATH=$(echo "$HC_BLOCK" | grep -E "^\s+path\s*=" | head -1 | \
+        sed -E 's/.*path\s*=\s*"?([^"]+)"?.*/\1/' | tr -d ' ' || echo "/")
+      
+      if [ -n "$TG_NAME" ]; then
+        AWS_PATH=$(aws elbv2 describe-target-groups \
+          --region "$REGION" \
+          --names "$TG_NAME" \
+          --query 'TargetGroups[0].HealthCheckPath' \
+          --output text 2>/dev/null || echo "")
+        
+        if [ -n "$AWS_PATH" ] && [ "$AWS_PATH" != "None" ] && [ "$TF_PATH" != "$AWS_PATH" ]; then
+          echo "::error::❌ Health check path drift for $TG_NAME:"
+          echo "::error::  Terraform: $TF_PATH"
+          echo "::error::  AWS:       $AWS_PATH"
+          DRIFT_DETECTED=true
+          ERRORS=$((ERRORS + 1))
+        fi
+      fi
+    fi
+  done
+  
+  if [ "$DRIFT_DETECTED" = false ]; then
+    echo "::notice::✓ No target group health check path drift detected"
+  fi
+fi
+
+# ============================================================================
+# 9. Check VPC/Subnet Changes (Low Priority)
 # ============================================================================
 echo "::notice::Checking for VPC/subnet changes..."
 

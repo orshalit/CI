@@ -87,18 +87,8 @@ if [ -d "$BASE_DIR/applications" ]; then
     done < <(find "$BASE_DIR/applications" -mindepth 1 -maxdepth 1 -type d | sort)
 fi
 
-# Build JSON output
-MATRIX_JSON="{\"include\":["
-FIRST=true
-for item in "${MATRIX_ITEMS[@]}"; do
-    if [ "$FIRST" = true ]; then
-        FIRST=false
-    else
-        MATRIX_JSON="$MATRIX_JSON,"
-    fi
-    MATRIX_JSON="$MATRIX_JSON$item"
-done
-MATRIX_JSON="$MATRIX_JSON]}"
+# Build JSON output using jq (cleaner and faster)
+MATRIX_JSON=$(printf '%s\n' "${MATRIX_ITEMS[@]}" | jq -R -s -c 'split("\n") | map(select(length > 0)) | map(fromjson) | {include: .}')
 
 # Output based on format
 case "$FORMAT" in
