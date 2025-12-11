@@ -71,13 +71,25 @@ jobs:
           fi
           echo "::notice::CI workflow succeeded - proceeding with deployment"
 
-      - name: Download build version from CI workflow
+      - name: Download artifacts from CI workflow
         if: |
           github.event_name == 'workflow_run' &&
           github.event.workflow_run.conclusion == 'success'
         uses: actions/download-artifact@v4
         with:
           name: build-version
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+          path: .
+        continue-on-error: true
+
+      - name: Download built images list from CI workflow
+        if: |
+          github.event_name == 'workflow_run' &&
+          github.event.workflow_run.conclusion == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: built-images
           github-token: ${{ secrets.GITHUB_TOKEN }}
           run-id: ${{ github.event.workflow_run.id }}
           path: .
@@ -510,7 +522,7 @@ jobs:
             echo "services_tfvars_exists=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Filter services by application (native Dhall)
+      - name: Filter services by application and built images (modular & resilient)
         id: filter_services
         if: |
           (steps.vars.outputs.action == 'plan' || steps.vars.outputs.action == 'apply') &&
@@ -519,15 +531,136 @@ jobs:
           PLAN_DIR="DEVOPS/live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}"
           APPLICATION="${{ steps.vars.outputs.application }}"
           
-          # If application is "all", use the full services file (already generated)
-          if [ "$APPLICATION" = "all" ] || [ -z "$APPLICATION" ]; then
-            echo "::notice::Deploying all services (application=all or not specified)"
-            echo "filtered_services_file=services.generated.tfvars" >> $GITHUB_OUTPUT
-            SERVICES_FILE="$PLAN_DIR/services.generated.tfvars"
-            SERVICE_COUNT=$(grep -cE '^\s+"[^"]+::[^"]+"\s*=\s*\{' "$SERVICES_FILE" 2>/dev/null || echo "0")
-            echo "services_count=$SERVICE_COUNT" >> $GITHUB_OUTPUT
-            exit 0
+          # Load built images list (modular: only deploy services whose images were built)
+          BUILT_IMAGES_FILE="built-images-consolidated.txt"
+          BUILT_IMAGES=""
+          if [ -f "$BUILT_IMAGES_FILE" ]; then
+            # Extract image names (remove comments and empty lines)
+            BUILT_IMAGES=$(grep -v '^#' "$BUILT_IMAGES_FILE" | grep -v '^$' | sort -u || echo "")
+            echo "::notice::Found built images list:"
+            echo "$BUILT_IMAGES" | sed 's/^/  - /' || echo "  (none)"
+          else
+            echo "::warning::Built images list not found - will deploy all services"
+            echo "::warning::This might deploy services whose images weren't built"
           fi
+          
+          # Generate base filtered services by application
+          FILTERED_DHALL="dhall/services.tfvars.filtered.dhall"
+          BASE_FILTERED_FILE="$PLAN_DIR/services.generated.tfvars.base-filtered"
+          
+          if [ "$APPLICATION" = "all" ] || [ -z "$APPLICATION" ]; then
+            echo "::notice::Application filter: all (deploying all applications)"
+            # Use full services file as base
+            BASE_FILTERED_FILE="$PLAN_DIR/services.generated.tfvars"
+          else
+            echo "::notice::Application filter: $APPLICATION"
+            # Generate filtered by application first
+            if [ ! -f "$FILTERED_DHALL" ]; then
+              echo "::error::Dhall filtered template not found at $FILTERED_DHALL"
+              exit 1
+            fi
+            
+            dhall --file "$FILTERED_DHALL" --argstr application "$APPLICATION" --plain > "$BASE_FILTERED_FILE" || {
+              echo "::error::Failed to generate filtered tfvars from Dhall"
+              exit 1
+            }
+          fi
+          
+          # Now filter by built images (modular: only services whose images exist)
+          FILTERED_FILE="$PLAN_DIR/services.generated.tfvars.filtered"
+          
+          if [ -n "$BUILT_IMAGES" ]; then
+            echo "::notice::Filtering services to only those whose images were built (modular deployment)"
+            
+            # Extract image repos from services and match against built images
+            # Service format: "app::service" = { container_image = "ghcr.io/owner/image-name" ... }
+            # Built images format: image-name (one per line)
+            
+            # Create temp file for filtered services
+            TEMP_FILTERED=$(mktemp)
+            
+            # Process each service block
+            IN_SERVICE=false
+            SERVICE_KEY=""
+            SERVICE_BLOCK=""
+            SKIP_SERVICE=false
+            
+            while IFS= read -r line; do
+              # Detect service start: "app::service" = {
+              if echo "$line" | grep -qE '^\s+"[^"]+::[^"]+"\s*=\s*\{'; then
+                # Save previous service if valid
+                if [ "$IN_SERVICE" = true ] && [ "$SKIP_SERVICE" = false ]; then
+                  echo "$SERVICE_BLOCK" >> "$TEMP_FILTERED"
+                fi
+                
+                # Start new service
+                IN_SERVICE=true
+                SERVICE_KEY=$(echo "$line" | sed -E 's/^\s*"([^"]+)".*/\1/')
+                SERVICE_BLOCK="$line"
+                SKIP_SERVICE=false
+                
+                # Extract app name from service key (app::service)
+                APP_NAME=$(echo "$SERVICE_KEY" | cut -d'::' -f1)
+                SERVICE_NAME=$(echo "$SERVICE_KEY" | cut -d'::' -f2)
+                
+                # Expected image name format: {app}-{service-type} (e.g., test-app-frontend, test-app-backend)
+                # Match against built images
+                EXPECTED_IMAGE="${APP_NAME}-${SERVICE_NAME}"
+                if ! echo "$BUILT_IMAGES" | grep -q "^${EXPECTED_IMAGE}$"; then
+                  echo "::warning::Skipping service '$SERVICE_KEY' - image '$EXPECTED_IMAGE' was not built"
+                  SKIP_SERVICE=true
+                else
+                  echo "::notice::Including service '$SERVICE_KEY' - image '$EXPECTED_IMAGE' was built"
+                fi
+              elif [ "$IN_SERVICE" = true ]; then
+                SERVICE_BLOCK="${SERVICE_BLOCK}\n${line}"
+                
+                # Detect service end: closing brace
+                if echo "$line" | grep -qE '^\s*\}$'; then
+                  if [ "$SKIP_SERVICE" = false ]; then
+                    echo -e "$SERVICE_BLOCK" >> "$TEMP_FILTERED"
+                  fi
+                  IN_SERVICE=false
+                  SERVICE_BLOCK=""
+                fi
+              else
+                # Header/comment lines
+                echo "$line" >> "$TEMP_FILTERED"
+              fi
+            done < "$BASE_FILTERED_FILE"
+            
+            # Save last service if valid
+            if [ "$IN_SERVICE" = true ] && [ "$SKIP_SERVICE" = false ]; then
+              echo -e "$SERVICE_BLOCK" >> "$TEMP_FILTERED"
+            fi
+            
+            mv "$TEMP_FILTERED" "$FILTERED_FILE"
+            
+            FILTERED_COUNT=$(grep -cE '^\s+"[^"]+::[^"]+"\s*=\s*\{' "$FILTERED_FILE" 2>/dev/null || echo "0")
+            BASE_COUNT=$(grep -cE '^\s+"[^"]+::[^"]+"\s*=\s*\{' "$BASE_FILTERED_FILE" 2>/dev/null || echo "0")
+            
+            if [ "$FILTERED_COUNT" -eq 0 ] && [ "$BASE_COUNT" -gt 0 ]; then
+              echo "::error::No services match built images!"
+              echo "::error::Built images:"
+              echo "$BUILT_IMAGES" | sed 's/^/  - /'
+              echo "::error::Available services (from application filter):"
+              grep -E '^\s+"[^"]+::[^"]+"' "$BASE_FILTERED_FILE" | sed 's/^/  - /' || echo "  (none)"
+              exit 1
+            fi
+            
+            echo "::notice::✓ Modular filtering: $FILTERED_COUNT/$BASE_COUNT service(s) match built images"
+          else
+            echo "::warning::No built images list - deploying all services (not modular)"
+            cp "$BASE_FILTERED_FILE" "$FILTERED_FILE"
+            FILTERED_COUNT=$(grep -cE '^\s+"[^"]+::[^"]+"\s*=\s*\{' "$FILTERED_FILE" 2>/dev/null || echo "0")
+          fi
+          
+          echo "filtered_services_file=services.generated.tfvars.filtered" >> $GITHUB_OUTPUT
+          echo "services_count=$FILTERED_COUNT" >> $GITHUB_OUTPUT
+          
+          echo "::group::Services to deploy (modular)"
+          grep -E '^\s+"[^"]+::[^"]+"' "$FILTERED_FILE" | head -20 || echo "(none)"
+          echo "::endgroup::"
           
           # Generate filtered tfvars directly from Dhall (native, type-safe)
           FILTERED_FILE="$PLAN_DIR/services.generated.tfvars.filtered"
