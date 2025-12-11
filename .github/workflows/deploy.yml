@@ -352,6 +352,10 @@ jobs:
 
       - name: Terraform Format Check and Auto-Fix
         id: fmt
+        if: |
+          steps.vars.outputs.environment != '' &&
+          steps.vars.outputs.module_path != '' &&
+          (steps.vars.outputs.action == 'plan' || steps.vars.outputs.action == 'apply' || steps.vars.outputs.action == 'destroy')
         run: |
           TERRAFORM_DIR="DEVOPS/live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}"
           
