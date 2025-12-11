@@ -2,7 +2,7 @@
 let Prelude = https://prelude.dhall-lang.org/v21.0.0/package.dhall
 
 let Service =
-      https://raw.githubusercontent.com/orshalit/DEVOPS/main/config/types/Service.dhall
+      https://raw.githubusercontent.com/orshalit/DEVOPS/b593194afb2c3be99edb55e6cd93c1494e20dc06/config/types/Service.dhall
 
 let servicesList =
       [ ./applications/test-app/api.dhall
