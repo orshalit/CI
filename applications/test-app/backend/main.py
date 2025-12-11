@@ -238,10 +238,28 @@ def rate_limit():
 @rate_limit()
 async def hello(request: Request):
     """Simple hello endpoint (DEPLOY-TEST-1: Version info added)"""
-    # DEPLOY-TEST-1: Added timestamp for deployment verification
-    import datetime
-    timestamp = datetime.datetime.utcnow().isoformat() + "Z"
-    return HelloResponse(message=f"hello from backend (deployed at {timestamp})")
+    # DEPLOY-TEST-1: Show build info only in non-production environments
+    # For security: Don't expose deployment timestamps in production
+    environment = os.getenv("ENVIRONMENT", "development")
+    
+    if environment.lower() != "production":
+        # In dev/staging: Show build date for verification (less sensitive than current timestamp)
+        version_file = PathLib("/app/version.json")
+        build_info = ""
+        if version_file.exists():
+            try:
+                with open(version_file) as f:
+                    version_data = json.load(f)
+                    build_date = version_data.get("build_date", "unknown")
+                    commit_short = version_data.get("commit", "unknown")[:7] if version_data.get("commit") != "unknown" else "unknown"
+                    build_info = f" (build: {commit_short}, {build_date})"
+            except (json.JSONDecodeError, OSError):
+                pass
+        
+        return HelloResponse(message=f"hello from backend{build_info}")
+    else:
+        # In production: Keep it simple, no build info
+        return HelloResponse(message="hello from backend")
 
 
 @app.get(
