@@ -199,6 +199,12 @@ jobs:
           done
       
       # App-specific Python code quality
+      - name: Install Ruff
+        if: steps.detect-apps.outputs.backend_apps != '[]'
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff
+      
       - name: Run Ruff linter for app backends
         continue-on-error: true
         run: |

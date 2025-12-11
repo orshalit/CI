@@ -10,7 +10,7 @@ let servicesList =
       , ./applications/test-app/frontend.dhall
       ]
 
--- Convert list to map using Map.toMap
+-- Convert list to map using List.fold with Map.insert
 let servicesEntries =
       Prelude.List.map
         Service
@@ -18,5 +18,13 @@ let servicesEntries =
         (\(service : Service) -> { mapKey = service.name, mapValue = service })
         servicesList
 
-in  Prelude.Map.toMap Service servicesEntries
+in  Prelude.List.fold
+      { mapKey : Text, mapValue : Service }
+      (Prelude.Map.Type Text Service)
+      (\(entry : { mapKey : Text, mapValue : Service }) ->
+        \(acc : Prelude.Map.Type Text Service) ->
+          Prelude.Map.insert Text Service entry.mapKey entry.mapValue acc
+      )
+      ({=} : Prelude.Map.Type Text Service)
+      servicesEntries
 
