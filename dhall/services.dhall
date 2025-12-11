@@ -11,23 +11,11 @@ let servicesList =
       , ./applications/test-app/frontend.dhall
       ]
 
--- Convert list to map using List.fold with Map.insert
-let servicesEntries =
-      Prelude.List.map
-        Service
-        { mapKey : Text, mapValue : Service }
-        (\(service : Service) -> { mapKey = service.name, mapValue = service })
-        servicesList
-
-let emptyMap = Prelude.Map.empty Text Service
-
-in  Prelude.List.fold
+-- Convert list to map by transforming each service to a map entry
+-- In Dhall, Map a b = List { mapKey : a, mapValue : b }, so the result IS the map
+in  Prelude.List.map
+      Service
       { mapKey : Text, mapValue : Service }
-      servicesEntries
-      (Prelude.Map.Type Text Service)
-      (\(entry : { mapKey : Text, mapValue : Service }) ->
-        \(acc : Prelude.Map.Type Text Service) ->
-          Prelude.Map.insert Text Service entry.mapKey entry.mapValue acc
-      )
-      emptyMap
+      (\(service : Service) -> { mapKey = service.name, mapValue = service })
+      servicesList
 

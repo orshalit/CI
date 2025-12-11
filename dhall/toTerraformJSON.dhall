@@ -121,6 +121,7 @@ let toTerraformJSON = \(servicesMap : List { mapKey : Text, mapValue : Service }
               )
               servicesMap
       
-      in  { services = Prelude.Map.fromList Text TerraformService terraformServices }
+      -- terraformServices is already a List { mapKey, mapValue } which IS a Dhall Map
+      in  { services = terraformServices }
 
 in  toTerraformJSON

@@ -14,6 +14,6 @@ let toTerraformJSON = ./toTerraformJSON.dhall
 
 let services = ./services.dhall
 
--- Convert services map to list of entries, then to Terraform JSON format
-in  toTerraformJSON (Prelude.Map.toList Service services)
+-- services is already a List { mapKey, mapValue } which toTerraformJSON expects
+in  toTerraformJSON services
 
