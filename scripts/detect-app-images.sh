@@ -6,8 +6,26 @@
 
 set -euo pipefail
 
-FORMAT="${1:-matrix}"
-NO_SHARED="${2:-}"
+FORMAT="matrix"
+NO_SHARED=""
+
+# Parse command-line arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --format)
+            FORMAT="$2"
+            shift 2
+            ;;
+        --no-shared)
+            NO_SHARED="true"
+            shift
+            ;;
+        *)
+            echo "Error: Unknown option '$1'" >&2
+            exit 1
+            ;;
+    esac
+done
 
 BASE_DIR="."
 MATRIX_ITEMS=()
