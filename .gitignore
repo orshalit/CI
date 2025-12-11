@@ -67,3 +67,7 @@ dhall/cache/binaries/*.tar.*
 DEVOPS/
 CI/
 
+# Documentation files (orientation/help only, not committed)
+*.md
+!README.md
+
