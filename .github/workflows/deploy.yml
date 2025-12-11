@@ -544,108 +544,92 @@ jobs:
           fi
           
           # Filter services.generated.json by application first
+          FILTERED_JSON=$(mktemp)
           if [ "$APPLICATION" != "all" ] && [ -n "$APPLICATION" ]; then
             echo "::notice::Filtering by application: $APPLICATION"
-            FILTERED_JSON=$(mktemp)
             jq --arg app "$APPLICATION" 'to_entries | map(select(.value.application == $app)) | from_entries' \
               "$SERVICES_JSON" > "$FILTERED_JSON" || {
               echo "::error::Failed to filter services by application"
               exit 1
             }
-            SERVICES_JSON="$FILTERED_JSON"
+          else
+            echo "::notice::Application filter: all (deploying all applications)"
+            cp "$SERVICES_JSON" "$FILTERED_JSON"
           fi
           
           # Now filter by built images (modular: only services whose images exist)
           if [ -n "$BUILT_IMAGES" ]; then
             echo "::notice::Filtering services to only those whose images were built (modular deployment)"
             
-            FILTERED_JSON=$(mktemp)
             # Match image_repo against built images
-            # image_repo format: "ghcr.io/owner/image-name"
+            # image_repo format: "ghcr.io/owner/image-name" 
             # built images format: "image-name" (one per line)
+            # Extract last part of image_repo (after last /) and match
             
-            # Create jq filter to match image names
-            FILTER_EXPR="to_entries | map(select("
-            FIRST=true
+            FILTERED_JSON_TEMP=$(mktemp)
+            # Build jq filter expression
+            FILTER_PARTS=""
             for IMG in $BUILT_IMAGES; do
-              if [ "$FIRST" = true ]; then
-                FIRST=false
+              if [ -z "$FILTER_PARTS" ]; then
+                FILTER_PARTS="(.value.image_repo | split(\"/\") | .[-1] == \"$IMG\")"
               else
-                FILTER_EXPR="${FILTER_EXPR} or "
+                FILTER_PARTS="$FILTER_PARTS or (.value.image_repo | split(\"/\") | .[-1] == \"$IMG\")"
               fi
-              # Extract image name from image_repo and match against built image
-              # e.g., "ghcr.io/owner/test-app-frontend" -> "test-app-frontend"
-              FILTER_EXPR="${FILTER_EXPR}(.value.image_repo | split(\"/\") | .[-1] == \"$IMG\")"
             done
-            FILTER_EXPR="${FILTER_EXPR})) | from_entries"
             
-            jq "$FILTER_EXPR" "$SERVICES_JSON" > "$FILTERED_JSON" || {
+            jq "to_entries | map(select($FILTER_PARTS)) | from_entries" "$FILTERED_JSON" > "$FILTERED_JSON_TEMP" || {
               echo "::error::Failed to filter services by built images"
               exit 1
             }
             
-            FILTERED_COUNT=$(jq 'length' "$FILTERED_JSON" 2>/dev/null || echo "0")
-            BASE_COUNT=$(jq 'length' "$SERVICES_JSON" 2>/dev/null || echo "0")
+            FILTERED_COUNT=$(jq 'length' "$FILTERED_JSON_TEMP" 2>/dev/null || echo "0")
+            BASE_COUNT=$(jq 'length' "$FILTERED_JSON" 2>/dev/null || echo "0")
             
             if [ "$FILTERED_COUNT" -eq 0 ] && [ "$BASE_COUNT" -gt 0 ]; then
               echo "::error::No services match built images!"
               echo "::error::Built images:"
               echo "$BUILT_IMAGES" | sed 's/^/  - /'
-              echo "::error::Available services:"
-              jq -r 'keys[]' "$SERVICES_JSON" | sed 's/^/  - /' || echo "  (none)"
+              echo "::error::Available services (image_repo):"
+              jq -r '.[].image_repo' "$FILTERED_JSON" | sed 's/^/  - /' || echo "  (none)"
               exit 1
             fi
             
             echo "::notice::✓ Modular filtering: $FILTERED_COUNT/$BASE_COUNT service(s) match built images"
-            SERVICES_JSON="$FILTERED_JSON"
+            mv "$FILTERED_JSON_TEMP" "$FILTERED_JSON"
           else
-            FILTERED_COUNT=$(jq 'length' "$SERVICES_JSON" 2>/dev/null || echo "0")
+            FILTERED_COUNT=$(jq 'length' "$FILTERED_JSON" 2>/dev/null || echo "0")
             echo "::warning::No built images list - deploying all services (not modular)"
           fi
           
-          # Generate filtered tfvars from filtered JSON using Dhall
-          FILTERED_FILE="$PLAN_DIR/services.generated.tfvars.filtered"
-          FILTERED_DHALL_TEMP=$(mktemp)
-          
-          # Create temporary Dhall file that reads from JSON
-          echo "let services = $SERVICES_JSON" > "$FILTERED_DHALL_TEMP"
-          echo "let toTerraform = ./dhall/toTerraform.dhall" >> "$FILTERED_DHALL_TEMP"
-          echo "in toTerraform (Prelude.Map.values Service services)" >> "$FILTERED_DHALL_TEMP"
-          
-          # Actually, simpler: use jq to convert JSON back to tfvars format
-          # Or regenerate from Dhall with the filtered services
-          # For now, let's use a simpler approach: filter the existing tfvars file
-          
-          # Actually, the cleanest: regenerate tfvars from filtered JSON using the same logic
-          # But that requires Dhall to read JSON, which is complex
-          # Let's use jq to filter the existing tfvars file based on service keys from JSON
-          
-          # Get service keys from filtered JSON
-          FILTERED_KEYS=$(jq -r 'keys[]' "$SERVICES_JSON" 2>/dev/null || echo "")
+          # Get filtered service keys
+          FILTERED_KEYS=$(jq -r 'keys[]' "$FILTERED_JSON" 2>/dev/null || echo "")
           
           if [ -z "$FILTERED_KEYS" ]; then
             echo "::error::No services to deploy after filtering"
             exit 1
           fi
           
-          # Filter the tfvars file to only include services in filtered keys
+          # Filter tfvars file to only include services in filtered keys
           BASE_TFVARS="$PLAN_DIR/services.generated.tfvars"
           if [ ! -f "$BASE_TFVARS" ]; then
             echo "::error::Base tfvars file not found: $BASE_TFVARS"
             exit 1
           fi
           
-          # Extract service blocks for filtered keys
+          FILTERED_FILE="$PLAN_DIR/services.generated.tfvars.filtered"
+          
+          # Extract service blocks for filtered keys using Python-like approach but in bash
+          # Use awk to extract service blocks
           FILTERED_TFVARS=$(mktemp)
-          echo "# Generated from Dhall service definitions (filtered by built images)" > "$FILTERED_TFVARS"
+          echo "# Generated from Dhall service definitions (filtered by built images - modular deployment)" > "$FILTERED_TFVARS"
           echo "# DO NOT EDIT MANUALLY" >> "$FILTERED_TFVARS"
           echo "" >> "$FILTERED_TFVARS"
           echo "services = {" >> "$FILTERED_TFVARS"
           
           for KEY in $FILTERED_KEYS; do
-            # Extract service block from base tfvars
-            # Service format: "app::service" = { ... }
+            # Extract service block matching this key
             awk -v key="$KEY" '
+              BEGIN { in_block=0; brace_count=0 }
               /^[[:space:]]*"'"$KEY"'"\s*=\s*\{/ {
                 print
                 in_block=1
@@ -661,20 +645,27 @@ jobs:
                   exit
                 }
               }
-            ' "$BASE_TFVARS" >> "$FILTERED_TFVARS" || true
+            ' "$BASE_TFVARS" >> "$FILTERED_TFVARS" || {
+              echo "::warning::Could not extract service block for: $KEY"
+            }
           done
           
           echo "}" >> "$FILTERED_TFVARS"
           
           FILTERED_COUNT=$(grep -cE '^\s+"[^"]+::[^"]+"\s*=\s*\{' "$FILTERED_TFVARS" 2>/dev/null || echo "0")
           
-          echo "filtered_services_file=services.generated.tfvars.filtered" >> $GITHUB_OUTPUT
-          echo "services_count=$FILTERED_COUNT" >> $GITHUB_OUTPUT
+          if [ "$FILTERED_COUNT" -eq 0 ]; then
+            echo "::error::No services extracted to filtered tfvars file"
+            exit 1
+          fi
           
           mv "$FILTERED_TFVARS" "$FILTERED_FILE"
           
+          echo "filtered_services_file=services.generated.tfvars.filtered" >> $GITHUB_OUTPUT
+          echo "services_count=$FILTERED_COUNT" >> $GITHUB_OUTPUT
+          
           echo "::group::Services to deploy (modular)"
-          jq -r 'keys[]' "$SERVICES_JSON" | head -20 || echo "(none)"
+          echo "$FILTERED_KEYS" | sed 's/^/  - /'
           echo "::endgroup::"
           
           # Generate filtered tfvars directly from Dhall (native, type-safe)
