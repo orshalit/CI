@@ -4,8 +4,11 @@
 #
 # Fallback order:
 # 1. Try GitHub releases (fastest, always latest)
-# 2. Try GitHub Actions cache (fast, persists across runs)
-# 3. Try repository cache (stable, committed fallback)
+# 2. Try GitHub Actions cache (fast, persists across runs, auto-managed)
+# 3. Try repository cache (stable, pre-populated, committed fallback)
+#
+# Note: Repository cache is NOT updated by this script - it's pre-populated
+# and committed. Use populate-dhall-binaries-cache.sh to update it manually.
 #
 # Usage: scripts/install-dhall-with-fallback.sh
 
@@ -131,24 +134,8 @@ install_from_cache() {
     return 1
 }
 
-# Function to cache a binary for future use
-cache_binary() {
-    local tool=$1
-    local binary_path=""
-    
-    if [ "$tool" = "dhall" ]; then
-        binary_path="$INSTALL_DIR/dhall"
-    elif [ "$tool" = "dhall-json" ]; then
-        binary_path="$INSTALL_DIR/dhall-to-json"
-    fi
-    
-    if [ -f "$binary_path" ]; then
-        mkdir -p "$CACHE_DIR"
-        cp "$binary_path" "$CACHE_DIR/"
-        chmod +x "$CACHE_DIR/$(basename "$binary_path")"
-        log_info "Cached $tool binary to $CACHE_DIR/$(basename "$binary_path")"
-    fi
-}
+# Note: We don't cache binaries on every run - the cache is pre-populated
+# and committed to the repo. Use populate-dhall-binaries-cache.sh to update it.
 
 # Main installation logic
 install_dhall() {
@@ -159,7 +146,6 @@ install_dhall() {
     
     # Try GitHub first
     if install_from_github "dhall" "$DHALL_VERSION"; then
-        cache_binary "dhall"
         return 0
     fi
     
@@ -182,7 +168,6 @@ install_dhall_json() {
     
     # Try GitHub first
     if install_from_github "dhall-json" "$DHALL_VERSION"; then
-        cache_binary "dhall-json"
         return 0
     fi
     

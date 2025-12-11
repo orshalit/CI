@@ -11,8 +11,10 @@ This directory contains cached Dhall binaries (`dhall` and `dhall-to-json`) as a
 ## How It Works
 
 1. **Primary**: Download from GitHub releases (always latest)
-2. **Fallback 1**: Use GitHub Actions cache (fast, persists across runs)
-3. **Fallback 2**: Use repository cache (stable, committed binaries)
+2. **Fallback 1**: Use GitHub Actions cache (fast, persists across runs, auto-managed by GitHub)
+3. **Fallback 2**: Use repository cache (stable, pre-populated, committed binaries)
+
+**Important**: The repository cache is NOT updated automatically. It's a stable fallback that you manually update when needed.
 
 ## Updating the Cache
 
