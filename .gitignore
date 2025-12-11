@@ -62,6 +62,8 @@ npm-audit-report.json
 # Dhall cache (keep binaries for fallback, but ignore temp files)
 dhall/cache/binaries/*.tmp
 dhall/cache/binaries/*.tar.*
+dhall/cache/binaries/bin/
+# Keep the actual binaries (dhall and dhall-to-json) - they're committed for fallback
 
 # Workflow checkouts (checked out by GitHub Actions, not committed)
 DEVOPS/

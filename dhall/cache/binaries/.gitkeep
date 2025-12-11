@@ -1,0 +1,4 @@
+# This directory contains cached Dhall binaries for fallback
+# Run: ./scripts/populate-dhall-binaries-cache.sh to populate
+# The binaries (dhall and dhall-to-json) should be committed to git
+
