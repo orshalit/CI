@@ -883,12 +883,11 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: built-images
+          name: built-images-${{ matrix.image_name }}
           path: built-images.txt
           retention-days: 7
           if-no-files-found: ignore
-          # Note: GitHub Actions automatically merges artifacts with the same name
-          # No need for merge-multiple parameter (not supported in v4)
+          # Using per-image artifact name to avoid conflicts in matrix
       
       - name: Export image for testing
         if: github.event_name == 'pull_request'
@@ -904,6 +903,50 @@ jobs:
             BUILD_DATE=${{ needs.prepare-build.outputs.build_date }}
           cache-from: type=gha,scope=${{ matrix.image_name }}
           load: true
+
+  # ===========================================================================
+  # Collect built images from matrix jobs
+  # ===========================================================================
+
+  collect-built-images:
+    name: Collect built images from matrix jobs
+    runs-on: ubuntu-latest
+    needs: [build-images]
+    if: always()
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download built images artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: built-images-*
+          merge-multiple: true
+          path: collected-built-images
+        continue-on-error: true
+
+      - name: Merge built-images.txt files
+        run: |
+          OUTPUT="built-images.txt"
+          echo "# Images successfully built in this CI run" > "$OUTPUT"
+          echo "# Format: image_name (one per line)" >> "$OUTPUT"
+          echo "# Used by deployment workflow to filter services" >> "$OUTPUT"
+          if compgen -G "collected-built-images/built-images-*/*.txt" > /dev/null; then
+            find collected-built-images -name "*.txt" -maxdepth 3 -print0 | xargs -0 cat >> "$OUTPUT"
+          else
+            echo "::warning::No built-images-* artifacts found"
+          fi
+          # Remove blank/comment lines
+          grep -v '^#' "$OUTPUT" | grep -v '^$' | sort -u > "${OUTPUT}.tmp" || true
+          mv "${OUTPUT}.tmp" "$OUTPUT"
+
+      - name: Upload merged built images artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: built-images
+          path: built-images.txt
+          retention-days: 7
+          if-no-files-found: warn
 
   # ===========================================================================
   # End-to-End Tests
