@@ -10,7 +10,7 @@ let servicesList =
       , ./applications/test-app/frontend.dhall
       ]
 
--- Convert list to map using Map.fromList (List.toMap doesn't exist)
+-- Convert list to map using Map.toMap
 let servicesEntries =
       Prelude.List.map
         Service
@@ -18,5 +18,5 @@ let servicesEntries =
         (\(service : Service) -> { mapKey = service.name, mapValue = service })
         servicesList
 
-in  Prelude.Map.fromList Service servicesEntries
+in  Prelude.Map.toMap Service servicesEntries
 
