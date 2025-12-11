@@ -20,11 +20,11 @@ let servicesEntries =
 
 in  Prelude.List.fold
       { mapKey : Text, mapValue : Service }
-      (Prelude.Map.Type Text Service)
+      (Map Text Service)
       (\(entry : { mapKey : Text, mapValue : Service }) ->
-        \(acc : Prelude.Map.Type Text Service) ->
+        \(acc : Map Text Service) ->
           Prelude.Map.insert Text Service entry.mapKey entry.mapValue acc
       )
-      ({=} : Prelude.Map.Type Text Service)
+      ({=} : Map Text Service)
       servicesEntries
 
