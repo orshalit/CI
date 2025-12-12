@@ -68,7 +68,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.API_TITLE,
     version=settings.API_VERSION,
-    # Pipeline fix: ALBConfig defined locally in toTerraformJSON.dhall
+    # Pipeline fix: Prelude.Optional.fold argument order corrected
     lifespan=lifespan,
     docs_url="/docs" if not settings.TESTING else None,
     redoc_url="/redoc" if not settings.TESTING else None,

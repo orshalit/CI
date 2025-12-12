@@ -69,25 +69,25 @@ let TerraformService =
 -- Convert ALB config to Terraform format
 let toTerraformALB = \(alb : ALBConfig) ->
       let healthCheckPath =
-            Prelude.Optional.fold Text "/" (\(path : Text) -> path) alb.health_check_path
+            Prelude.Optional.fold Text alb.health_check_path Text "/" (\(path : Text) -> path)
       
       let healthCheckPort =
-            Prelude.Optional.fold Text "traffic-port" (\(p : Text) -> p) alb.health_check_port
+            Prelude.Optional.fold Text alb.health_check_port Text "traffic-port" (\(p : Text) -> p)
 
       let healthCheckMatcher =
-            Prelude.Optional.fold Text "200" (\(m : Text) -> m) alb.health_check_matcher
+            Prelude.Optional.fold Text alb.health_check_matcher Text "200" (\(m : Text) -> m)
 
       let healthCheckInterval =
-            Prelude.Optional.fold Natural 30 (\(n : Natural) -> n) alb.health_check_interval
+            Prelude.Optional.fold Natural alb.health_check_interval Natural 30 (\(n : Natural) -> n)
 
       let healthCheckTimeout =
-            Prelude.Optional.fold Natural 5 (\(n : Natural) -> n) alb.health_check_timeout
+            Prelude.Optional.fold Natural alb.health_check_timeout Natural 5 (\(n : Natural) -> n)
 
       let healthyThreshold =
-            Prelude.Optional.fold Natural 2 (\(n : Natural) -> n) alb.health_check_healthy_threshold
+            Prelude.Optional.fold Natural alb.health_check_healthy_threshold Natural 2 (\(n : Natural) -> n)
 
       let unhealthyThreshold =
-            Prelude.Optional.fold Natural 2 (\(n : Natural) -> n) alb.health_check_unhealthy_threshold
+            Prelude.Optional.fold Natural alb.health_check_unhealthy_threshold Natural 2 (\(n : Natural) -> n)
       
       in  { alb_id = alb.alb_id
           , listener_protocol = alb.listener_protocol
@@ -107,7 +107,7 @@ let toTerraformALB = \(alb : ALBConfig) ->
 -- Convert Service to Terraform format
 let toTerraformService = \(service : Service) ->
       let imageTag =
-            Prelude.Optional.fold Text "latest" (\(t : Text) -> t) service.image_tag
+            Prelude.Optional.fold Text service.image_tag Text "latest" (\(t : Text) -> t)
 
       -- Convert ALB config
       let albConfig = toTerraformALB service.alb

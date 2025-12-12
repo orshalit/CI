@@ -150,7 +150,7 @@ function App() {
 
         <div className="card">
           <h2>Health Check</h2>
-          {/* Pipeline fix: ALBConfig type error resolved */}
+          {/* Pipeline fix: Optional.fold argument order fixed */}
           <p className="status">
             Status:{' '}
             <span className={healthStatus === 'healthy' ? 'healthy' : 'unhealthy'}>
