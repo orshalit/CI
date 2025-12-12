@@ -844,6 +844,25 @@ jobs:
               echo "has_images=true" >> $GITHUB_OUTPUT
               echo "::notice::Building frontend images ($COUNT image(s))"
             fi
+          elif [ "$APP_CODE_CHANGED" == "true" ]; then
+            # App code changed but not specifically backend or frontend (e.g., Dockerfile, dhall, docker-compose)
+            # Build all app-specific images as a fallback
+            FILTERED=$(echo "$FULL_MATRIX" | jq '.include | map(select(.type == "app-specific")) | {include: .}')
+            COUNT=$(echo "$FILTERED" | jq '.include | length')
+            if [ "$COUNT" -eq 0 ]; then
+              echo "::warning::App code changed but no app-specific images found, using full matrix"
+              echo "matrix<<EOF" >> $GITHUB_OUTPUT
+              echo "$FULL_MATRIX" >> $GITHUB_OUTPUT
+              echo "EOF" >> $GITHUB_OUTPUT
+              FALLBACK_COUNT=$(echo "$FULL_MATRIX" | jq '.include | length')
+              echo "has_images=$([ "$FALLBACK_COUNT" -gt 0 ] && echo "true" || echo "false")" >> $GITHUB_OUTPUT
+            else
+              echo "matrix<<EOF" >> $GITHUB_OUTPUT
+              echo "$FILTERED" >> $GITHUB_OUTPUT
+              echo "EOF" >> $GITHUB_OUTPUT
+              echo "has_images=true" >> $GITHUB_OUTPUT
+              echo "::notice::Building all app-specific images ($COUNT image(s)) - app infrastructure changed"
+            fi
           else
             echo "matrix={\"include\": []}" >> $GITHUB_OUTPUT
             echo "has_images=false" >> $GITHUB_OUTPUT
