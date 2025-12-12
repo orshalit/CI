@@ -412,7 +412,8 @@ jobs:
 
           ALL_IMAGES_EXIST=true
           for IMG_NAME in $IMAGE_NAMES; do
-            FULL_IMAGE_PATH="ghcr.io/${{ github.repository_owner }}/${IMG_NAME}:${IMAGE_TAG}"
+            # container_image already contains full path (e.g., ghcr.io/owner/test-app-backend)
+            FULL_IMAGE_PATH="${IMG_NAME}:${IMAGE_TAG}"
             echo "::group::Checking for $FULL_IMAGE_PATH"
             if docker manifest inspect "$FULL_IMAGE_PATH" > /dev/null 2>&1; then
               echo "::notice::✓ Docker image $FULL_IMAGE_PATH found."

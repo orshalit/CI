@@ -150,7 +150,7 @@ function App() {
 
         <div className="card">
           <h2>Health Check</h2>
-          {/* Pipeline fix: jq path fixed for services JSON */}
+          {/* Pipeline fix: use container_image directly without prefix */}
           <p className="status">
             Status:{' '}
             <span className={healthStatus === 'healthy' ? 'healthy' : 'unhealthy'}>
