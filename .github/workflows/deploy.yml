@@ -2040,25 +2040,28 @@ jobs:
           DESTROY_EXIT=$?
           
           # Always read output from temp file (more reliable than variable capture)
-          DESTROY_OUTPUT=$(cat "$TEMP_DESTROY_LOG" 2>/dev/null || echo "")
+          DESTROY_OUTPUT=$(cat "$TEMP_DESTROY_LOG" 2>/dev/null || echo "") || true
           
           # Always show output
           echo "$DESTROY_OUTPUT" || true
           
           # Debug: Verify temp file exists and has content
+          echo "::notice::Debug: DESTROY_EXIT=$DESTROY_EXIT" || true
           if [ -f "$TEMP_DESTROY_LOG" ]; then
-            TEMP_FILE_SIZE=$(wc -c < "$TEMP_DESTROY_LOG" 2>/dev/null || echo "0")
+            TEMP_FILE_SIZE=$(wc -c < "$TEMP_DESTROY_LOG" 2>/dev/null || echo "0") || true
             echo "::notice::Temp file exists, size: $TEMP_FILE_SIZE bytes" || true
           else
             echo "::warning::Temp file does not exist!" || true
           fi
           
-          if [ $DESTROY_EXIT -eq 0 ]; then
+          # Use explicit comparison to avoid issues with bash -e
+          if [ "$DESTROY_EXIT" = "0" ]; then
             echo "::notice::✓ Destroy completed successfully"
             rm -f "$TEMP_DESTROY_LOG"
           else
             # Debug: Show what we're checking
-            echo "::notice::Destroy failed with exit code $DESTROY_EXIT" || true
+            echo "::notice::=== DESTROY FAILED ===" || true
+            echo "::notice::Destroy failed with exit code: $DESTROY_EXIT" || true
             echo "::notice::Checking for state lock error..." || true
             
             # Check temp file directly for lock errors (most reliable method)
