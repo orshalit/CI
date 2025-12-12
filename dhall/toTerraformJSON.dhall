@@ -21,6 +21,23 @@ let Service =
       ../DEVOPS/config/types/Service.dhall
         ? ./.cache/Service.dhall
 
+-- ALB config type (matches Service.alb structure)
+let ALBConfig =
+      { alb_id : Text
+      , listener_protocol : Text
+      , listener_port : Natural
+      , path_patterns : List Text
+      , host_patterns : List Text
+      , health_check_path : Optional Text
+      , health_check_port : Optional Text
+      , health_check_matcher : Optional Text
+      , health_check_interval : Optional Natural
+      , health_check_timeout : Optional Natural
+      , health_check_healthy_threshold : Optional Natural
+      , health_check_unhealthy_threshold : Optional Natural
+      , priority : Optional Natural
+      }
+
 -- Terraform service type (what Terraform expects)
 let TerraformService =
       { container_image : Text
@@ -50,7 +67,7 @@ let TerraformService =
       }
 
 -- Convert ALB config to Terraform format
-let toTerraformALB = \(alb : Service.ALBConfig) ->
+let toTerraformALB = \(alb : ALBConfig) ->
       let healthCheckPath =
             Prelude.Optional.fold Text "/" (\(path : Text) -> path) alb.health_check_path
       

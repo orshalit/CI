@@ -150,7 +150,7 @@ function App() {
 
         <div className="card">
           <h2>Health Check</h2>
-          {/* Pipeline test: Full run with artifact merge fix */}
+          {/* Pipeline fix: ALBConfig type error resolved */}
           <p className="status">
             Status:{' '}
             <span className={healthStatus === 'healthy' ? 'healthy' : 'unhealthy'}>
