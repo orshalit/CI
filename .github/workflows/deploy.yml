@@ -1552,6 +1552,35 @@ jobs:
           plan_file: "tfplan"
           auto_approve: "true"
 
+      - name: Generate and Set Secret Values
+        id: generate_secrets
+        if: |
+          steps.vars.outputs.action == 'apply' && 
+          steps.apply.outcome == 'success' && 
+          steps.vars.outputs.module_path == '05-database'
+        continue-on-error: true
+        run: |
+          PLAN_DIR="DEVOPS/live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}"
+          
+          echo "::notice::🔐 Generating secure secrets for database module..."
+          
+          if [ -f "DEVOPS/scripts/generate-secrets.sh" ]; then
+            chmod +x DEVOPS/scripts/generate-secrets.sh
+            cd DEVOPS
+            if DEVOPS/scripts/generate-secrets.sh "${{ steps.vars.outputs.environment }}" "$PLAN_DIR"; then
+              echo "::notice::✓ Secret generation completed successfully"
+              echo "secrets_generated=true" >> $GITHUB_OUTPUT
+            else
+              echo "::warning::⚠ Secret generation script failed (non-blocking)"
+              echo "::warning::Secrets may need to be set manually"
+              echo "secrets_generated=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "::warning::Secret generation script not found at DEVOPS/scripts/generate-secrets.sh"
+            echo "::warning::Skipping secret generation - secrets may need to be set manually"
+            echo "secrets_generated=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Verify Target Group Health Check Paths (Post-Apply)
         id: verify_health_checks
         if: steps.vars.outputs.action == 'apply' && steps.apply.outcome == 'success' && steps.vars.outputs.module_path == '04-ecs-fargate'
