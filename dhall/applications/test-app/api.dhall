@@ -12,7 +12,7 @@ in  { name = "test-app-api"
     , cpu = 256
     , memory = 512
     , desired_count = 2
-    , env = toMap { LOG_LEVEL = "INFO", DATABASE_URL = "" }
+    , env = toMap { LOG_LEVEL = "INFO", AWS_REGION = "us-east-1", ENVIRONMENT = "dev", APPLICATION = "test-app", DYNAMODB_TABLE_KEY = "greetings" }
     , secrets = [] : List { mapKey : Text, mapValue : Text }
     , service_discovery_name = None Text
     , alb = { health_check_path = Some "/health"

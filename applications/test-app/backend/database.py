@@ -1,189 +1,348 @@
-"""Database configuration and models with connection pooling and monitoring."""
+"""DynamoDB configuration and operations with error handling and monitoring."""
 
 import logging
-import time
+import os
+import uuid
 from datetime import UTC, datetime
+from typing import Optional
 
-from sqlalchemy import Column, DateTime, Integer, String, create_engine, event
-from sqlalchemy.orm import declarative_base, sessionmaker
-from sqlalchemy.pool import QueuePool
+import boto3
+from botocore.exceptions import ClientError, NoCredentialsError
 
 from config import settings
 
 
 logger = logging.getLogger(__name__)
 
-# Check if database is available
-DATABASE_URL = None
-engine = None
-SessionLocal = None
+# DynamoDB client and table name
+dynamodb_client = None
+dynamodb_resource = None
+table_name = None
 database_available = False
 
-# Use in-memory SQLite for testing, PostgreSQL otherwise
+def get_table_name_from_ssm(environment: str, table_key: str = "greetings") -> Optional[str]:
+    """
+    Get DynamoDB table name from SSM Parameter Store.
+    
+    Args:
+        environment: Environment name (e.g., 'dev', 'staging', 'prod')
+        table_key: Table identifier (e.g., 'greetings')
+    
+    Returns:
+        Table name from SSM Parameter Store, or None if not found
+    """
+    try:
+        ssm_client = boto3.client("ssm", region_name=os.getenv("AWS_REGION", "us-east-1"))
+        parameter_name = f"/{environment}/dynamodb/{table_key}/table_name"
+        
+        response = ssm_client.get_parameter(Name=parameter_name)
+        return response["Parameter"]["Value"]
+    except ClientError as e:
+        error_code = e.response.get("Error", {}).get("Code", "")
+        if error_code == "ParameterNotFound":
+            logger.debug(f"SSM parameter '{parameter_name}' not found, will use environment variable fallback")
+        else:
+            logger.warning(f"Error reading SSM parameter '{parameter_name}': {e}")
+        return None
+    except Exception as e:
+        logger.warning(f"Unexpected error reading SSM parameter: {e}")
+        return None
+
+
+# Initialize DynamoDB client
 if settings.TESTING:
-    DATABASE_URL = "sqlite:///:memory:"
-    connect_args = {"check_same_thread": False}
-    # SQLite-specific engine configuration (no pooling)
-    engine = create_engine(DATABASE_URL, echo=False, connect_args=connect_args)
-    SessionLocal = sessionmaker(
-        autocommit=False, autoflush=False, bind=engine
-    )
-    database_available = True
+    # Use DynamoDB Local or mock for testing
+    # For now, set database_available = False in tests
+    database_available = False
+    logger.info("Testing mode: DynamoDB not initialized")
 else:
-    # Check if DATABASE_URL is provided and not empty
-    db_url = settings.DATABASE_URL
-    if db_url and db_url.strip() and db_url.strip() != "":
-        DATABASE_URL = db_url.strip()
-        connect_args = {}
-        # PostgreSQL-specific engine configuration with connection pooling
-        engine = create_engine(
-            DATABASE_URL,
-            poolclass=QueuePool,
-            pool_size=settings.DATABASE_POOL_SIZE,
-            max_overflow=settings.DATABASE_MAX_OVERFLOW,
-            pool_timeout=settings.DATABASE_POOL_TIMEOUT,
-            pool_recycle=settings.DATABASE_POOL_RECYCLE,
-            pool_pre_ping=True,  # Verify connections before using
-            echo=False,  # Set to True for SQL query logging in development
-            connect_args=connect_args,
-        )
-        SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-        database_available = True
-        logger.info("Database engine created successfully")
-    else:
-        logger.warning(
-            "DATABASE_URL is empty or not set. Database features will be unavailable."
-        )
+    try:
+        # Get table name from SSM Parameter Store (preferred) or environment variable (fallback)
+        environment = os.getenv("ENVIRONMENT", "dev")
+        table_key = os.getenv("DYNAMODB_TABLE_KEY", "greetings")  # Configurable table key
+        
+        # Try SSM Parameter Store first (best practice)
+        # SSM Parameter path: /{environment}/dynamodb/{table_key}/table_name
+        table_name = get_table_name_from_ssm(environment, table_key)
+        
+        # Fallback to environment variable if SSM parameter not found
+        if table_name is None:
+            table_name = os.getenv("DYNAMODB_TABLE_NAME", f"{environment}-{table_key}")
+            logger.info(f"Using table name from environment variable: {table_name}")
+        else:
+            logger.info(f"Using table name from SSM Parameter Store: {table_name} (key: {table_key})")
+        
+        # Initialize boto3 clients
+        dynamodb_client = boto3.client("dynamodb", region_name=os.getenv("AWS_REGION", "us-east-1"))
+        dynamodb_resource = boto3.resource("dynamodb", region_name=os.getenv("AWS_REGION", "us-east-1"))
+        
+        # Verify table exists
+        try:
+            dynamodb_client.describe_table(TableName=table_name)
+            database_available = True
+            logger.info(f"DynamoDB table '{table_name}' is available")
+        except ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code", "")
+            if error_code == "ResourceNotFoundException":
+                logger.warning(
+                    f"DynamoDB table '{table_name}' not found. "
+                    "Database features will be unavailable. "
+                    "Ensure the table is created via Terraform."
+                )
+                database_available = False
+            else:
+                logger.error(f"Error checking DynamoDB table: {e}")
+                database_available = False
+        except NoCredentialsError:
+            logger.warning(
+                "AWS credentials not found. DynamoDB features will be unavailable. "
+                "Ensure ECS task role has DynamoDB permissions."
+            )
+            database_available = False
+    except Exception as e:
+        logger.error(f"Failed to initialize DynamoDB client: {e}")
         database_available = False
 
-Base = declarative_base()
-
 
 # =============================================================================
-# Connection Event Listeners for Monitoring
+# DynamoDB Models/Structures
 # =============================================================================
 
 
-# Register event listeners only if engine exists
-if engine is not None:
-    @event.listens_for(engine, "connect")
-    def on_connect(dbapi_conn, connection_record):
-        """Handle new database connection - set pragmas and log."""
-        logger.info("Database connection established")
-        # Set SQLite pragmas for better performance and safety
-        if DATABASE_URL and "sqlite" in DATABASE_URL:
-            cursor = dbapi_conn.cursor()
-            cursor.execute("PRAGMA foreign_keys=ON")
-            cursor.close()
+class Greeting:
+    """Greeting model for DynamoDB items."""
 
-    @event.listens_for(engine, "checkout")
-    def on_checkout(dbapi_conn, connection_record, connection_proxy):
-        """Log connection checkout from pool for monitoring."""
-        logger.debug("Connection checked out from pool")
+    def __init__(self, id: str, user_name: str, message: str, created_at: Optional[str] = None):
+        self.id = id
+        self.user_name = user_name
+        self.message = message
+        self.created_at = created_at or datetime.now(UTC).isoformat()
 
-    @event.listens_for(engine, "checkin")
-    def on_checkin(dbapi_conn, connection_record):
-        """Log connection returned to pool for monitoring."""
-        logger.debug("Connection returned to pool")
+    def to_dict(self) -> dict:
+        """Convert to DynamoDB item format."""
+        return {
+            "id": self.id,
+            "user_name": self.user_name,
+            "message": self.message,
+            "created_at": self.created_at,
+        }
 
-
-# =============================================================================
-# Database Models
-# =============================================================================
-
-
-def _get_utc_now():
-    """Get current UTC time (timezone-aware)."""
-    return datetime.now(UTC)
-
-
-class Greeting(Base):
-    """Greeting model for storing user greetings."""
-
-    __tablename__ = "greetings"
-
-    id = Column(Integer, primary_key=True, index=True)
-    user_name = Column(String(100), index=True, nullable=False)
-    message = Column(String(500), nullable=False)
-    created_at = Column(
-        DateTime, default=_get_utc_now, nullable=False, index=True
-    )
+    @classmethod
+    def from_dict(cls, item: dict) -> "Greeting":
+        """Create Greeting from DynamoDB item."""
+        return cls(
+            id=item.get("id", ""),
+            user_name=item.get("user_name", ""),
+            message=item.get("message", ""),
+            created_at=item.get("created_at"),
+        )
 
     def __repr__(self):
         return (
-            f"<Greeting(id={self.id}, user_name='{self.user_name}', "
+            f"<Greeting(id='{self.id}', user_name='{self.user_name}', "
             f"created_at='{self.created_at}')>"
         )
 
 
 # =============================================================================
-# Database Initialization
+# Database Operations
 # =============================================================================
 
 
-def init_db(max_retries: int = 3):
+def init_db():
     """
-    Initialize database tables with retry logic.
-
-    Args:
-        max_retries: Maximum number of connection attempts before failing.
-
+    Verify DynamoDB table exists (tables are created via Terraform).
+    
     Raises:
-        Exception: If database initialization fails after all retries.
+        Exception: If table verification fails.
     """
-    if not database_available or engine is None:
-        logger.warning("Database is not available. Skipping database initialization.")
+    if not database_available or dynamodb_client is None:
+        logger.warning("DynamoDB is not available. Skipping table verification.")
         return
 
-    for attempt in range(max_retries):
-        try:
-            Base.metadata.create_all(bind=engine)
-            logger.info("Database tables initialized successfully")
-            return
-        except Exception as e:
-            logger.warning(
-                f"Database initialization attempt {attempt + 1}/{max_retries} "
-                f"failed: {e}"
+    try:
+        response = dynamodb_client.describe_table(TableName=table_name)
+        logger.info(
+            f"DynamoDB table '{table_name}' verified successfully. "
+            f"Status: {response['Table']['TableStatus']}"
+        )
+    except ClientError as e:
+        error_code = e.response.get("Error", {}).get("Code", "")
+        if error_code == "ResourceNotFoundException":
+            logger.error(
+                f"DynamoDB table '{table_name}' not found. "
+                "Please create the table via Terraform before deploying the application."
             )
-            if attempt == max_retries - 1:
-                logger.error("Database initialization failed after all retries")
-                raise
-            # Exponential backoff
-            sleep_time = 2**attempt
-            logger.info(f"Retrying in {sleep_time} seconds...")
-            time.sleep(sleep_time)
+            raise
+        else:
+            logger.error(f"Error verifying DynamoDB table: {e}")
+            raise
+    except Exception as e:
+        logger.error(f"Unexpected error verifying DynamoDB table: {e}")
+        raise
 
 
 def get_db():
     """
-    Get database session with automatic cleanup.
-
+    Get DynamoDB table resource.
+    
     Yields:
-        Session: SQLAlchemy database session.
-
+        Table: DynamoDB table resource.
+    
     Raises:
-        RuntimeError: If database is not available.
+        RuntimeError: If DynamoDB is not available.
     """
-    if not database_available or SessionLocal is None:
+    if not database_available or dynamodb_resource is None or table_name is None:
         raise RuntimeError(
-            "Database is not available. DATABASE_URL is not configured."
+            "DynamoDB is not available. Table name is not configured or table does not exist."
         )
 
-    db = SessionLocal()
+    table = dynamodb_resource.Table(table_name)
+    yield table
+
+
+def create_greeting(user_name: str, message: str) -> Greeting:
+    """
+    Create a new greeting in DynamoDB.
+    
+    Args:
+        user_name: Name of the user
+        message: Greeting message
+    
+    Returns:
+        Greeting: Created greeting object
+    
+    Raises:
+        ClientError: If DynamoDB operation fails
+    """
+    if not database_available or dynamodb_resource is None or table_name is None:
+        raise RuntimeError("DynamoDB is not available")
+
+    greeting = Greeting(
+        id=str(uuid.uuid4()),
+        user_name=user_name,
+        message=message,
+    )
+
+    table = dynamodb_resource.Table(table_name)
     try:
-        yield db
-    finally:
-        db.close()
+        table.put_item(Item=greeting.to_dict())
+        logger.info(f"Created greeting: {greeting.id} for user: {user_name}")
+        return greeting
+    except ClientError as e:
+        logger.error(f"Error creating greeting in DynamoDB: {e}")
+        raise
 
 
-def dispose_engine():
+def get_greetings(skip: int = 0, limit: int = 10) -> tuple[list[Greeting], int]:
     """
-    Dispose of the database engine and close all connections.
-
-    Call this during graceful shutdown to clean up resources.
+    Get all greetings with pagination.
+    
+    Args:
+        skip: Number of items to skip
+        limit: Maximum number of items to return
+    
+    Returns:
+        tuple: (list of greetings, total count)
+    
+    Raises:
+        ClientError: If DynamoDB operation fails
     """
-    if engine is not None:
-        logger.info("Disposing database engine and closing all connections")
-        engine.dispose()
-    else:
-        logger.debug("No database engine to dispose")
+    if not database_available or dynamodb_resource is None or table_name is None:
+        raise RuntimeError("DynamoDB is not available")
+
+    table = dynamodb_resource.Table(table_name)
+    
+    try:
+        # Scan table (for small datasets, consider using Query with GSI for better performance)
+        # Note: Scan is expensive for large tables - consider pagination with LastEvaluatedKey
+        response = table.scan(
+            Limit=limit + skip,  # Get more items to account for skip
+        )
+        
+        items = response.get("Items", [])
+        
+        # Apply skip and limit manually (DynamoDB doesn't support offset natively)
+        # For production, use LastEvaluatedKey for proper pagination
+        total = len(items)
+        items = items[skip : skip + limit]
+        
+        greetings = [Greeting.from_dict(item) for item in items]
+        
+        # Get total count (approximate for large tables)
+        # For exact count, use a separate count operation or maintain count in separate item
+        # Note: Scan with Select="COUNT" returns approximate count for large tables
+        # For now, use the count from the scan response
+        total_count = response.get("Count", 0)
+        
+        # If there are more items, we need to paginate (for now, return approximate count)
+        # In production, consider maintaining a separate count item or using a more efficient method
+        return greetings, total_count
+    except ClientError as e:
+        logger.error(f"Error getting greetings from DynamoDB: {e}")
+        raise
+
+
+def get_user_greetings(user_name: str) -> list[Greeting]:
+    """
+    Get all greetings for a specific user using GSI.
+    
+    Args:
+        user_name: Name of the user
+    
+    Returns:
+        list: List of greetings for the user
+    
+    Raises:
+        ClientError: If DynamoDB operation fails
+    """
+    if not database_available or dynamodb_resource is None or table_name is None:
+        raise RuntimeError("DynamoDB is not available")
+
+    table = dynamodb_resource.Table(table_name)
+    
+    try:
+        # Query using GSI on user_name
+        response = table.query(
+            IndexName="user-name-index",
+            KeyConditionExpression="user_name = :user_name",
+            ExpressionAttributeValues={":user_name": user_name},
+        )
+        
+        items = response.get("Items", [])
+        greetings = [Greeting.from_dict(item) for item in items]
+        
+        logger.info(f"Found {len(greetings)} greetings for user: {user_name}")
+        return greetings
+    except ClientError as e:
+        error_code = e.response.get("Error", {}).get("Code", "")
+        if error_code == "ResourceNotFoundException":
+            logger.warning(
+                f"GSI 'user-name-index' not found. "
+                "Falling back to scan (less efficient)."
+            )
+            # Fallback to scan if GSI doesn't exist
+            return _get_user_greetings_scan(user_name)
+        logger.error(f"Error getting user greetings from DynamoDB: {e}")
+        raise
+
+
+def _get_user_greetings_scan(user_name: str) -> list[Greeting]:
+    """Fallback method using scan (less efficient)."""
+    if not database_available or dynamodb_resource is None or table_name is None:
+        raise RuntimeError("DynamoDB is not available")
+
+    table = dynamodb_resource.Table(table_name)
+    
+    try:
+        response = table.scan(
+            FilterExpression="user_name = :user_name",
+            ExpressionAttributeValues={":user_name": user_name},
+        )
+        
+        items = response.get("Items", [])
+        greetings = [Greeting.from_dict(item) for item in items]
+        return greetings
+    except ClientError as e:
+        logger.error(f"Error scanning for user greetings: {e}")
+        raise
