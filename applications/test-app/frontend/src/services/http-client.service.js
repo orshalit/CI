@@ -4,6 +4,7 @@
  */
 
 import { logger } from './logger.service';
+import { configService } from './config.service';
 
 const DEFAULT_CONFIG = {
   timeout: 10000, // 10 seconds
@@ -17,6 +18,54 @@ class HttpClientService {
     this.config = { ...DEFAULT_CONFIG, ...config };
     // Use getter to always access current fetch (works in tests)
     this._fetch = config.fetch || null;
+    // API key is now fetched at runtime from config service (not from build-time env var)
+    // Fallback to config.apiKey for testing or explicit override
+    this._apiKeyOverride = config.apiKey || null;
+  }
+  
+  /**
+   * Get API key from runtime config service
+   * Falls back to override if provided (for testing)
+   * @private
+   * @returns {Promise<string|null>} API key
+   */
+  async getApiKey() {
+    // If override provided (e.g., in tests), use it
+    if (this._apiKeyOverride) {
+      return this._apiKeyOverride;
+    }
+    
+    // Otherwise, fetch from runtime config
+    try {
+      return await configService.getApiKey();
+    } catch (error) {
+      logger.warn('Failed to get API key from config service', error);
+      return null;
+    }
+  }
+  
+  /**
+   * Get default headers including API key if available
+   * @private
+   * @returns {Promise<Object>} Headers object
+   */
+  async getDefaultHeaders() {
+    const headers = {};
+    
+    // Get API key (async, but we'll handle it in executeRequest)
+    // For now, return headers without API key - it will be added in executeRequest
+    return headers;
+  }
+  
+  /**
+   * Get default headers synchronously (for backward compatibility)
+   * Note: API key will be added asynchronously in executeRequest
+   * @private
+   * @returns {Object} Headers object
+   */
+  getDefaultHeadersSync() {
+    // Return empty headers - API key will be added in executeRequest
+    return {};
   }
 
   /**
@@ -129,10 +178,38 @@ class HttpClientService {
   async request(url, options = {}, retriesLeft = this.config.maxRetries) {
     const requestId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-    logger.debug('Starting request', { url, requestId, retriesLeft });
+    // Get API key asynchronously (from runtime config)
+    // Skip API key for /api/config endpoint (it's public)
+    let apiKey = null;
+    if (!url.includes('/api/config')) {
+      try {
+        apiKey = await this.getApiKey();
+      } catch (error) {
+        logger.warn('Failed to get API key, proceeding without it', error);
+      }
+    }
+
+    // Merge default headers with API key and request headers
+    const defaultHeaders = this.getDefaultHeadersSync();
+    const mergedHeaders = {
+      ...defaultHeaders,
+      ...(options.headers || {}),
+    };
+    
+    // Add API key header if available
+    if (apiKey) {
+      mergedHeaders['X-API-Key'] = apiKey;
+    }
+    
+    const requestOptions = {
+      ...options,
+      headers: mergedHeaders,
+    };
+
+    logger.debug('Starting request', { url, requestId, retriesLeft, hasApiKey: !!apiKey });
 
     try {
-      const response = await this.executeRequest(url, options);
+      const response = await this.executeRequest(url, requestOptions);
 
       // Handle successful response
       if (response.ok) {

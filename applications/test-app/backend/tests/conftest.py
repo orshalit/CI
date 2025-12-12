@@ -18,6 +18,7 @@ from sqlalchemy.pool import StaticPool
 # Set testing environment variables before importing app modules
 os.environ["TESTING"] = "True"
 os.environ["RATE_LIMIT_ENABLED"] = "False"
+os.environ["AUTH_REQUIRED"] = "False"  # Disable auth for unit tests
 os.environ["LOG_LEVEL"] = "ERROR"  # Reduce log noise in tests
 
 from database import Base, Greeting, get_db  # noqa: E402

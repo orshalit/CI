@@ -264,6 +264,33 @@ def get_external_api_key(env_var: Optional[str] = None) -> str:
     )
 
 
+def get_backend_api_key(env_var: Optional[str] = None) -> str:
+    """
+    Get backend API key for API authentication.
+    
+    This key is used to authenticate requests to the backend API endpoints.
+    Clients must include this key in the X-API-Key header.
+    
+    Args:
+        env_var: Environment variable name for fallback (defaults to BACKEND_API_KEY)
+    
+    Returns:
+        str: Backend API key value
+    
+    Raises:
+        ValueError: If secret not found and no fallback available
+    """
+    if env_var is None:
+        env_var = "BACKEND_API_KEY"
+    
+    return get_secret_value(
+        secret_identifier="backend-api-key",
+        key="value",
+        env_var_fallback=env_var,
+        use_discovery=True,
+    )
+
+
 def get_api_key(service_name: str, env_var: Optional[str] = None) -> str:
     """
     Get API key for a service (generic function).

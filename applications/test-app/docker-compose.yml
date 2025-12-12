@@ -28,6 +28,8 @@ services:
       DYNAMODB_TABLE_NAME: ${DYNAMODB_TABLE_NAME:-dev-greetings}
       ENVIRONMENT: ${ENVIRONMENT:-dev}
       AWS_REGION: ${AWS_REGION:-us-east-1}
+      TESTING: ${TESTING:-false}
+      AUTH_REQUIRED: ${AUTH_REQUIRED:-true}
       RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-false}
     depends_on:
       database:

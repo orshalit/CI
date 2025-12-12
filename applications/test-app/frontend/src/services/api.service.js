@@ -6,18 +6,31 @@
 import { httpClient } from './http-client.service';
 import { validationService } from './validation.service';
 import { logger } from './logger.service';
+import { configService } from './config.service';
 
 class ApiService {
   constructor() {
-    this.baseUrl = this.getBackendUrl();
+    // Backend URL fallback (for initial connection to get config)
+    // After config loads, we'll use the URL from config
+    this.baseUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
   }
 
   /**
-   * Gets backend URL from environment
+   * Gets backend URL from runtime config (preferred) or environment fallback
    * @private
+   * @returns {Promise<string>} Backend URL
    */
-  getBackendUrl() {
-    return import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
+  async getBackendUrl() {
+    try {
+      // Try to get from runtime config (if loaded)
+      if (configService.isLoaded()) {
+        return await configService.getBackendUrl();
+      }
+    } catch (error) {
+      logger.warn('Failed to get backend URL from config, using fallback', error);
+    }
+    // Fallback to environment variable or default
+    return this.baseUrl;
   }
 
   /**
@@ -27,7 +40,8 @@ class ApiService {
   async checkHealth() {
     try {
       logger.debug('Checking health status');
-      const data = await httpClient.get(`${this.baseUrl}/health`);
+      const backendUrl = await this.getBackendUrl();
+      const data = await httpClient.get(`${backendUrl}/health`);
 
       logger.info('Health check completed', { status: data.status, version: data.version });
       return {
@@ -70,7 +84,8 @@ class ApiService {
   async callDeployTest2() {
     try {
       logger.debug('Calling deploy-test-2 endpoint');
-      const data = await httpClient.get(`${this.baseUrl}/api/deploy-test-2`);
+      const backendUrl = await this.getBackendUrl();
+      const data = await httpClient.get(`${backendUrl}/api/deploy-test-2`);
 
       logger.info('Deploy-test-2 endpoint called successfully', { message: data.message });
       return data;
@@ -120,7 +135,8 @@ class ApiService {
       const encoded = encodeURIComponent(sanitized);
 
       logger.debug('Calling greet endpoint', { userName: sanitized });
-      const data = await httpClient.get(`${this.baseUrl}/api/greet/${encoded}`);
+      const backendUrl = await this.getBackendUrl();
+      const data = await httpClient.get(`${backendUrl}/api/greet/${encoded}`);
 
       logger.info('Greet endpoint called successfully', {
         userName: sanitized,
@@ -140,7 +156,8 @@ class ApiService {
   async getDynamoDBStatus() {
     try {
       logger.debug('Calling dynamodb-status endpoint');
-      const data = await httpClient.get(`${this.baseUrl}/api/dynamodb-status`);
+      const backendUrl = await this.getBackendUrl();
+      const data = await httpClient.get(`${backendUrl}/api/dynamodb-status`);
 
       logger.info('DynamoDB status retrieved successfully', { available: data.available });
       return data;
@@ -159,8 +176,9 @@ class ApiService {
   async getGreetings(skip = 0, limit = 10) {
     try {
       logger.debug('Calling greetings endpoint', { skip, limit });
+      const backendUrl = await this.getBackendUrl();
       const data = await httpClient.get(
-        `${this.baseUrl}/api/greetings?skip=${skip}&limit=${limit}`
+        `${backendUrl}/api/greetings?skip=${skip}&limit=${limit}`
       );
 
       logger.info('Greetings retrieved successfully', {

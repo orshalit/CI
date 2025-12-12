@@ -869,8 +869,7 @@ jobs:
       (needs.backend-tests.result == 'success' || needs.backend-tests.result == 'skipped') &&
       (needs.frontend-tests.result == 'success' || needs.frontend-tests.result == 'skipped') &&
       (needs.validate-dhall.result == 'success' || needs.validate-dhall.result == 'skipped') &&
-      (needs.app-backend-tests.result == 'success' || needs.app-backend-tests.result == 'skipped') &&
-      (needs.frontend-tests.result == 'success' || needs.frontend-tests.result == 'skipped')
+      (needs.app-backend-tests.result == 'success' || needs.app-backend-tests.result == 'skipped')
     strategy:
       matrix: ${{ fromJson(needs.filter-build-matrix.outputs.matrix) }}
       fail-fast: false
@@ -1085,6 +1084,9 @@ jobs:
           DYNAMODB_TABLE_NAME: dev-greetings
           ENVIRONMENT: dev
           AWS_REGION: us-east-1
+          # Disable authentication for E2E tests (TESTING mode)
+          TESTING: "true"
+          AUTH_REQUIRED: "false"
         run: |
           # Build compose file list (base + all app compose files)
           COMPOSE_FILES="-f docker-compose.base.yml"
@@ -1440,8 +1442,10 @@ jobs:
             echo "=== Verify Backend Version (${FIRST_BACKEND} on port ${BACKEND_PORT}) ==="
             response=$(curl -s "${BACKEND_URL}/version")
             echo "$response" | jq .
-            echo "$response" | jq -e '.version == "${{ needs.prepare-build.outputs.version }}"'
-            echo "$response" | jq -e '.commit == "${{ needs.prepare-build.outputs.commit }}"'
+            EXPECTED_VERSION="${{ needs.prepare-build.outputs.version }}"
+            EXPECTED_COMMIT="${{ needs.prepare-build.outputs.commit }}"
+            echo "$response" | jq -e --arg version "$EXPECTED_VERSION" '.version == $version'
+            echo "$response" | jq -e --arg commit "$EXPECTED_COMMIT" '.commit == $commit'
           fi
           
           if [ -n "$FRONTEND_SERVICES" ]; then
@@ -1473,7 +1477,8 @@ jobs:
             echo "=== Verify Frontend Version (${FIRST_FRONTEND} on port ${FRONTEND_PORT}) ==="
             response=$(curl -s "${FRONTEND_URL}/version.json")
             echo "$response" | jq .
-            echo "$response" | jq -e '.version == "${{ needs.prepare-build.outputs.version }}"'
+            EXPECTED_VERSION="${{ needs.prepare-build.outputs.version }}"
+            echo "$response" | jq -e --arg version "$EXPECTED_VERSION" '.version == $version'
           fi
       
       - name: Show service logs on failure

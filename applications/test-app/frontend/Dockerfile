@@ -10,6 +10,9 @@ ARG BUILD_DATE
 ARG BUILD_VERSION=dev
 ARG GIT_COMMIT=unknown
 ARG GIT_BRANCH=unknown
+# Note: VITE_API_KEY removed - API key is now fetched at runtime from /api/config endpoint
+# This provides better security and allows key rotation without rebuilding images
+ARG VITE_BACKEND_URL
 
 ################################################################################
 # Stage 1: Builder - Build React application
@@ -26,6 +29,9 @@ WORKDIR /app
 
 # Set Node environment for optimized production build
 ENV NODE_ENV=production
+# Vite environment variables (must be available at build time)
+# Note: VITE_API_KEY removed - fetched at runtime for security
+ENV VITE_BACKEND_URL=${VITE_BACKEND_URL}
 
 # Copy package files first (for better layer caching)
 COPY package.json package-lock.json* ./

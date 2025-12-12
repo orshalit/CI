@@ -123,3 +123,23 @@ class DynamoDBStatusResponse(BaseModel):
     endpoint_url: str | None = None
     region: str | None = None
     message: str
+
+
+class ConfigResponse(BaseModel):
+    """Public configuration response schema for frontend runtime config"""
+
+    api_key: str = Field(..., description="Backend API key for authentication")
+    backend_url: str = Field(..., description="Backend API base URL")
+    environment: str = Field(..., description="Deployment environment")
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "api_key": "sk_live_abc123...",
+                    "backend_url": "https://test-api.app.dev.light-solutions.org",
+                    "environment": "dev",
+                }
+            ]
+        }
+    }

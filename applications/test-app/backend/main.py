@@ -13,6 +13,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from botocore.exceptions import ClientError
 
+from auth import get_auth_dependency
 from config import settings
 from database import (
     Greeting,
@@ -32,6 +33,7 @@ from middleware import (
     SecurityHeadersMiddleware,
 )
 from schemas import (
+    ConfigResponse,
     DynamoDBStatusResponse,
     GreetingResponse,
     GreetingsListResponse,
@@ -183,6 +185,54 @@ async def health_check():
 
 
 @app.get(
+    "/api/config",
+    response_model=ConfigResponse,
+    tags=["config"],
+    summary="Public configuration endpoint",
+    description="Returns public configuration needed by frontend at runtime (including API key)",
+)
+@rate_limit()
+async def get_config():
+    """
+    Public configuration endpoint for frontend runtime configuration.
+    
+    This endpoint provides the API key and other public configuration
+    that the frontend needs at runtime. The API key is fetched from
+    Secrets Manager and returned securely.
+    
+    Note: This endpoint does NOT require authentication (it's public config).
+    The API key returned here is used by the frontend to authenticate
+    subsequent API requests.
+    """
+    try:
+        from secrets import get_backend_api_key
+        
+        # Get API key from Secrets Manager
+        api_key = get_backend_api_key()
+        
+        # Get backend URL from environment or settings
+        backend_url = os.getenv(
+            "BACKEND_API_URL",
+            os.getenv("API_BASE_URL", "https://test-api.app.dev.light-solutions.org")
+        )
+        
+        # Get environment
+        environment = os.getenv("ENVIRONMENT", "development")
+        
+        return ConfigResponse(
+            api_key=api_key,
+            backend_url=backend_url,
+            environment=environment,
+        )
+    except Exception as e:
+        logger.error(f"Failed to retrieve config: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve configuration",
+        )
+
+
+@app.get(
     "/version",
     response_model=VersionResponse,
     tags=["info"],
@@ -255,6 +305,7 @@ def rate_limit():
     tags=["greetings"],
     summary="Hello endpoint",
     description="Simple hello endpoint for testing",
+    dependencies=[get_auth_dependency()],
 )
 @rate_limit()
 async def hello(request: Request):
@@ -290,6 +341,7 @@ async def hello(request: Request):
     tags=["testing"],
     summary="Deployment test endpoint",
     description="DEPLOY-TEST-2: Test endpoint to verify deployment pipeline",
+    dependencies=[get_auth_dependency()],
 )
 @rate_limit()
 async def deploy_test_2(request: Request):
@@ -305,6 +357,7 @@ async def deploy_test_2(request: Request):
     tags=["testing"],
     summary="Deployment test endpoint #3",
     description="DEPLOY-TEST-3: Latest test endpoint to verify CI/CD fixes",
+    dependencies=[get_auth_dependency()],
 )
 @rate_limit()
 async def deploy_test_3(request: Request):
@@ -320,6 +373,7 @@ async def deploy_test_3(request: Request):
     tags=["testing"],
     summary="Secrets management test endpoint",
     description="Test endpoint to verify dynamic secrets discovery and retrieval from AWS Secrets Manager",
+    dependencies=[get_auth_dependency()],
 )
 @rate_limit()
 async def secrets_test(request: Request):
@@ -418,6 +472,7 @@ async def secrets_test(request: Request):
     description=(
         "Create a personalized greeting for a user and store it in the database"
     ),
+    dependencies=[get_auth_dependency()],
 )
 @rate_limit()
 async def greet_user(
@@ -499,6 +554,7 @@ async def greet_user(
     tags=["greetings"],
     summary="Get all greetings",
     description="Retrieve all greetings with pagination",
+    dependencies=[get_auth_dependency()],
 )
 @rate_limit()
 async def get_greetings(
@@ -563,6 +619,7 @@ async def get_greetings(
     tags=["greetings"],
     summary="Get user greetings",
     description="Retrieve all greetings for a specific user",
+    dependencies=[get_auth_dependency()],
 )
 @rate_limit()
 async def get_user_greetings(
@@ -622,6 +679,7 @@ async def get_user_greetings(
     summary="Get DynamoDB connection status",
     description="Returns the current status of DynamoDB connectivity and table information",
     tags=["Database"],
+    dependencies=[get_auth_dependency()],
 )
 @rate_limit()
 async def get_dynamodb_status(request: Request):

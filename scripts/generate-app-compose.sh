@@ -86,6 +86,8 @@ EOF
       DYNAMODB_TABLE_NAME: \${DYNAMODB_TABLE_NAME:-dev-greetings}
       ENVIRONMENT: \${ENVIRONMENT:-dev}
       AWS_REGION: \${AWS_REGION:-us-east-1}
+      TESTING: \${TESTING:-false}
+      AUTH_REQUIRED: \${AUTH_REQUIRED:-true}
 EOF
     
     if [ -z "$PROD" ]; then
@@ -159,6 +161,7 @@ EOF
       - "\${${APP_NAME_UPPER}_FRONTEND_PORT:-3000}:3000"
     environment:
       VITE_BACKEND_URL: \${${APP_NAME_UPPER}_BACKEND_URL:-http://${APP_NAME}-backend:8000}
+      VITE_API_KEY: \${${APP_NAME_UPPER}_API_KEY:-}
     depends_on:
       ${APP_NAME}-backend:
         condition: service_healthy

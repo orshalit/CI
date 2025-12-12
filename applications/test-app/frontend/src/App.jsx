@@ -4,8 +4,13 @@ import { apiService } from './services/api.service';
 import { validationService } from './services/validation.service';
 import { useApi, useHealthCheck } from './hooks/useApi.hook';
 import { logger } from './services/logger.service';
+import { configService } from './services/config.service';
 
 function App() {
+  // Config loading state
+  const [configLoaded, setConfigLoaded] = useState(false);
+  const [configError, setConfigError] = useState(null);
+  
   // Health check hook
   const { healthStatus, checkHealth, healthData } = useHealthCheck();
   
@@ -26,8 +31,28 @@ function App() {
   const [userNameError, setUserNameError] = useState('');
   const [greetingsRefresh, setGreetingsRefresh] = useState(0);
 
-  // Check health on mount
+  // Initialize runtime configuration on mount
   useEffect(() => {
+    const initializeConfig = async () => {
+      try {
+        logger.info('Initializing runtime configuration...');
+        await configService.fetchConfig();
+        setConfigLoaded(true);
+        logger.info('Runtime configuration loaded successfully');
+      } catch (error) {
+        logger.error('Failed to load runtime configuration', error);
+        setConfigError(error.message);
+        setConfigLoaded(true); // Set to true anyway to allow app to render (with error)
+      }
+    };
+    
+    initializeConfig();
+  }, []);
+
+  // Check health and load data after config is loaded
+  useEffect(() => {
+    if (!configLoaded) return; // Wait for config to load
+    
     checkHealth();
     // Check DynamoDB status on mount
     getDynamoDBStatus().catch((err) => {
@@ -37,7 +62,7 @@ function App() {
     getGreetings(0, 20).catch((err) => {
       logger.warn('Failed to load greetings', err);
     });
-  }, [checkHealth, getDynamoDBStatus, getGreetings]);
+  }, [configLoaded, checkHealth, getDynamoDBStatus, getGreetings]);
 
   // Refresh greetings when a new greeting is created
   useEffect(() => {
@@ -164,6 +189,38 @@ function App() {
 
   // Determine if any operation is loading
   const isLoading = helloState.loading || deployTest2State.loading || deployTest3State.loading || greetState.loading || greetingsState.loading;
+
+  // Show loading state while config is being fetched
+  if (!configLoaded) {
+    return (
+      <div className="app">
+        <div className="container">
+          <h1>Full-Stack Application</h1>
+          <div className="card">
+            <p>Loading configuration...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Show error state if config failed to load
+  if (configError) {
+    return (
+      <div className="app">
+        <div className="container">
+          <h1>Full-Stack Application</h1>
+          <div className="card">
+            <h2>Configuration Error</h2>
+            <p className="result error" role="alert">
+              Failed to load configuration: {configError}
+            </p>
+            <p>Please ensure the backend is running and accessible.</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="app">

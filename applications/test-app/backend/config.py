@@ -90,6 +90,9 @@ class Settings(BaseSettings):
     # Testing
     TESTING: bool = os.getenv("TESTING", "false").lower() == "true"
 
+    # Authentication
+    AUTH_REQUIRED: bool = os.getenv("AUTH_REQUIRED", "true").lower() == "true"
+
     def get_cors_origins(self) -> list[str]:
         """Parse CORS origins from environment variable"""
         if self.CORS_ORIGINS == "*":
