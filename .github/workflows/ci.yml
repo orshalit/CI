@@ -781,8 +781,27 @@ jobs:
           fi
           
           # Filter matrix based on what changed
-          # If app-code changed, we should build all app-specific images (more permissive)
-          if [ "$BACKEND_CHANGED" == "true" ] && [ "$FRONTEND_CHANGED" == "true" ]; then
+          # If app-code changed (includes both backend and frontend), build all app-specific images
+          # This ensures that when any app code changes, all related images are built
+          if [ "$APP_CODE_CHANGED" == "true" ]; then
+            # Build all app-specific images when any app code changes
+            FILTERED=$(echo "$FULL_MATRIX" | jq '.include | map(select(.type == "app-specific")) | {include: .}')
+            COUNT=$(echo "$FILTERED" | jq '.include | length')
+            if [ "$COUNT" -eq 0 ]; then
+              echo "::warning::App code changed but no app-specific images found, using full matrix"
+              echo "matrix<<EOF" >> $GITHUB_OUTPUT
+              echo "$FULL_MATRIX" >> $GITHUB_OUTPUT
+              echo "EOF" >> $GITHUB_OUTPUT
+              FALLBACK_COUNT=$(echo "$FULL_MATRIX" | jq '.include | length')
+              echo "has_images=$([ "$FALLBACK_COUNT" -gt 0 ] && echo "true" || echo "false")" >> $GITHUB_OUTPUT
+            else
+              echo "matrix<<EOF" >> $GITHUB_OUTPUT
+              echo "$FILTERED" >> $GITHUB_OUTPUT
+              echo "EOF" >> $GITHUB_OUTPUT
+              echo "has_images=true" >> $GITHUB_OUTPUT
+              echo "::notice::Building all app-specific images ($COUNT image(s)) - app code changed"
+            fi
+          elif [ "$BACKEND_CHANGED" == "true" ] && [ "$FRONTEND_CHANGED" == "true" ]; then
             echo "matrix<<EOF" >> $GITHUB_OUTPUT
             echo "$FULL_MATRIX" >> $GITHUB_OUTPUT
             echo "EOF" >> $GITHUB_OUTPUT
@@ -824,24 +843,6 @@ jobs:
               echo "EOF" >> $GITHUB_OUTPUT
               echo "has_images=true" >> $GITHUB_OUTPUT
               echo "::notice::Building frontend images ($COUNT image(s))"
-            fi
-          elif [ "$APP_CODE_CHANGED" == "true" ]; then
-            # App code changed - build all app-specific images
-            FILTERED=$(echo "$FULL_MATRIX" | jq '.include | map(select(.type == "app-specific")) | {include: .}')
-            COUNT=$(echo "$FILTERED" | jq '.include | length')
-            if [ "$COUNT" -eq 0 ]; then
-              echo "::warning::App code changed but no app-specific images found, using full matrix"
-              echo "matrix<<EOF" >> $GITHUB_OUTPUT
-              echo "$FULL_MATRIX" >> $GITHUB_OUTPUT
-              echo "EOF" >> $GITHUB_OUTPUT
-              FALLBACK_COUNT=$(echo "$FULL_MATRIX" | jq '.include | length')
-              echo "has_images=$([ "$FALLBACK_COUNT" -gt 0 ] && echo "true" || echo "false")" >> $GITHUB_OUTPUT
-            else
-              echo "matrix<<EOF" >> $GITHUB_OUTPUT
-              echo "$FILTERED" >> $GITHUB_OUTPUT
-              echo "EOF" >> $GITHUB_OUTPUT
-              echo "has_images=true" >> $GITHUB_OUTPUT
-              echo "::notice::Building app-specific images ($COUNT image(s))"
             fi
           else
             echo "matrix={\"include\": []}" >> $GITHUB_OUTPUT
