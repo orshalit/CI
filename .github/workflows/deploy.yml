@@ -2037,13 +2037,18 @@ jobs:
           
           # Add empty defaults for required variables since we're destroying from state
           # Terraform will use state values, but still needs variables for config validation
-          if [ -z "$(echo "$DESTROY_ARGS" | grep -o "services")" ]; then
+          # Check if variables are already provided via var files, if not add empty defaults
+          HAS_SERVICES=$(echo "$DESTROY_ARGS" | grep -q "services" && echo "yes" || echo "no")
+          HAS_ALBS=$(echo "$DESTROY_ARGS" | grep -q "albs" && echo "yes" || echo "no")
+          HAS_BACKEND_BUCKET=$(echo "$DESTROY_ARGS" | grep -q "terraform_backend_bucket_name" && echo "yes" || echo "no")
+          
+          if [ "$HAS_SERVICES" = "no" ]; then
             DESTROY_ARGS="$DESTROY_ARGS -var=services={}"
           fi
-          if [ -z "$(echo "$DESTROY_ARGS" | grep -o "albs")" ]; then
+          if [ "$HAS_ALBS" = "no" ]; then
             DESTROY_ARGS="$DESTROY_ARGS -var=albs={}"
           fi
-          if [ -z "$(echo "$DESTROY_ARGS" | grep -o "terraform_backend_bucket_name")" ]; then
+          if [ "$HAS_BACKEND_BUCKET" = "no" ]; then
             DESTROY_ARGS="$DESTROY_ARGS -var=terraform_backend_bucket_name=devops-project-terraform"
           fi
           
