@@ -138,6 +138,7 @@ function App() {
       <div className="container">
         <h1>Full-Stack Application</h1>
         {/* Pipeline fix: Fixed artifact merge for built-images */}
+        {/* Pipeline run: Testing full deployment cycle after health diagnostics */}
         
         {/* Version Badge - DEPLOY-TEST-1 */}
         <div className="version-badge">

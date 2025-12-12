@@ -47,6 +47,7 @@ async def lifespan(app: FastAPI):
     """Lifespan event handler for startup and shutdown"""
     # Startup: Initialize database only if available and not in testing mode
     # CI/CD Pipeline Test: Full pipeline validation with Dhall fixes
+    # Pipeline run: Testing full deployment cycle after health diagnostics
     if not settings.TESTING and database_available:
         logger.info("Initializing database...")
         try:
