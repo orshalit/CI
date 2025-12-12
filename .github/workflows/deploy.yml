@@ -2052,8 +2052,21 @@ jobs:
             echo "::notice::✓ Destroy completed successfully"
             rm -f "$TEMP_DESTROY_LOG"
           else
-            # Check if failure was due to state lock
+            # Debug: Show what we're checking
+            echo "::notice::Destroy failed with exit code $DESTROY_EXIT"
+            echo "::notice::Checking for state lock error..."
+            
+            # Check if failure was due to state lock (case-insensitive, check for variations)
+            HAS_LOCK_ERROR=false
             if echo "$DESTROY_OUTPUT" | grep -qi "Error acquiring the state lock"; then
+              HAS_LOCK_ERROR=true
+            elif echo "$DESTROY_OUTPUT" | grep -qi "state lock"; then
+              HAS_LOCK_ERROR=true
+            elif echo "$DESTROY_OUTPUT" | grep -qi "Lock Info:"; then
+              HAS_LOCK_ERROR=true
+            fi
+            
+            if [ "$HAS_LOCK_ERROR" = "true" ]; then
               echo "::warning::State lock detected. Attempting to force unlock stale lock..."
               
               # Extract lock ID from error message - try multiple patterns
