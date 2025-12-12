@@ -180,8 +180,9 @@ class HttpClientService {
 
     // Get API key asynchronously (from runtime config)
     // Skip API key for /api/config endpoint (it's public)
+    // Skip API key if in proxy mode (proxy handles it)
     let apiKey = null;
-    if (!url.includes('/api/config')) {
+    if (!url.includes('/api/config') && !configService.isProxyMode()) {
       try {
         apiKey = await this.getApiKey();
       } catch (error) {
@@ -196,8 +197,8 @@ class HttpClientService {
       ...(options.headers || {}),
     };
     
-    // Add API key header if available
-    if (apiKey) {
+    // Add API key header if available and not in proxy mode
+    if (apiKey && !configService.isProxyMode()) {
       mergedHeaders['X-API-Key'] = apiKey;
     }
     

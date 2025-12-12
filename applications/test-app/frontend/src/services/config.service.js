@@ -11,6 +11,10 @@ class ConfigService {
     this.config = null;
     this.loadingPromise = null;
     this.backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
+    
+    // Proxy mode detection
+    // If VITE_PROXY_MODE is true, the frontend is behind a proxy that handles API key injection
+    this._proxyMode = import.meta.env.VITE_PROXY_MODE === 'true';
   }
 
   /**
@@ -44,6 +48,18 @@ class ConfigService {
    * @private
    */
   async _doFetchConfig() {
+    // If in proxy mode, skip API key fetch - proxy handles it
+    if (this._proxyMode) {
+      logger.info('Proxy mode enabled - API key handled by proxy');
+      this.config = {
+        apiKey: null,  // Not needed - proxy injects it
+        backendUrl: this.backendUrl,
+        environment: import.meta.env.VITE_ENVIRONMENT || 'unknown',
+        proxyMode: true
+      };
+      return this.config;
+    }
+
     try {
       logger.info('Fetching runtime configuration from backend...');
       
@@ -120,6 +136,14 @@ class ConfigService {
    */
   isLoaded() {
     return this.config !== null;
+  }
+
+  /**
+   * Check if proxy mode is enabled
+   * @returns {boolean}
+   */
+  isProxyMode() {
+    return this._proxyMode || (this.config?.proxyMode === true);
   }
 }
 
