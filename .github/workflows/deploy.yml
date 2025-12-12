@@ -2040,48 +2040,69 @@ jobs:
           # Use -refresh=false to work directly with state (avoids variable requirements)
           # Add -no-color for cleaner logs and -input=false to prevent prompts
           echo "::notice::Executing terraform destroy with -refresh=false (state-based)..."
-          if terraform -chdir="$PLAN_DIR" destroy -refresh=false -input=false -no-color $DESTROY_ARGS 2>&1 | tee /tmp/terraform-destroy.log; then
+          
+          # Run destroy and capture output to check for lock errors
+          # Use a temp file to capture output and get proper exit code
+          TEMP_DESTROY_LOG=$(mktemp)
+          terraform -chdir="$PLAN_DIR" destroy -refresh=false -input=false -no-color $DESTROY_ARGS > "$TEMP_DESTROY_LOG" 2>&1
+          DESTROY_EXIT=$?
+          DESTROY_OUTPUT=$(cat "$TEMP_DESTROY_LOG" 2>/dev/null || echo "")
+          
+          # Always show output
+          echo "$DESTROY_OUTPUT"
+          
+          if [ $DESTROY_EXIT -eq 0 ]; then
             echo "::notice::✓ Destroy completed successfully"
+            rm -f "$TEMP_DESTROY_LOG"
           else
-            DESTROY_EXIT=$?
-            DESTROY_OUTPUT=$(cat /tmp/terraform-destroy.log 2>/dev/null || echo "")
-            
             # Check if failure was due to state lock
             if echo "$DESTROY_OUTPUT" | grep -q "Error acquiring the state lock"; then
-              echo "::warning::State lock detected. Attempting to force unlock..."
-              # Extract lock ID from error message if possible
-              LOCK_ID=$(echo "$DESTROY_OUTPUT" | grep -oP 'ID:\s+\K[^\s]+' | head -1 || echo "")
+              echo "::warning::State lock detected. Attempting to force unlock stale lock..."
               
-              if [ -n "$LOCK_ID" ]; then
+              # Extract lock ID from error message - try multiple patterns
+              # Pattern 1: Look for "ID:" followed by the UUID
+              LOCK_ID=$(echo "$DESTROY_OUTPUT" | grep -A 10 "Lock Info:" | grep -E "ID:[[:space:]]+[a-f0-9-]+" | sed 's/.*ID:[[:space:]]*\([a-f0-9-]*\).*/\1/' | head -1 || echo "")
+              
+              # Pattern 2: Alternative extraction if first fails
+              if [ -z "$LOCK_ID" ] || [ "$LOCK_ID" = "" ]; then
+                LOCK_ID=$(echo "$DESTROY_OUTPUT" | grep -oE 'ID:[[:space:]]+[a-f0-9-]{36}' | sed 's/ID:[[:space:]]*//' | head -1 || echo "")
+              fi
+              
+              if [ -n "$LOCK_ID" ] && [ "$LOCK_ID" != "" ]; then
                 echo "::notice::Force unlocking state lock: $LOCK_ID"
-                terraform -chdir="$PLAN_DIR" force-unlock -force "$LOCK_ID" || {
+                echo "::warning::This lock may be from a previous failed run"
+                
+                # Force unlock the stale lock
+                terraform -chdir="$PLAN_DIR" force-unlock -force "$LOCK_ID" 2>&1 || {
                   echo "::warning::Failed to force unlock. Lock may be from another active operation."
+                  echo "::error::Please manually unlock: terraform -chdir=\"$PLAN_DIR\" force-unlock $LOCK_ID"
+                  rm -f "$TEMP_DESTROY_LOG"
+                  exit 1
                 }
                 
+                echo "::notice::✓ Lock released. Retrying destroy..."
+                
                 # Retry destroy after unlocking
-                echo "::notice::Retrying destroy after force unlock..."
                 terraform -chdir="$PLAN_DIR" destroy -refresh=false -input=false -no-color $DESTROY_ARGS || {
                   echo "::error::Terraform destroy failed after force unlock"
                   echo "::error::Some resources may have been destroyed. Review state and AWS console."
-                  rm -f /tmp/terraform-destroy.log
+                  rm -f "$TEMP_DESTROY_LOG"
                   exit 1
                 }
                 echo "::notice::✓ Destroy completed successfully after force unlock"
+                rm -f "$TEMP_DESTROY_LOG"
               else
                 echo "::error::State lock detected but could not extract lock ID"
-                echo "::error::You may need to manually unlock the state:"
-                echo "::error::  terraform -chdir=\"$PLAN_DIR\" force-unlock <LOCK_ID>"
-                echo "::error::Or wait for the lock to expire (typically 10 minutes)"
-                rm -f /tmp/terraform-destroy.log
+                echo "::error::You may need to manually unlock the state"
+                echo "::error::Check the error output above for the lock ID"
+                echo "::error::Lock ID format: b298ae0c-cd1f-af5a-f231-e02d8a246d86"
+                rm -f "$TEMP_DESTROY_LOG"
                 exit 1
               fi
             else
               echo "::error::Terraform destroy failed"
               echo "::error::Some resources may have been destroyed. Review state and AWS console."
-              rm -f /tmp/terraform-destroy.log
+              rm -f "$TEMP_DESTROY_LOG"
               exit 1
             fi
-            rm -f /tmp/terraform-destroy.log
           fi
-          
-          echo "::notice::✓ Destroy completed successfully"
