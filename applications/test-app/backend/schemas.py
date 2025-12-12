@@ -72,8 +72,8 @@ class GreetingResponse(BaseModel):
     """Greeting response schema"""
 
     message: str
-    id: int
-    created_at: datetime
+    id: str  # Changed from int to str (DynamoDB uses string UUIDs)
+    created_at: str  # Changed from datetime to str (ISO timestamp string)
 
     model_config = {"from_attributes": True}
 
@@ -81,10 +81,10 @@ class GreetingResponse(BaseModel):
 class GreetingItem(BaseModel):
     """Individual greeting item schema"""
 
-    id: int
+    id: str  # Changed from int to str (DynamoDB uses string UUIDs)
     user_name: str
     message: str
-    created_at: datetime
+    created_at: str  # Changed from datetime to str (ISO timestamp string)
 
     model_config = {"from_attributes": True}
 

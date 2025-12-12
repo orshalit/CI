@@ -446,31 +446,42 @@ jobs:
 
           echo "::notice::Generating config for ${ENV}/${MODULE_NAME}..."
 
-          # First, convert Dhall to JSON and validate
-          ENV_JSON=$(dhall-to-json --file DEVOPS/config/environments/${ENV}.dhall) || {
-            echo "::error::Failed to convert DEVOPS/config/environments/${ENV}.dhall to JSON"
-            exit 1
-          }
-          
-          # Check if module exists
-          MODULE_EXISTS=$(echo "$ENV_JSON" | jq -r "has(\"${MODULE_NAME}\")")
-          if [ "$MODULE_EXISTS" != "true" ]; then
-            echo "::error::Module '${MODULE_NAME}' not found in DEVOPS/config/environments/${ENV}.dhall"
-            echo "::error::Available modules:"
-            echo "$ENV_JSON" | jq -r 'keys[]' | sed 's/^/  - /' || true
-            exit 1
+          # Check if module-specific converter exists (preferred method)
+          MODULE_TFVARS_DHALL="DEVOPS/config/environments/${ENV}/${MODULE_NAME}.tfvars.dhall"
+          if [ -f "$MODULE_TFVARS_DHALL" ]; then
+            echo "::notice::Using module-specific converter: $MODULE_TFVARS_DHALL"
+            dhall-to-json --file "$MODULE_TFVARS_DHALL" > "${OUTPUT_FILE}" || {
+              echo "::error::Failed to convert $MODULE_TFVARS_DHALL to JSON"
+              exit 1
+            }
+          else
+            echo "::notice::Module-specific converter not found, extracting from dev.dhall..."
+            # Fallback: Extract module config directly from dev.dhall JSON
+            ENV_JSON=$(dhall-to-json --file DEVOPS/config/environments/${ENV}.dhall) || {
+              echo "::error::Failed to convert DEVOPS/config/environments/${ENV}.dhall to JSON"
+              exit 1
+            }
+            
+            # Check if module exists
+            MODULE_EXISTS=$(echo "$ENV_JSON" | jq -r "has(\"${MODULE_NAME}\")")
+            if [ "$MODULE_EXISTS" != "true" ]; then
+              echo "::error::Module '${MODULE_NAME}' not found in DEVOPS/config/environments/${ENV}.dhall"
+              echo "::error::Available modules:"
+              echo "$ENV_JSON" | jq -r 'keys[]' | sed 's/^/  - /' || true
+              exit 1
+            fi
+            
+            # Extract module config
+            MODULE_CONFIG=$(echo "$ENV_JSON" | jq -c ".[\"${MODULE_NAME}\"]")
+            
+            # Validate that we got a valid object
+            if [ -z "$MODULE_CONFIG" ] || [ "$MODULE_CONFIG" = "null" ]; then
+              echo "::error::Module '${MODULE_NAME}' exists but has null value"
+              exit 1
+            fi
+            
+            echo "$MODULE_CONFIG" > "${OUTPUT_FILE}"
           fi
-          
-          # Extract module config
-          MODULE_CONFIG=$(echo "$ENV_JSON" | jq -c ".[\"${MODULE_NAME}\"]")
-          
-          # Validate that we got a valid object
-          if [ -z "$MODULE_CONFIG" ] || [ "$MODULE_CONFIG" = "null" ]; then
-            echo "::error::Module '${MODULE_NAME}' exists but has null value"
-            exit 1
-          fi
-          
-          echo "$MODULE_CONFIG" > "${OUTPUT_FILE}"
           
           # Validate the output file is valid JSON
           if ! jq empty "${OUTPUT_FILE}" 2>/dev/null; then
@@ -1567,7 +1578,7 @@ jobs:
           if [ -f "DEVOPS/scripts/generate-secrets.sh" ]; then
             chmod +x DEVOPS/scripts/generate-secrets.sh
             cd DEVOPS
-            if DEVOPS/scripts/generate-secrets.sh "${{ steps.vars.outputs.environment }}" "$PLAN_DIR"; then
+            if scripts/generate-secrets.sh "${{ steps.vars.outputs.environment }}" "live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}"; then
               echo "::notice::✓ Secret generation completed successfully"
               echo "secrets_generated=true" >> $GITHUB_OUTPUT
             else
