@@ -2048,26 +2048,30 @@ jobs:
             rm -f "$TEMP_DESTROY_LOG"
           else
             # Check if failure was due to state lock
-            if echo "$DESTROY_OUTPUT" | grep -q "Error acquiring the state lock"; then
+            if echo "$DESTROY_OUTPUT" | grep -qi "Error acquiring the state lock"; then
               echo "::warning::State lock detected. Attempting to force unlock stale lock..."
               
               # Extract lock ID from error message - try multiple patterns
               # Pattern 1: Look for "ID:" followed by the UUID (most common format)
-              LOCK_ID=$(echo "$DESTROY_OUTPUT" | grep -A 5 "Lock Info:" | grep "ID:" | awk '{print $2}' | head -1 || echo "")
+              LOCK_ID=$(echo "$DESTROY_OUTPUT" | grep -A 10 "Lock Info:" | grep -i "ID:" | awk '{print $2}' | head -1 | tr -d '[:space:]' || echo "")
               
-              # Pattern 2: Alternative extraction using sed
+              # Pattern 2: Alternative extraction using sed with UUID pattern
               if [ -z "$LOCK_ID" ] || [ "$LOCK_ID" = "" ]; then
-                LOCK_ID=$(echo "$DESTROY_OUTPUT" | grep -A 5 "Lock Info:" | grep -oE 'ID:[[:space:]]+[a-f0-9-]+' | awk '{print $2}' | head -1 || echo "")
+                LOCK_ID=$(echo "$DESTROY_OUTPUT" | grep -A 10 "Lock Info:" | grep -i "ID:" | sed -n 's/.*ID:[[:space:]]*\([a-f0-9-]\{36\}\).*/\1/p' | head -1 || echo "")
               fi
               
-              # Pattern 3: Direct grep for UUID pattern after "ID:"
+              # Pattern 3: Direct grep for UUID pattern (36 chars with hyphens)
               if [ -z "$LOCK_ID" ] || [ "$LOCK_ID" = "" ]; then
-                LOCK_ID=$(echo "$DESTROY_OUTPUT" | grep -oE 'ID:[[:space:]]+[a-f0-9-]{36}' | sed 's/ID:[[:space:]]*//' | head -1 || echo "")
+                LOCK_ID=$(echo "$DESTROY_OUTPUT" | grep -oE '[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}' | head -1 || echo "")
               fi
               
-              # Pattern 4: Extract any UUID-like string after "ID:"
-              if [ -z "$LOCK_ID" ] || [ "$LOCK_ID" = "" ]; then
-                LOCK_ID=$(echo "$DESTROY_OUTPUT" | sed -n '/Lock Info:/,/^$/p' | grep "ID:" | sed 's/.*ID:[[:space:]]*\([a-f0-9-]*\).*/\1/' | head -1 || echo "")
+              # Debug: Show what we found
+              if [ -n "$LOCK_ID" ] && [ "$LOCK_ID" != "" ]; then
+                echo "::notice::Extracted lock ID: $LOCK_ID"
+              else
+                echo "::warning::Could not extract lock ID automatically"
+                echo "::notice::Lock Info section from output:"
+                echo "$DESTROY_OUTPUT" | grep -A 10 "Lock Info:" || echo "No Lock Info section found"
               fi
               
               if [ -n "$LOCK_ID" ] && [ "$LOCK_ID" != "" ]; then
