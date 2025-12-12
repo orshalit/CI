@@ -2161,7 +2161,7 @@ jobs:
                 # Terraform will use state values, but still needs variables for config validation
                 echo "::notice::Using empty variable defaults for state-based destroy..."
                 RETRY_ARGS="-refresh=false -input=false -no-color -auto-approve"
-                RETRY_ARGS="$RETRY_ARGS -var=services={} -var=albs={}"
+                RETRY_ARGS="$RETRY_ARGS -var \"services={}\" -var \"albs={}\""
                 
                 # Retry destroy after unlocking
                 terraform -chdir="$PLAN_DIR" destroy $RETRY_ARGS || {
