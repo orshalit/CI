@@ -114,14 +114,14 @@ async def health_check():
         try:
             with open(version_file) as f:
                 version_data = json.load(f)
-                version_info["version"] = version_data.get("version") or os.getenv("APP_VERSION") or "unknown"
+                version_info["version"] = version_data.get("version") or os.getenv("APP_VERSION") or settings.API_VERSION or "dev"
                 version_info["commit"] = version_data.get("commit") or os.getenv("GIT_COMMIT") or "unknown"
         except (json.JSONDecodeError, OSError) as e:
             logger.warning(f"Failed to read version.json: {e}")
-            version_info["version"] = os.getenv("APP_VERSION") or "unknown"
+            version_info["version"] = os.getenv("APP_VERSION") or settings.API_VERSION or "dev"
             version_info["commit"] = os.getenv("GIT_COMMIT") or "unknown"
     else:
-        version_info["version"] = os.getenv("APP_VERSION") or "unknown"
+        version_info["version"] = os.getenv("APP_VERSION") or settings.API_VERSION or "dev"
         version_info["commit"] = os.getenv("GIT_COMMIT") or "unknown"
     
     # Log version info for debugging

@@ -39,14 +39,15 @@ function App() {
       })
       .then((data) => {
         setVersionInfo({
-          version: data.version || 'unknown',
+          version: data.version || 'dev',
           commit: data.commit || 'unknown',
         });
         logger.debug('Version loaded from version.json', data);
       })
       .catch((err) => {
         logger.warn('Failed to load version.json, will try health check', err);
-        // Don't set to unknown yet - wait for health check
+        // Set a default while waiting for health check
+        setVersionInfo({ version: 'loading...', commit: 'unknown' });
       });
   }, []);
   
@@ -54,13 +55,13 @@ function App() {
   useEffect(() => {
     if (healthData?.version) {
       setVersionInfo((prev) => ({
-        version: healthData.version || prev.version || 'unknown',
+        version: healthData.version || prev.version || 'dev',
         commit: healthData.commit || prev.commit || 'unknown',
       }));
       logger.debug('Version updated from health check', healthData);
     } else if (healthData && !versionInfo.version) {
-      // If health check completed but no version, set to unknown
-      setVersionInfo({ version: 'unknown', commit: 'unknown' });
+      // If health check completed but no version, use dev as fallback
+      setVersionInfo({ version: 'dev', commit: 'unknown' });
     }
   }, [healthData]);
 
