@@ -2033,6 +2033,9 @@ jobs:
           # Add -no-color for cleaner logs and -input=false to prevent prompts
           echo "::notice::Executing terraform destroy with -refresh=false (state-based)..."
           
+          # Disable exit on error to allow error handling
+          set +e
+          
           # Run destroy and capture output to check for lock errors
           # Use a temp file to capture output and get proper exit code
           TEMP_DESTROY_LOG=$(mktemp)
@@ -2040,7 +2043,7 @@ jobs:
           DESTROY_EXIT=$?
           
           # Always read output from temp file (more reliable than variable capture)
-          DESTROY_OUTPUT=$(cat "$TEMP_DESTROY_LOG" 2>/dev/null || echo "") || true
+          DESTROY_OUTPUT=$(cat "$TEMP_DESTROY_LOG" 2>/dev/null || echo "")
           
           # Always show output
           echo "$DESTROY_OUTPUT" || true
@@ -2059,8 +2062,6 @@ jobs:
             echo "::notice::✓ Destroy completed successfully"
             rm -f "$TEMP_DESTROY_LOG"
           else
-            # Disable exit on error for error handling section
-            set +e
             # Debug: Show what we're checking
             echo "::notice::=== DESTROY FAILED ==="
             echo "::notice::Destroy failed with exit code: $DESTROY_EXIT"
@@ -2178,9 +2179,9 @@ jobs:
               echo "::error::Terraform destroy failed"
               echo "::error::Some resources may have been destroyed. Review state and AWS console."
               rm -f "$TEMP_DESTROY_LOG"
-              set -e
               exit 1
             fi
-            # Re-enable exit on error
-            set -e
           fi
+          
+          # Re-enable exit on error at the end
+          set -e
