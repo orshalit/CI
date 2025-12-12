@@ -74,6 +74,14 @@ http {
             access_log off;
         }
 
+        # Version.json - serve directly without SPA routing
+        location = /version.json {
+            add_header Cache-Control "no-cache, no-store, must-revalidate";
+            add_header Pragma "no-cache";
+            add_header Expires "0";
+            access_log off;
+        }
+
         # Main application - SPA routing
         # All routes fall back to index.html for client-side routing
         location / {

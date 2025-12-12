@@ -31,26 +31,36 @@ function App() {
   // Load version info from version.json (DEPLOY-TEST-1)
   useEffect(() => {
     fetch('/version.json')
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+        return res.json();
+      })
       .then((data) => {
         setVersionInfo({
           version: data.version || 'unknown',
           commit: data.commit || 'unknown',
         });
+        logger.debug('Version loaded from version.json', data);
       })
       .catch((err) => {
-        logger.warn('Failed to load version.json', err);
-        setVersionInfo({ version: 'unknown', commit: 'unknown' });
+        logger.warn('Failed to load version.json, will try health check', err);
+        // Don't set to unknown yet - wait for health check
       });
   }, []);
   
-  // Update version from health check if available
+  // Update version from health check if available (fallback or override)
   useEffect(() => {
     if (healthData?.version) {
       setVersionInfo((prev) => ({
-        version: healthData.version || prev.version,
-        commit: healthData.commit || prev.commit,
+        version: healthData.version || prev.version || 'unknown',
+        commit: healthData.commit || prev.commit || 'unknown',
       }));
+      logger.debug('Version updated from health check', healthData);
+    } else if (healthData && !versionInfo.version) {
+      // If health check completed but no version, set to unknown
+      setVersionInfo({ version: 'unknown', commit: 'unknown' });
     }
   }, [healthData]);
 
