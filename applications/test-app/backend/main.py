@@ -11,12 +11,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
-from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
-from sqlalchemy.orm import Session
+from botocore.exceptions import ClientError
 
 from config import settings
-from database import Greeting, database_available, get_db, init_db
+from database import (
+    Greeting,
+    create_greeting,
+    database_available,
+    get_db,
+    get_greetings as db_get_greetings,
+    get_user_greetings as db_get_user_greetings,
+    init_db,
+    table_name,
+)
 from logging_config import setup_logging
 from middleware import (
     ErrorHandlingMiddleware,
@@ -138,17 +145,24 @@ async def health_check():
 
     # Test database connection if available
     try:
-        db = next(get_db())
-        db.execute(text("SELECT 1"))
-        db.close()
-        return HealthResponse(
-            status="healthy",
-            database="connected",
-            version=version_info["version"],
-            commit=version_info["commit"]
-        )
-    except SQLAlchemyError as e:
-        logger.error(f"Database health check failed: {e}", exc_info=True)
+        from database import dynamodb_client
+        if dynamodb_client and table_name:
+            dynamodb_client.describe_table(TableName=table_name)
+            return HealthResponse(
+                status="healthy",
+                database="connected",
+                version=version_info["version"],
+                commit=version_info["commit"]
+            )
+        else:
+            return HealthResponse(
+                status="healthy",
+                database="unavailable",
+                version=version_info["version"],
+                commit=version_info["commit"]
+            )
+    except ClientError as e:
+        logger.error(f"DynamoDB health check failed: {e}", exc_info=True)
         return HealthResponse(
             status="unhealthy",
             database="disconnected",
@@ -301,6 +315,101 @@ async def deploy_test_3(request: Request):
 
 
 @app.get(
+    "/api/secrets-test",
+    tags=["testing"],
+    summary="Secrets management test endpoint",
+    description="Test endpoint to verify dynamic secrets discovery and retrieval from AWS Secrets Manager",
+)
+@rate_limit()
+async def secrets_test(request: Request):
+    """
+    Test endpoint to verify secrets management integration.
+    
+    This endpoint demonstrates:
+    - Dynamic secret discovery via SSM Parameter Store
+    - Secret retrieval from AWS Secrets Manager
+    - Proper error handling and fallbacks
+    """
+    from secrets import (
+        get_external_api_key,
+        get_jwt_signing_key,
+        get_session_secret,
+    )
+    
+    results = {
+        "status": "success",
+        "secrets_tested": [],
+        "errors": [],
+    }
+    
+    # Test each pre-configured secret
+    secret_tests = [
+        ("session-secret", get_session_secret, "SESSION_SECRET"),
+        ("jwt-signing-key", get_jwt_signing_key, "JWT_SIGNING_KEY"),
+        ("external-api-key", get_external_api_key, "EXTERNAL_API_KEY"),
+    ]
+    
+    for secret_name, secret_func, env_var in secret_tests:
+        try:
+            secret_value = secret_func()
+            # Don't expose the actual secret value, just confirm it exists
+            secret_length = len(secret_value)
+            results["secrets_tested"].append({
+                "name": secret_name,
+                "status": "retrieved",
+                "source": "secrets_manager",
+                "length": secret_length,
+            })
+            logger.debug(f"Successfully retrieved {secret_name} (length: {secret_length})")
+        except ValueError as e:
+            # Check if fallback to environment variable worked
+            fallback_value = os.getenv(env_var)
+            if fallback_value:
+                results["secrets_tested"].append({
+                    "name": secret_name,
+                    "status": "retrieved",
+                    "source": "environment_variable",
+                    "length": len(fallback_value),
+                })
+                logger.info(f"Retrieved {secret_name} from environment variable fallback")
+            else:
+                results["secrets_tested"].append({
+                    "name": secret_name,
+                    "status": "not_found",
+                    "error": str(e),
+                })
+                results["errors"].append(f"{secret_name}: {str(e)}")
+                logger.warning(f"Could not retrieve {secret_name}: {e}")
+        except Exception as e:
+            results["secrets_tested"].append({
+                "name": secret_name,
+                "status": "error",
+                "error": str(e),
+            })
+            results["errors"].append(f"{secret_name}: {str(e)}")
+            logger.error(f"Error retrieving {secret_name}: {e}", exc_info=True)
+    
+    # Also verify SECRET_KEY from config uses secrets
+    try:
+        from config import settings
+        secret_key_length = len(settings.SECRET_KEY)
+        results["secrets_tested"].append({
+            "name": "SECRET_KEY (from config)",
+            "status": "configured",
+            "source": "config_settings",
+            "length": secret_key_length,
+        })
+    except Exception as e:
+        results["errors"].append(f"SECRET_KEY config error: {str(e)}")
+    
+    # Set overall status
+    if results["errors"]:
+        results["status"] = "partial_success" if results["secrets_tested"] else "failed"
+    
+    return results
+
+
+@app.get(
     "/api/greet/{user}",
     response_model=GreetingResponse,
     tags=["greetings"],
@@ -313,23 +422,19 @@ async def deploy_test_3(request: Request):
 async def greet_user(
     request: Request,
     user: str = Path(..., min_length=1, max_length=100, description="User name"),
-    db: Session = Depends(get_db),  # noqa: B008
 ):
-    """Personalized greeting endpoint that stores greetings in database"""
-    # Check if database is available (get_db will raise RuntimeError if not,
-    # but we want 503)
+    """Personalized greeting endpoint that stores greetings in DynamoDB"""
+    # Check if database is available
     if not database_available:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database is not available. Please configure DATABASE_URL."
+            detail="DynamoDB is not available. Please ensure the table is created and IAM permissions are configured."
         )
 
     try:
         # Validate and sanitize input
         user_clean = user.strip()
         if not user_clean:
-            # Raise RequestValidationError to return 422 (FastAPI's standard
-            # for validation errors)
             raise RequestValidationError(
                 errors=[
                     {
@@ -355,22 +460,11 @@ async def greet_user(
 
         greeting_message = f"Hello, {user_clean}!"
 
-        # Store greeting in database with proper error handling
+        # Store greeting in DynamoDB with proper error handling
         try:
-            greeting = Greeting(user_name=user_clean, message=greeting_message)
-            db.add(greeting)
-            db.commit()
-            db.refresh(greeting)
-        except IntegrityError as e:
-            db.rollback()
-            logger.error(f"Database integrity error: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to save greeting",
-            ) from e
-        except SQLAlchemyError as e:
-            db.rollback()
-            logger.error(f"Database error: {e}", exc_info=True)
+            greeting = create_greeting(user_name=user_clean, message=greeting_message)
+        except ClientError as e:
+            logger.error(f"DynamoDB error: {e}", exc_info=True)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Database error occurred",
@@ -382,14 +476,12 @@ async def greet_user(
             created_at=greeting.created_at,
         )
     except (HTTPException, RequestValidationError):
-        # Re-raise HTTPException and RequestValidationError to let FastAPI handle them
         raise
     except RuntimeError as e:
-        # Handle database unavailable error from get_db()
-        if "Database is not available" in str(e):
+        if "DynamoDB is not available" in str(e):
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Database is not available. Please configure DATABASE_URL."
+                detail="DynamoDB is not available. Please ensure the table is created and IAM permissions are configured."
             ) from e
         raise
     except Exception as e:
@@ -414,15 +506,12 @@ async def get_greetings(
     limit: int = Query(
         10, ge=1, le=100, description="Maximum number of records to return"
     ),
-    db: Session = Depends(get_db),  # noqa: B008
 ):
-    """Get all greetings from database with pagination"""
-    # Check if database is available (get_db will raise RuntimeError if not,
-    # but we want 503)
+    """Get all greetings from DynamoDB with pagination"""
     if not database_available:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database is not available. Please configure DATABASE_URL."
+            detail="DynamoDB is not available. Please ensure the table is created and IAM permissions are configured."
         )
 
     try:
@@ -437,18 +526,11 @@ async def get_greetings(
                 detail="Limit must be between 1 and 100",
             )
 
-        # Query with error handling
+        # Query DynamoDB with error handling
         try:
-            total = db.query(Greeting).count()
-            greetings = (
-                db.query(Greeting)
-                .order_by(Greeting.created_at.desc())
-                .offset(skip)
-                .limit(limit)
-                .all()
-            )
-        except SQLAlchemyError as e:
-            logger.error(f"Database error in get_greetings: {e}", exc_info=True)
+            greetings, total = db_get_greetings(skip=skip, limit=limit)
+        except ClientError as e:
+            logger.error(f"DynamoDB error in get_greetings: {e}", exc_info=True)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Database error occurred",
@@ -460,11 +542,10 @@ async def get_greetings(
     except HTTPException:
         raise
     except RuntimeError as e:
-        # Handle database unavailable error from get_db()
-        if "Database is not available" in str(e):
+        if "DynamoDB is not available" in str(e):
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Database is not available. Please configure DATABASE_URL."
+                detail="DynamoDB is not available. Please ensure the table is created and IAM permissions are configured."
             ) from e
         raise
     except Exception as e:
@@ -486,15 +567,12 @@ async def get_greetings(
 async def get_user_greetings(
     request: Request,
     user: str = Path(..., min_length=1, max_length=100, description="User name"),
-    db: Session = Depends(get_db),  # noqa: B008
 ):
-    """Get all greetings for a specific user"""
-    # Check if database is available (get_db will raise RuntimeError if not,
-    # but we want 503)
+    """Get all greetings for a specific user from DynamoDB"""
     if not database_available:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database is not available. Please configure DATABASE_URL."
+            detail="DynamoDB is not available. Please ensure the table is created and IAM permissions are configured."
         )
 
     try:
@@ -506,16 +584,11 @@ async def get_user_greetings(
                 detail="User name cannot be empty",
             )
 
-        # Query with error handling
+        # Query DynamoDB with error handling
         try:
-            greetings = (
-                db.query(Greeting)
-                .filter(Greeting.user_name == user_clean)
-                .order_by(Greeting.created_at.desc())
-                .all()
-            )
-        except SQLAlchemyError as e:
-            logger.error(f"Database error in get_user_greetings: {e}", exc_info=True)
+            greetings = db_get_user_greetings(user_name=user_clean)
+        except ClientError as e:
+            logger.error(f"DynamoDB error in get_user_greetings: {e}", exc_info=True)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Database error occurred",
@@ -527,11 +600,10 @@ async def get_user_greetings(
     except HTTPException:
         raise
     except RuntimeError as e:
-        # Handle database unavailable error from get_db()
-        if "Database is not available" in str(e):
+        if "DynamoDB is not available" in str(e):
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Database is not available. Please configure DATABASE_URL."
+                detail="DynamoDB is not available. Please ensure the table is created and IAM permissions are configured."
             ) from e
         raise
     except Exception as e:

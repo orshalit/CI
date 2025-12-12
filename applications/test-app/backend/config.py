@@ -1,8 +1,53 @@
 """Configuration management with environment variable validation"""
 
+import logging
 import os
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
+
+
+def _get_secret_key() -> str:
+    """
+    Get SECRET_KEY from Secrets Manager or fallback to environment variable.
+    
+    This function attempts to retrieve the session secret from AWS Secrets Manager
+    using dynamic discovery. If that fails, it falls back to the SECRET_KEY
+    environment variable, and finally to a default value.
+    
+    Returns:
+        str: Secret key value
+    """
+    try:
+        # Try to import secrets module (may not be available in all environments)
+        from secrets import get_session_secret
+        
+        try:
+            # Try to get from Secrets Manager via dynamic discovery
+            secret_key = get_session_secret()
+            logger.info("Successfully retrieved SECRET_KEY from Secrets Manager")
+            return secret_key
+        except Exception as e:
+            logger.debug(f"Could not retrieve SECRET_KEY from Secrets Manager: {e}")
+            # Fall through to environment variable fallback
+    except ImportError:
+        logger.debug("secrets module not available, using environment variable fallback")
+    except Exception as e:
+        logger.debug(f"Error importing secrets module: {e}")
+    
+    # Fallback to environment variable
+    env_secret = os.getenv("SECRET_KEY")
+    if env_secret:
+        logger.info("Using SECRET_KEY from environment variable")
+        return env_secret
+    
+    # Final fallback (should only be used in local development/testing)
+    logger.warning(
+        "SECRET_KEY not found in Secrets Manager or environment variable. "
+        "Using default value. This should not be used in production!"
+    )
+    return "change-me-in-production"
 
 
 class Settings(BaseSettings):
@@ -30,7 +75,8 @@ class Settings(BaseSettings):
     DATABASE_POOL_RECYCLE: int = int(os.getenv("DATABASE_POOL_RECYCLE", "3600"))
 
     # Security Configuration
-    SECRET_KEY: str = os.getenv("SECRET_KEY", "change-me-in-production")
+    # SECRET_KEY is loaded dynamically from Secrets Manager or environment variable
+    SECRET_KEY: str = _get_secret_key()
     ALLOWED_HOSTS: list[str] = os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 
     # Rate Limiting
