@@ -68,7 +68,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.API_TITLE,
     version=settings.API_VERSION,
-    # Pipeline fix: Fixed artifact merge - built-images.txt no longer overwrites
+    # Pipeline test: Full run with artifact merge fix - verify built-images.txt passes to deploy
     lifespan=lifespan,
     docs_url="/docs" if not settings.TESTING else None,
     redoc_url="/redoc" if not settings.TESTING else None,

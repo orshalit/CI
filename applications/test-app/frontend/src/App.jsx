@@ -150,7 +150,7 @@ function App() {
 
         <div className="card">
           <h2>Health Check</h2>
-          {/* CI/CD Pipeline Test: Full pipeline validation with Dhall fixes */}
+          {/* Pipeline test: Full run with artifact merge fix */}
           <p className="status">
             Status:{' '}
             <span className={healthStatus === 'healthy' ? 'healthy' : 'unhealthy'}>
