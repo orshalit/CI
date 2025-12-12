@@ -149,6 +149,7 @@ function App() {
         <h1>Full-Stack Application</h1>
         {/* Pipeline fix: Fixed artifact merge for built-images */}
         {/* Pipeline run: Testing full deployment cycle after health diagnostics */}
+        {/* Test: Frontend-only change to verify build matrix filters correctly */}
         
         {/* Version Badge - DEPLOY-TEST-1 */}
         <div className="version-badge">
