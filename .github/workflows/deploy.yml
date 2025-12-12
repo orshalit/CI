@@ -2038,25 +2038,12 @@ jobs:
           TEMP_DESTROY_LOG=$(mktemp)
           terraform -chdir="$PLAN_DIR" destroy -refresh=false -input=false -no-color $DESTROY_ARGS > "$TEMP_DESTROY_LOG" 2>&1
           DESTROY_EXIT=$?
+          
+          # Always read output from temp file (more reliable than variable capture)
           DESTROY_OUTPUT=$(cat "$TEMP_DESTROY_LOG" 2>/dev/null || echo "")
           
           # Always show output
           echo "$DESTROY_OUTPUT"
-          
-          # Debug: Check if we captured output and show first 500 chars
-          if [ -z "$DESTROY_OUTPUT" ]; then
-            echo "::warning::No output captured from destroy command"
-            echo "::notice::Checking temp file directly..."
-            if [ -f "$TEMP_DESTROY_LOG" ]; then
-              echo "::notice::Temp file exists, size: $(wc -c < "$TEMP_DESTROY_LOG") bytes"
-              echo "::notice::First 500 chars of temp file:"
-              head -c 500 "$TEMP_DESTROY_LOG" || cat "$TEMP_DESTROY_LOG" | head -c 500
-              echo ""
-              DESTROY_OUTPUT=$(cat "$TEMP_DESTROY_LOG" 2>/dev/null || echo "")
-            fi
-          else
-            echo "::notice::Output captured, length: ${#DESTROY_OUTPUT} chars"
-          fi
           
           if [ $DESTROY_EXIT -eq 0 ]; then
             echo "::notice::✓ Destroy completed successfully"
@@ -2066,27 +2053,22 @@ jobs:
             echo "::notice::Destroy failed with exit code $DESTROY_EXIT"
             echo "::notice::Checking for state lock error..."
             
-            # Check if failure was due to state lock (case-insensitive, check for variations)
-            # Also check the temp file directly if output variable is empty
+            # Check temp file directly for lock errors (most reliable method)
             HAS_LOCK_ERROR=false
-            if [ -n "$DESTROY_OUTPUT" ]; then
-              if echo "$DESTROY_OUTPUT" | grep -qi "Error acquiring the state lock"; then
+            if [ -f "$TEMP_DESTROY_LOG" ]; then
+              if grep -qi "Error acquiring the state lock" "$TEMP_DESTROY_LOG" 2>/dev/null; then
                 HAS_LOCK_ERROR=true
-              elif echo "$DESTROY_OUTPUT" | grep -qi "state lock"; then
-                HAS_LOCK_ERROR=true
-              elif echo "$DESTROY_OUTPUT" | grep -qi "Lock Info:"; then
+              elif grep -qi "Lock Info:" "$TEMP_DESTROY_LOG" 2>/dev/null; then
                 HAS_LOCK_ERROR=true
               fi
             fi
             
-            # If still no match and temp file exists, check it directly
-            if [ "$HAS_LOCK_ERROR" = "false" ] && [ -f "$TEMP_DESTROY_LOG" ]; then
-              if grep -qi "Error acquiring the state lock" "$TEMP_DESTROY_LOG" 2>/dev/null; then
+            # Also check output variable as fallback
+            if [ "$HAS_LOCK_ERROR" = "false" ] && [ -n "$DESTROY_OUTPUT" ]; then
+              if echo "$DESTROY_OUTPUT" | grep -qi "Error acquiring the state lock"; then
                 HAS_LOCK_ERROR=true
-                DESTROY_OUTPUT=$(cat "$TEMP_DESTROY_LOG" 2>/dev/null || echo "")
-              elif grep -qi "Lock Info:" "$TEMP_DESTROY_LOG" 2>/dev/null; then
+              elif echo "$DESTROY_OUTPUT" | grep -qi "Lock Info:"; then
                 HAS_LOCK_ERROR=true
-                DESTROY_OUTPUT=$(cat "$TEMP_DESTROY_LOG" 2>/dev/null || echo "")
               fi
             fi
             
