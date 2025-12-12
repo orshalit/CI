@@ -114,14 +114,18 @@ async def health_check():
         try:
             with open(version_file) as f:
                 version_data = json.load(f)
-                version_info["version"] = version_data.get("version", os.getenv("APP_VERSION"))
-                version_info["commit"] = version_data.get("commit", os.getenv("GIT_COMMIT"))
-        except (json.JSONDecodeError, OSError):
-            version_info["version"] = os.getenv("APP_VERSION")
-            version_info["commit"] = os.getenv("GIT_COMMIT")
+                version_info["version"] = version_data.get("version") or os.getenv("APP_VERSION") or "unknown"
+                version_info["commit"] = version_data.get("commit") or os.getenv("GIT_COMMIT") or "unknown"
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning(f"Failed to read version.json: {e}")
+            version_info["version"] = os.getenv("APP_VERSION") or "unknown"
+            version_info["commit"] = os.getenv("GIT_COMMIT") or "unknown"
     else:
-        version_info["version"] = os.getenv("APP_VERSION")
-        version_info["commit"] = os.getenv("GIT_COMMIT")
+        version_info["version"] = os.getenv("APP_VERSION") or "unknown"
+        version_info["commit"] = os.getenv("GIT_COMMIT") or "unknown"
+    
+    # Log version info for debugging
+    logger.debug(f"Health check version info: {version_info}")
 
     # Check if database is available
     if not database_available:
