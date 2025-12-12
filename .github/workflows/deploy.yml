@@ -79,7 +79,9 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Run backend tests
-        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+        if: |
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.action != 'destroy') ||
+          (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
         working-directory: applications/test-app/backend
         run: |
           pytest tests/test_main.py
