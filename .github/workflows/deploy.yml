@@ -2043,6 +2043,11 @@ jobs:
           # Always show output
           echo "$DESTROY_OUTPUT"
           
+          # Debug: Check if we captured output
+          if [ -z "$DESTROY_OUTPUT" ]; then
+            echo "::warning::No output captured from destroy command"
+          fi
+          
           if [ $DESTROY_EXIT -eq 0 ]; then
             echo "::notice::✓ Destroy completed successfully"
             rm -f "$TEMP_DESTROY_LOG"
