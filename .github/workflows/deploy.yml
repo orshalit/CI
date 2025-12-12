@@ -1580,6 +1580,28 @@ jobs:
             echo "::notice::Verification script not found, skipping..."
           fi
 
+      - name: Verify Service Health and Connectivity
+        id: verify_service_health
+        if: steps.vars.outputs.action == 'apply' && steps.apply.outcome == 'success' && steps.vars.outputs.module_path == '04-ecs-fargate'
+        continue-on-error: true
+        run: |
+          PLAN_DIR="DEVOPS/live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}"
+          
+          echo "::notice::Verifying service health and connectivity after deployment..."
+          
+          if [ -f "DEVOPS/scripts/verify-service-health.sh" ]; then
+            chmod +x DEVOPS/scripts/verify-service-health.sh
+            cd DEVOPS
+            if DEVOPS/scripts/verify-service-health.sh "${{ steps.vars.outputs.environment }}" "${{ steps.vars.outputs.module_path }}" "${{ secrets.AWS_REGION }}"; then
+              echo "::notice::✓ All services are healthy and accessible"
+            else
+              echo "::warning::⚠ Some services may be unhealthy or inaccessible. Check the output above for details."
+              echo "::notice::This is often normal immediately after deployment - DNS propagation and container startup can take a few minutes."
+            fi
+          else
+            echo "::notice::Service health verification script not found, skipping..."
+          fi
+
       - name: Targeted Cleanup on Apply Failure
         if: steps.vars.outputs.action == 'apply' && steps.apply.outcome == 'failure' && steps.vars.outputs.environment != 'production'
         continue-on-error: true
