@@ -446,8 +446,38 @@ jobs:
 
           echo "::notice::Generating config for ${ENV}/${MODULE_NAME}..."
 
-          # Generate the JSON config for the specific module being deployed
-          dhall-to-json --file DEVOPS/config/environments/${ENV}.dhall | jq ".[\"${MODULE_NAME}\"]" > "${OUTPUT_FILE}"
+          # First, convert Dhall to JSON and validate
+          ENV_JSON=$(dhall-to-json --file DEVOPS/config/environments/${ENV}.dhall) || {
+            echo "::error::Failed to convert DEVOPS/config/environments/${ENV}.dhall to JSON"
+            exit 1
+          }
+          
+          # Check if module exists
+          MODULE_EXISTS=$(echo "$ENV_JSON" | jq -r "has(\"${MODULE_NAME}\")")
+          if [ "$MODULE_EXISTS" != "true" ]; then
+            echo "::error::Module '${MODULE_NAME}' not found in DEVOPS/config/environments/${ENV}.dhall"
+            echo "::error::Available modules:"
+            echo "$ENV_JSON" | jq -r 'keys[]' | sed 's/^/  - /' || true
+            exit 1
+          fi
+          
+          # Extract module config
+          MODULE_CONFIG=$(echo "$ENV_JSON" | jq -c ".[\"${MODULE_NAME}\"]")
+          
+          # Validate that we got a valid object
+          if [ -z "$MODULE_CONFIG" ] || [ "$MODULE_CONFIG" = "null" ]; then
+            echo "::error::Module '${MODULE_NAME}' exists but has null value"
+            exit 1
+          fi
+          
+          echo "$MODULE_CONFIG" > "${OUTPUT_FILE}"
+          
+          # Validate the output file is valid JSON
+          if ! jq empty "${OUTPUT_FILE}" 2>/dev/null; then
+            echo "::error::Generated terraform.tfvars.json is not valid JSON"
+            cat "${OUTPUT_FILE}"
+            exit 1
+          fi
 
           echo "::notice::✓ Generated ${OUTPUT_FILE}"
           echo "::group::Generated terraform.tfvars.json"

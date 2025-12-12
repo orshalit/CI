@@ -150,7 +150,7 @@ function App() {
 
         <div className="card">
           <h2>Health Check</h2>
-          {/* Pipeline fix: use container_image directly without prefix */}
+          {/* Pipeline fix: terraform.tfvars.json generation validation */}
           <p className="status">
             Status:{' '}
             <span className={healthStatus === 'healthy' ? 'healthy' : 'unhealthy'}>

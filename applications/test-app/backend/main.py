@@ -68,7 +68,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.API_TITLE,
     version=settings.API_VERSION,
-    # Pipeline fix: container_image already full path, no prefix needed
+    # Pipeline fix: terraform.tfvars.json validation and error handling
     lifespan=lifespan,
     docs_url="/docs" if not settings.TESTING else None,
     redoc_url="/redoc" if not settings.TESTING else None,
