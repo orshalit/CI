@@ -2029,7 +2029,10 @@ jobs:
           fi
           
           # Execute destroy with proper error handling
-          terraform -chdir="$PLAN_DIR" destroy $DESTROY_ARGS || {
+          # Use -refresh=false to work directly with state (avoids variable requirements)
+          # Add -no-color for cleaner logs and -input=false to prevent prompts
+          echo "::notice::Executing terraform destroy with -refresh=false (state-based)..."
+          terraform -chdir="$PLAN_DIR" destroy -refresh=false -input=false -no-color $DESTROY_ARGS || {
             echo "::error::Terraform destroy failed"
             echo "::error::Some resources may have been destroyed. Review state and AWS console."
             exit 1
