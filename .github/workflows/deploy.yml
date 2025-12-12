@@ -2006,7 +2006,9 @@ jobs:
 
       - name: Terraform Destroy
         if: steps.vars.outputs.action == 'destroy' && steps.vars.outputs.environment != 'production'
+        shell: bash
         run: |
+          set +e  # Disable exit on error from the start
           PLAN_DIR="DEVOPS/live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}"
           DESTROY_ARGS="-auto-approve"
           if [ -n "${{ steps.build_var_files_destroy.outputs.var_files }}" ]; then
@@ -2032,9 +2034,6 @@ jobs:
           # Use -refresh=false to work directly with state (avoids variable requirements)
           # Add -no-color for cleaner logs and -input=false to prevent prompts
           echo "::notice::Executing terraform destroy with -refresh=false (state-based)..."
-          
-          # Disable exit on error to allow error handling
-          set +e
           
           # Run destroy and capture output to check for lock errors
           # Use a temp file to capture output and get proper exit code
