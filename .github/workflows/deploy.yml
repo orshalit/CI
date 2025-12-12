@@ -2008,7 +2008,7 @@ jobs:
         if: steps.vars.outputs.action == 'destroy' && steps.vars.outputs.environment != 'production'
         shell: bash
         run: |
-          set +e  # Disable exit on error from the start
+          set +e  # Disable exit on error from the start for lock handling
           PLAN_DIR="DEVOPS/live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}"
           DESTROY_ARGS="-auto-approve"
           if [ -n "${{ steps.build_var_files_destroy.outputs.var_files }}" ]; then
@@ -2018,27 +2018,98 @@ jobs:
               fi
             done
           fi
+          
           # Ensure Terraform is initialized before destroy (idempotency)
+          echo "::notice::[$(date +'%H:%M:%S')] Initializing Terraform..."
           terraform -chdir="$PLAN_DIR" init -upgrade -no-color || {
             echo "::error::Terraform init failed before destroy"
             exit 1
           }
           
           # Verify state exists before destroying (resilience)
+          echo "::notice::[$(date +'%H:%M:%S')] Verifying Terraform state exists..."
           if ! terraform -chdir="$PLAN_DIR" state list -no-color >/dev/null 2>&1; then
             echo "::notice::No Terraform state found - nothing to destroy"
             exit 0
           fi
           
-          # Execute destroy with proper error handling
-          # Use -refresh=false to work directly with state (avoids variable requirements)
-          # Add -no-color for cleaner logs and -input=false to prevent prompts
-          echo "::notice::Executing terraform destroy with -refresh=false (state-based)..."
+          # Show what will be destroyed for visibility
+          echo "::notice::[$(date +'%H:%M:%S')] Generating destroy plan to show what will be destroyed..."
+          PLAN_OUTPUT=$(terraform -chdir="$PLAN_DIR" plan -destroy -refresh=false -input=false -no-color -var="services={}" -var="albs={}" -var="terraform_backend_bucket_name=devops-project-terraform" $DESTROY_ARGS 2>&1)
+          PLAN_EXIT=$?
+          
+          if [ $PLAN_EXIT -eq 0 ]; then
+            echo "$PLAN_OUTPUT" | head -100
+            echo "::notice::[$(date +'%H:%M:%S')] Destroy plan generated successfully"
+          else
+            echo "$PLAN_OUTPUT"
+            echo "::warning::[$(date +'%H:%M:%S')] Destroy plan had warnings/errors, but continuing..."
+          fi
           
           # Add empty defaults for required variables since we're destroying from state
-          # Terraform will use state values, but still needs variables for config validation
-          # Always add these defaults for state-based destroy operations
           DESTROY_ARGS="$DESTROY_ARGS -var=services={} -var=albs={} -var=terraform_backend_bucket_name=devops-project-terraform"
           
-          # Execute destroy
-          terraform -chdir="$PLAN_DIR" destroy -refresh=false -input=false -no-color $DESTROY_ARGS
+          # Create temp file for destroy output to check for lock errors
+          TEMP_DESTROY_LOG=$(mktemp)
+          trap "rm -f $TEMP_DESTROY_LOG" EXIT
+          
+          echo "::notice::[$(date +'%H:%M:%S')] Starting terraform destroy (this may take several minutes)..."
+          echo "::notice::[$(date +'%H:%M:%S')] Destroy output will stream in real-time below..."
+          
+          # Execute destroy with real-time output streaming
+          terraform -chdir="$PLAN_DIR" destroy -refresh=false -input=false -no-color $DESTROY_ARGS 2>&1 | tee "$TEMP_DESTROY_LOG"
+          DESTROY_EXIT=${PIPESTATUS[0]}
+          
+          # Check for state lock errors
+          if [ $DESTROY_EXIT -ne 0 ]; then
+            if grep -qi "Error acquiring the state lock" "$TEMP_DESTROY_LOG" || grep -qi "Lock Info:" "$TEMP_DESTROY_LOG"; then
+              echo "::warning::[$(date +'%H:%M:%S')] State lock detected. Attempting to extract lock ID..."
+              
+              # Try multiple patterns to extract lock ID
+              LOCK_ID=""
+              
+              # Pattern 1: Look for "Lock Info:" followed by ID
+              LOCK_ID=$(grep -A 10 "Lock Info:" "$TEMP_DESTROY_LOG" | grep -i "ID:" | awk '{print $2}' | head -1)
+              
+              # Pattern 2: Look for lock ID in error message
+              if [ -z "$LOCK_ID" ]; then
+                LOCK_ID=$(grep -i "lock.*id" "$TEMP_DESTROY_LOG" | sed -n 's/.*[Ii][Dd][:]\?[[:space:]]*\([a-f0-9-]\{36\}\).*/\1/p' | head -1)
+              fi
+              
+              # Pattern 3: Extract UUID-like strings near lock messages
+              if [ -z "$LOCK_ID" ]; then
+                LOCK_ID=$(grep -i "lock" "$TEMP_DESTROY_LOG" | grep -oE '[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}' | head -1)
+              fi
+              
+              if [ -n "$LOCK_ID" ]; then
+                echo "::notice::[$(date +'%H:%M:%S')] Found lock ID: $LOCK_ID. Attempting force-unlock..."
+                terraform -chdir="$PLAN_DIR" force-unlock -force "$LOCK_ID" -no-color 2>&1
+                UNLOCK_EXIT=$?
+                
+                if [ $UNLOCK_EXIT -eq 0 ]; then
+                  echo "::notice::[$(date +'%H:%M:%S')] Lock released successfully. Retrying destroy..."
+                  
+                  # Retry destroy with same args
+                  echo "::notice::[$(date +'%H:%M:%S')] Retrying terraform destroy..."
+                  terraform -chdir="$PLAN_DIR" destroy -refresh=false -input=false -no-color $DESTROY_ARGS 2>&1 | tee "$TEMP_DESTROY_LOG"
+                  DESTROY_EXIT=${PIPESTATUS[0]}
+                else
+                  echo "::error::[$(date +'%H:%M:%S')] Failed to force-unlock. Lock ID: $LOCK_ID"
+                  echo "::error::Please manually delete the lock in DynamoDB or use: terraform force-unlock -force $LOCK_ID"
+                fi
+              else
+                echo "::warning::[$(date +'%H:%M:%S')] Could not extract lock ID from output. Showing relevant lines:"
+                grep -i "lock" "$TEMP_DESTROY_LOG" | head -20
+                echo "::error::Please manually check and remove the state lock in DynamoDB"
+              fi
+            fi
+          fi
+          
+          # Re-enable exit on error and check final result
+          set -e
+          if [ $DESTROY_EXIT -ne 0 ]; then
+            echo "::error::[$(date +'%H:%M:%S')] Terraform destroy failed with exit code $DESTROY_EXIT"
+            exit $DESTROY_EXIT
+          else
+            echo "::notice::[$(date +'%H:%M:%S')] Terraform destroy completed successfully!"
+          fi
