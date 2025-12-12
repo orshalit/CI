@@ -2045,6 +2045,14 @@ jobs:
           # Always show output
           echo "$DESTROY_OUTPUT"
           
+          # Debug: Verify temp file exists and has content
+          if [ -f "$TEMP_DESTROY_LOG" ]; then
+            TEMP_FILE_SIZE=$(wc -c < "$TEMP_DESTROY_LOG" 2>/dev/null || echo "0")
+            echo "::notice::Temp file exists, size: $TEMP_FILE_SIZE bytes"
+          else
+            echo "::warning::Temp file does not exist!"
+          fi
+          
           if [ $DESTROY_EXIT -eq 0 ]; then
             echo "::notice::✓ Destroy completed successfully"
             rm -f "$TEMP_DESTROY_LOG"
@@ -2056,11 +2064,18 @@ jobs:
             # Check temp file directly for lock errors (most reliable method)
             HAS_LOCK_ERROR=false
             if [ -f "$TEMP_DESTROY_LOG" ]; then
+              echo "::notice::Checking temp file for lock errors..."
               if grep -qi "Error acquiring the state lock" "$TEMP_DESTROY_LOG" 2>/dev/null; then
+                echo "::notice::Found 'Error acquiring the state lock' in temp file"
                 HAS_LOCK_ERROR=true
               elif grep -qi "Lock Info:" "$TEMP_DESTROY_LOG" 2>/dev/null; then
+                echo "::notice::Found 'Lock Info:' in temp file"
                 HAS_LOCK_ERROR=true
+              else
+                echo "::notice::No lock error patterns found in temp file"
               fi
+            else
+              echo "::warning::Temp file not found for lock check"
             fi
             
             # Also check output variable as fallback
@@ -2080,18 +2095,24 @@ jobs:
               
               # Try extraction from temp file (most reliable)
               if [ -f "$TEMP_DESTROY_LOG" ]; then
+                echo "::notice::Extracting lock ID from temp file..."
                 # Pattern 1: Look for "ID:" followed by the UUID
                 LOCK_ID=$(grep -A 10 "Lock Info:" "$TEMP_DESTROY_LOG" 2>/dev/null | grep -i "ID:" | awk '{print $2}' | head -1 | tr -d '[:space:]' || echo "")
+                echo "::notice::Pattern 1 result: ${LOCK_ID:-empty}"
                 
                 # Pattern 2: Alternative extraction using sed
                 if [ -z "$LOCK_ID" ] || [ "$LOCK_ID" = "" ]; then
                   LOCK_ID=$(grep -A 10 "Lock Info:" "$TEMP_DESTROY_LOG" 2>/dev/null | grep -i "ID:" | sed -n 's/.*ID:[[:space:]]*\([a-f0-9-]\{36\}\).*/\1/p' | head -1 || echo "")
+                  echo "::notice::Pattern 2 result: ${LOCK_ID:-empty}"
                 fi
                 
                 # Pattern 3: Direct grep for UUID pattern
                 if [ -z "$LOCK_ID" ] || [ "$LOCK_ID" = "" ]; then
                   LOCK_ID=$(grep -oE '[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}' "$TEMP_DESTROY_LOG" 2>/dev/null | head -1 || echo "")
+                  echo "::notice::Pattern 3 result: ${LOCK_ID:-empty}"
                 fi
+              else
+                echo "::warning::Temp file not found for lock ID extraction"
               fi
               
               # Fallback to output variable if temp file extraction failed
