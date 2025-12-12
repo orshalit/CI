@@ -132,6 +132,47 @@ class ApiService {
       throw new Error(error.message || 'Failed to call greet endpoint');
     }
   }
+
+  /**
+   * Get DynamoDB status
+   * @returns {Promise<{available: boolean, table_name?: string, message: string}>}
+   */
+  async getDynamoDBStatus() {
+    try {
+      logger.debug('Calling dynamodb-status endpoint');
+      const data = await httpClient.get(`${this.baseUrl}/api/dynamodb-status`);
+
+      logger.info('DynamoDB status retrieved successfully', { available: data.available });
+      return data;
+    } catch (error) {
+      logger.error('DynamoDB status check failed', error);
+      throw new Error(error.message || 'Failed to get DynamoDB status');
+    }
+  }
+
+  /**
+   * Get all greetings from DynamoDB
+   * @param {number} skip - Number of records to skip (default: 0)
+   * @param {number} limit - Maximum number of records to return (default: 10)
+   * @returns {Promise<{total: number, greetings: Array, skip: number, limit: number}>}
+   */
+  async getGreetings(skip = 0, limit = 10) {
+    try {
+      logger.debug('Calling greetings endpoint', { skip, limit });
+      const data = await httpClient.get(
+        `${this.baseUrl}/api/greetings?skip=${skip}&limit=${limit}`
+      );
+
+      logger.info('Greetings retrieved successfully', {
+        total: data.total,
+        count: data.greetings?.length || 0,
+      });
+      return data;
+    } catch (error) {
+      logger.error('Failed to get greetings', error);
+      throw new Error(error.message || 'Failed to get greetings');
+    }
+  }
 }
 
 export const apiService = new ApiService();

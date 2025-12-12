@@ -12,21 +12,42 @@ function App() {
   // Version state (DEPLOY-TEST-1)
   const [versionInfo, setVersionInfo] = useState({ version: null, commit: null });
 
-  // API hooks for hello, deploy-test-2, deploy-test-3, and greet endpoints
+  // API hooks for hello, deploy-test-2, deploy-test-3, greet, and DynamoDB endpoints
   // Bind methods to ensure proper 'this' context
   const [callHelloApi, helloState] = useApi(apiService.callHello.bind(apiService));
   const [callDeployTest2Api, deployTest2State] = useApi(apiService.callDeployTest2.bind(apiService));
   const [callDeployTest3Api, deployTest3State] = useApi(apiService.callDeployTest3.bind(apiService));
   const [callGreetApi, greetState] = useApi(apiService.callGreet.bind(apiService));
+  const [getDynamoDBStatus, dynamodbStatusState] = useApi(apiService.getDynamoDBStatus.bind(apiService));
+  const [getGreetings, greetingsState] = useApi(apiService.getGreetings.bind(apiService));
 
   // Local state
   const [userName, setUserName] = useState('');
   const [userNameError, setUserNameError] = useState('');
+  const [greetingsRefresh, setGreetingsRefresh] = useState(0);
 
   // Check health on mount
   useEffect(() => {
     checkHealth();
-  }, [checkHealth]);
+    // Check DynamoDB status on mount
+    getDynamoDBStatus().catch((err) => {
+      logger.warn('Failed to get DynamoDB status', err);
+    });
+    // Load greetings on mount
+    getGreetings(0, 20).catch((err) => {
+      logger.warn('Failed to load greetings', err);
+    });
+  }, [checkHealth, getDynamoDBStatus, getGreetings]);
+
+  // Refresh greetings when a new greeting is created
+  useEffect(() => {
+    if (greetState.data && !greetState.loading) {
+      // Refresh greetings list after successful greet
+      getGreetings(0, 20).catch((err) => {
+        logger.warn('Failed to refresh greetings', err);
+      });
+    }
+  }, [greetState.data, greetState.loading, getGreetings]);
   
   // Load version info from version.json (DEPLOY-TEST-1)
   useEffect(() => {
@@ -142,7 +163,7 @@ function App() {
   );
 
   // Determine if any operation is loading
-  const isLoading = helloState.loading || deployTest2State.loading || deployTest3State.loading || greetState.loading;
+  const isLoading = helloState.loading || deployTest2State.loading || deployTest3State.loading || greetState.loading || greetingsState.loading;
 
   return (
     <div className="app">
@@ -258,6 +279,106 @@ function App() {
           {greetState.error && (
             <p className="result error" role="alert">
               Error: {greetState.error}
+            </p>
+          )}
+        </div>
+
+        <div className="card">
+          <h2>DynamoDB Status</h2>
+          <p className="deploy-info" style={{ color: '#6c5ce7', fontWeight: 'bold' }}>
+            🔍 Pipeline Test: DynamoDB connectivity and table status
+          </p>
+          <button 
+            onClick={() => getDynamoDBStatus()} 
+            disabled={dynamodbStatusState.loading}
+            style={{ backgroundColor: '#6c5ce7', color: 'white', fontWeight: 'bold' }}
+          >
+            {dynamodbStatusState.loading ? 'Loading...' : 'Check DynamoDB Status'}
+          </button>
+          {dynamodbStatusState.data && (
+            <div style={{ marginTop: '1rem', padding: '0.75rem', backgroundColor: dynamodbStatusState.data.available ? '#d4edda' : '#f8d7da', borderRadius: '4px' }}>
+              <p style={{ fontWeight: 'bold', marginBottom: '0.5rem' }}>
+                Status: {dynamodbStatusState.data.available ? '✅ Available' : '❌ Unavailable'}
+              </p>
+              {dynamodbStatusState.data.table_name && (
+                <p style={{ fontSize: '0.9em', margin: '0.25rem 0' }}>
+                  Table: <strong>{dynamodbStatusState.data.table_name}</strong>
+                </p>
+              )}
+              {dynamodbStatusState.data.table_status && (
+                <p style={{ fontSize: '0.9em', margin: '0.25rem 0' }}>
+                  Status: <strong>{dynamodbStatusState.data.table_status}</strong>
+                </p>
+              )}
+              {dynamodbStatusState.data.endpoint_url && (
+                <p style={{ fontSize: '0.85em', margin: '0.25rem 0', color: '#666' }}>
+                  Endpoint: {dynamodbStatusState.data.endpoint_url}
+                </p>
+              )}
+              <p style={{ fontSize: '0.9em', marginTop: '0.5rem' }}>
+                {dynamodbStatusState.data.message}
+              </p>
+            </div>
+          )}
+          {dynamodbStatusState.error && (
+            <p className="result error" role="alert" style={{ marginTop: '1rem' }}>
+              Error: {dynamodbStatusState.error}
+            </p>
+          )}
+        </div>
+
+        <div className="card">
+          <h2>Greetings from DynamoDB</h2>
+          <p className="deploy-info" style={{ color: '#00b894', fontWeight: 'bold' }}>
+            📋 Pipeline Test: Display all greetings stored in DynamoDB
+          </p>
+          <button 
+            onClick={() => getGreetings(0, 20)} 
+            disabled={greetingsState.loading}
+            style={{ backgroundColor: '#00b894', color: 'white', fontWeight: 'bold' }}
+          >
+            {greetingsState.loading ? 'Loading...' : 'Refresh Greetings'}
+          </button>
+          {greetingsState.data && (
+            <div style={{ marginTop: '1rem' }}>
+              <p style={{ fontWeight: 'bold', marginBottom: '0.5rem' }}>
+                Total: {greetingsState.data.total} greeting(s)
+              </p>
+              {greetingsState.data.greetings && greetingsState.data.greetings.length > 0 ? (
+                <div style={{ maxHeight: '400px', overflowY: 'auto', border: '1px solid #ddd', borderRadius: '4px', padding: '0.5rem' }}>
+                  {greetingsState.data.greetings.map((greeting) => (
+                    <div 
+                      key={greeting.id} 
+                      style={{ 
+                        padding: '0.75rem', 
+                        marginBottom: '0.5rem', 
+                        backgroundColor: '#f8f9fa', 
+                        borderRadius: '4px',
+                        borderLeft: '3px solid #00b894'
+                      }}
+                    >
+                      <p style={{ margin: '0.25rem 0', fontWeight: 'bold' }}>
+                        {greeting.user_name}
+                      </p>
+                      <p style={{ margin: '0.25rem 0', color: '#555' }}>
+                        {greeting.message}
+                      </p>
+                      <p style={{ margin: '0.25rem 0', fontSize: '0.85em', color: '#888' }}>
+                        {new Date(greeting.created_at).toLocaleString()}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p style={{ padding: '1rem', color: '#888', fontStyle: 'italic' }}>
+                  No greetings found. Create one using the Greet Endpoint above!
+                </p>
+              )}
+            </div>
+          )}
+          {greetingsState.error && (
+            <p className="result error" role="alert" style={{ marginTop: '1rem' }}>
+              Error: {greetingsState.error}
             </p>
           )}
         </div>

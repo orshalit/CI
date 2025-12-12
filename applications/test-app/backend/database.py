@@ -50,58 +50,72 @@ def get_table_name_from_ssm(environment: str, table_key: str = "greetings") -> O
 
 
 # Initialize DynamoDB client
-if settings.TESTING:
-    # Use DynamoDB Local or mock for testing
-    # For now, set database_available = False in tests
-    database_available = False
-    logger.info("Testing mode: DynamoDB not initialized")
-else:
-    try:
-        # Get table name from SSM Parameter Store (preferred) or environment variable (fallback)
-        environment = os.getenv("ENVIRONMENT", "dev")
-        table_key = os.getenv("DYNAMODB_TABLE_KEY", "greetings")  # Configurable table key
-        
-        # Try SSM Parameter Store first (best practice)
+try:
+    # Get table name from SSM Parameter Store (preferred) or environment variable (fallback)
+    environment = os.getenv("ENVIRONMENT", "dev")
+    table_key = os.getenv("DYNAMODB_TABLE_KEY", "greetings")  # Configurable table key
+    
+    # Check if DynamoDB Local endpoint is configured (for local testing/E2E)
+    dynamodb_endpoint_url = os.getenv("DYNAMODB_ENDPOINT_URL")
+    
+    # Try SSM Parameter Store first (best practice) - skip in testing/local mode
+    if not settings.TESTING and not dynamodb_endpoint_url:
         # SSM Parameter path: /{environment}/dynamodb/{table_key}/table_name
         table_name = get_table_name_from_ssm(environment, table_key)
-        
-        # Fallback to environment variable if SSM parameter not found
-        if table_name is None:
-            table_name = os.getenv("DYNAMODB_TABLE_NAME", f"{environment}-{table_key}")
-            logger.info(f"Using table name from environment variable: {table_name}")
+    else:
+        table_name = None
+    
+    # Fallback to environment variable if SSM parameter not found
+    if table_name is None:
+        table_name = os.getenv("DYNAMODB_TABLE_NAME", f"{environment}-{table_key}")
+        logger.info(f"Using table name from environment variable: {table_name}")
+    else:
+        logger.info(f"Using table name from SSM Parameter Store: {table_name} (key: {table_key})")
+    
+    # Initialize boto3 clients with optional endpoint URL for DynamoDB Local
+    client_config = {"region_name": os.getenv("AWS_REGION", "us-east-1")}
+    resource_config = {"region_name": os.getenv("AWS_REGION", "us-east-1")}
+    
+    if dynamodb_endpoint_url:
+        client_config["endpoint_url"] = dynamodb_endpoint_url
+        resource_config["endpoint_url"] = dynamodb_endpoint_url
+        logger.info(f"Using DynamoDB Local endpoint: {dynamodb_endpoint_url}")
+    
+    dynamodb_client = boto3.client("dynamodb", **client_config)
+    dynamodb_resource = boto3.resource("dynamodb", **resource_config)
+    
+    # Verify table exists
+    try:
+        dynamodb_client.describe_table(TableName=table_name)
+        database_available = True
+        logger.info(f"DynamoDB table '{table_name}' is available")
+    except ClientError as e:
+        error_code = e.response.get("Error", {}).get("Code", "")
+        if error_code == "ResourceNotFoundException":
+            logger.warning(
+                f"DynamoDB table '{table_name}' not found. "
+                "Database features will be unavailable. "
+                "Ensure the table is created via Terraform or initialization script."
+            )
+            database_available = False
         else:
-            logger.info(f"Using table name from SSM Parameter Store: {table_name} (key: {table_key})")
-        
-        # Initialize boto3 clients
-        dynamodb_client = boto3.client("dynamodb", region_name=os.getenv("AWS_REGION", "us-east-1"))
-        dynamodb_resource = boto3.resource("dynamodb", region_name=os.getenv("AWS_REGION", "us-east-1"))
-        
-        # Verify table exists
-        try:
-            dynamodb_client.describe_table(TableName=table_name)
-            database_available = True
-            logger.info(f"DynamoDB table '{table_name}' is available")
-        except ClientError as e:
-            error_code = e.response.get("Error", {}).get("Code", "")
-            if error_code == "ResourceNotFoundException":
-                logger.warning(
-                    f"DynamoDB table '{table_name}' not found. "
-                    "Database features will be unavailable. "
-                    "Ensure the table is created via Terraform."
-                )
-                database_available = False
-            else:
-                logger.error(f"Error checking DynamoDB table: {e}")
-                database_available = False
-        except NoCredentialsError:
+            logger.error(f"Error checking DynamoDB table: {e}")
+            database_available = False
+    except NoCredentialsError:
+        # In DynamoDB Local mode, credentials are not required
+        if dynamodb_endpoint_url:
+            logger.info("DynamoDB Local mode: credentials not required")
+            # Table might not exist yet, but client is available
+            database_available = False  # Will be set to True after table creation
+        else:
             logger.warning(
                 "AWS credentials not found. DynamoDB features will be unavailable. "
                 "Ensure ECS task role has DynamoDB permissions."
             )
             database_available = False
-    except Exception as e:
-        logger.error(f"Failed to initialize DynamoDB client: {e}")
-        database_available = False
+except Exception as e:
+    logger.error(f"Failed to initialize DynamoDB client: {e}")
+    database_available = False
 
 
 # =============================================================================

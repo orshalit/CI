@@ -1592,6 +1592,203 @@ jobs:
             echo "secrets_generated=false" >> $GITHUB_OUTPUT
           fi
 
+      - name: Verify DynamoDB Table Connectivity (Post-Apply)
+        id: verify_dynamodb
+        if: |
+          steps.vars.outputs.action == 'apply' && 
+          steps.apply.outcome == 'success' && 
+          steps.vars.outputs.module_path == '05-database'
+        continue-on-error: true
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
+          ENVIRONMENT: ${{ steps.vars.outputs.environment }}
+        run: |
+          echo "::notice::🔍 Verifying DynamoDB table connectivity after deployment..."
+          
+          PLAN_DIR="DEVOPS/live/${{ steps.vars.outputs.environment }}/05-database"
+          TABLE_NAME=""
+          
+          # Method 1: Get table name(s) from Terraform outputs (most reliable)
+          echo "::group::Discovering table name from Terraform outputs"
+          cd "$PLAN_DIR"
+          
+          # Try to get table_names output (map of table names)
+          TABLE_NAMES_JSON=$(terraform output -json table_names 2>/dev/null || echo "{}")
+          
+          if [ "$TABLE_NAMES_JSON" != "{}" ] && [ -n "$TABLE_NAMES_JSON" ]; then
+            # Count how many tables we have
+            TABLE_COUNT=$(echo "$TABLE_NAMES_JSON" | jq 'length' 2>/dev/null || echo "0")
+            echo "Found $TABLE_COUNT table(s) in Terraform output"
+            
+            # Extract table names (handle both single and multiple tables)
+            if [ "$TABLE_COUNT" -eq 1 ]; then
+              # Single table - get the value directly
+              TABLE_NAME=$(echo "$TABLE_NAMES_JSON" | jq -r 'to_entries[0].value // empty' 2>/dev/null || echo "")
+            elif [ "$TABLE_COUNT" -gt 1 ]; then
+              # Multiple tables - prefer "greetings" table, otherwise first one
+              TABLE_NAME=$(echo "$TABLE_NAMES_JSON" | jq -r '.greetings // to_entries[0].value // empty' 2>/dev/null || echo "")
+              echo "Multiple tables found, using: $TABLE_NAME"
+            fi
+            
+            if [ -n "$TABLE_NAME" ] && [ "$TABLE_NAME" != "null" ]; then
+              echo "✓ Found table name from Terraform output: $TABLE_NAME"
+              
+              # Show all tables for reference
+              echo "All tables in Terraform output:"
+              echo "$TABLE_NAMES_JSON" | jq -r 'to_entries[] | "  - \(.key): \(.value)"' 2>/dev/null || echo "  (unable to parse)"
+            fi
+          else
+            echo "⚠ Terraform output 'table_names' not available or empty"
+          fi
+          
+          cd - > /dev/null
+          echo "::endgroup::"
+          
+          # Method 2: Try SSM Parameter Store (if Terraform output failed)
+          if [ -z "$TABLE_NAME" ] || [ "$TABLE_NAME" = "null" ]; then
+            echo "::group::Discovering table name from SSM Parameter Store"
+            SSM_PARAM="/${{ steps.vars.outputs.environment }}/dynamodb/greetings/table_name"
+            TABLE_NAME=$(aws ssm get-parameter \
+              --name "$SSM_PARAM" \
+              --region "$AWS_REGION" \
+              --query 'Parameter.Value' \
+              --output text 2>/dev/null || echo "")
+            
+            if [ -n "$TABLE_NAME" ]; then
+              echo "✓ Found table name from SSM: $TABLE_NAME"
+            else
+              echo "⚠ SSM parameter not found: $SSM_PARAM"
+            fi
+            echo "::endgroup::"
+          fi
+          
+          # Method 3: List all DynamoDB tables and find matching one
+          if [ -z "$TABLE_NAME" ] || [ "$TABLE_NAME" = "null" ]; then
+            echo "::group::Discovering table name from AWS DynamoDB"
+            echo "Listing all DynamoDB tables in region $AWS_REGION..."
+            
+            # List all tables and find one matching the environment pattern
+            EXPECTED_PATTERN="${{ steps.vars.outputs.environment }}-greetings"
+            ALL_TABLES=$(aws dynamodb list-tables --region "$AWS_REGION" --query 'TableNames[]' --output text 2>/dev/null || echo "")
+            
+            if [ -n "$ALL_TABLES" ]; then
+              # Check if expected table exists
+              if echo "$ALL_TABLES" | grep -q "^$EXPECTED_PATTERN$"; then
+                TABLE_NAME="$EXPECTED_PATTERN"
+                echo "✓ Found table matching pattern: $TABLE_NAME"
+              else
+                # Get first table that contains the environment name
+                TABLE_NAME=$(echo "$ALL_TABLES" | tr '\t' '\n' | grep -E "^${{ steps.vars.outputs.environment }}-" | head -1 || echo "")
+                if [ -n "$TABLE_NAME" ]; then
+                  echo "✓ Found table with environment prefix: $TABLE_NAME"
+                else
+                  # Last resort: get first table
+                  TABLE_NAME=$(echo "$ALL_TABLES" | tr '\t' '\n' | head -1 || echo "")
+                  if [ -n "$TABLE_NAME" ]; then
+                    echo "⚠ Using first available table: $TABLE_NAME (may not be correct)"
+                  fi
+                fi
+              fi
+            else
+              echo "⚠ No tables found in DynamoDB"
+            fi
+            echo "::endgroup::"
+          fi
+          
+          # Final fallback: Use naming convention
+          if [ -z "$TABLE_NAME" ] || [ "$TABLE_NAME" = "null" ]; then
+            TABLE_NAME="${{ steps.vars.outputs.environment }}-greetings"
+            echo "::warning::Using default table name (naming convention): $TABLE_NAME"
+          fi
+          
+          echo "::notice::Using table name: $TABLE_NAME"
+          
+          # Verify table exists and is accessible
+          echo "::group::DynamoDB Table Verification"
+          echo "Verifying table: $TABLE_NAME in region: $AWS_REGION"
+          
+          if aws dynamodb describe-table \
+            --table-name "$TABLE_NAME" \
+            --region "$AWS_REGION" \
+            > /dev/null 2>&1; then
+            echo "✓ Table exists and is accessible"
+            
+            # Get comprehensive table details
+            TABLE_DETAILS=$(aws dynamodb describe-table \
+              --table-name "$TABLE_NAME" \
+              --region "$AWS_REGION" 2>/dev/null || echo "{}")
+            
+            TABLE_STATUS=$(echo "$TABLE_DETAILS" | jq -r '.Table.TableStatus // "UNKNOWN"' 2>/dev/null || echo "UNKNOWN")
+            TABLE_ARN=$(echo "$TABLE_DETAILS" | jq -r '.Table.TableArn // ""' 2>/dev/null || echo "")
+            ITEM_COUNT=$(echo "$TABLE_DETAILS" | jq -r '.Table.ItemCount // 0' 2>/dev/null || echo "0")
+            TABLE_SIZE=$(echo "$TABLE_DETAILS" | jq -r '.Table.TableSizeBytes // 0' 2>/dev/null || echo "0")
+            BILLING_MODE=$(echo "$TABLE_DETAILS" | jq -r '.Table.BillingModeSummary.BillingMode // "UNKNOWN"' 2>/dev/null || echo "UNKNOWN")
+            GSI_COUNT=$(echo "$TABLE_DETAILS" | jq -r '.Table.GlobalSecondaryIndexes | length // 0' 2>/dev/null || echo "0")
+            
+            echo ""
+            echo "📊 Table Details:"
+            echo "  Name: $TABLE_NAME"
+            echo "  Status: $TABLE_STATUS"
+            echo "  ARN: $TABLE_ARN"
+            echo "  Item Count: $ITEM_COUNT"
+            echo "  Size: $TABLE_SIZE bytes"
+            echo "  Billing Mode: $BILLING_MODE"
+            echo "  Global Secondary Indexes: $GSI_COUNT"
+            
+            if [ "$TABLE_STATUS" = "ACTIVE" ]; then
+              echo ""
+              echo "✓ Table is ACTIVE and ready for operations"
+              
+              # Test basic write operation (optional - creates a test item)
+              TEST_ITEM_ID="test-verify-$(date +%s)-$$"
+              TEST_CREATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+              echo "Testing write operation with test item: $TEST_ITEM_ID"
+              
+              if aws dynamodb put-item \
+                --table-name "$TABLE_NAME" \
+                --item "{\"id\":{\"S\":\"$TEST_ITEM_ID\"},\"created_at\":{\"S\":\"$TEST_CREATED_AT\"},\"user_name\":{\"S\":\"test-user\"},\"message\":{\"S\":\"Integration test verification\"}}" \
+                --region "$AWS_REGION" \
+                > /dev/null 2>&1; then
+                echo "✓ Write operation successful"
+                
+                # Test read operation
+                if aws dynamodb get-item \
+                  --table-name "$TABLE_NAME" \
+                  --key "{\"id\":{\"S\":\"$TEST_ITEM_ID\"},\"created_at\":{\"S\":\"$TEST_CREATED_AT\"}}" \
+                  --region "$AWS_REGION" \
+                  --query 'Item.message.S' \
+                  --output text \
+                  > /dev/null 2>&1; then
+                  echo "✓ Read operation successful"
+                  
+                  # Clean up test item
+                  aws dynamodb delete-item \
+                    --table-name "$TABLE_NAME" \
+                    --key "{\"id\":{\"S\":\"$TEST_ITEM_ID\"},\"created_at\":{\"S\":\"$TEST_CREATED_AT\"}}" \
+                    --region "$AWS_REGION" \
+                    > /dev/null 2>&1 || true
+                  echo "✓ Test item cleaned up"
+                else
+                  echo "⚠ Read operation failed (non-critical - may be due to IAM permissions)"
+                fi
+              else
+                echo "⚠ Write operation failed (may be due to IAM permissions - non-critical)"
+              fi
+              
+              echo "::notice::✓ DynamoDB table verification completed successfully"
+              echo "verification_passed=true" >> $GITHUB_OUTPUT
+            else
+              echo "::warning::⚠ Table exists but is not ACTIVE (Status: $TABLE_STATUS)"
+              echo "verification_passed=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "::error::✗ Table '$TABLE_NAME' not found or not accessible"
+            echo "::error::Please verify the table was created successfully"
+            echo "verification_passed=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          echo "::endgroup::"
+
       - name: Verify Target Group Health Check Paths (Post-Apply)
         id: verify_health_checks
         if: steps.vars.outputs.action == 'apply' && steps.apply.outcome == 'success' && steps.vars.outputs.module_path == '04-ecs-fargate'

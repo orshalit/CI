@@ -32,6 +32,7 @@ from middleware import (
     SecurityHeadersMiddleware,
 )
 from schemas import (
+    DynamoDBStatusResponse,
     GreetingResponse,
     GreetingsListResponse,
     HealthResponse,
@@ -612,3 +613,48 @@ async def get_user_greetings(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error",
         ) from e
+
+
+@app.get(
+    "/api/dynamodb-status",
+    response_model=DynamoDBStatusResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get DynamoDB connection status",
+    description="Returns the current status of DynamoDB connectivity and table information",
+    tags=["Database"],
+)
+@rate_limit()
+async def get_dynamodb_status(request: Request):
+    """Get DynamoDB connection status and table information"""
+    import os
+    from database import database_available, table_name, dynamodb_client
+    
+    endpoint_url = os.getenv("DYNAMODB_ENDPOINT_URL")
+    region = os.getenv("AWS_REGION", "us-east-1")
+    
+    if not database_available:
+        return DynamoDBStatusResponse(
+            available=False,
+            table_name=table_name,
+            endpoint_url=endpoint_url,
+            region=region,
+            message="DynamoDB is not available. Table may not exist or IAM permissions may be missing.",
+        )
+    
+    # Try to get table status
+    table_status = None
+    try:
+        if dynamodb_client and table_name:
+            response = dynamodb_client.describe_table(TableName=table_name)
+            table_status = response.get("Table", {}).get("TableStatus", "UNKNOWN")
+    except Exception as e:
+        logger.warning(f"Could not get table status: {e}")
+    
+    return DynamoDBStatusResponse(
+        available=True,
+        table_name=table_name,
+        table_status=table_status,
+        endpoint_url=endpoint_url,
+        region=region,
+        message=f"DynamoDB is available. Table '{table_name}' is {'ACTIVE' if table_status == 'ACTIVE' else table_status or 'UNKNOWN'}.",
+    )

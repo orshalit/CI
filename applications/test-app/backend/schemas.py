@@ -112,3 +112,14 @@ class ErrorResponse(BaseModel):
     error: str
     detail: str | None = None
     status_code: int
+
+
+class DynamoDBStatusResponse(BaseModel):
+    """DynamoDB status response schema"""
+
+    available: bool
+    table_name: str | None = None
+    table_status: str | None = None
+    endpoint_url: str | None = None
+    region: str | None = None
+    message: str

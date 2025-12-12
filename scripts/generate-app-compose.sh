@@ -82,6 +82,10 @@ EOF
     environment:
       DATABASE_URL: postgresql://\${POSTGRES_USER:-appuser}:\${POSTGRES_PASSWORD:-apppassword}@database:5432/\${POSTGRES_DB:-appdb}
       LOG_LEVEL: \${LOG_LEVEL:-INFO}
+      DYNAMODB_ENDPOINT_URL: \${DYNAMODB_ENDPOINT_URL:-http://dynamodb-local:8000}
+      DYNAMODB_TABLE_NAME: \${DYNAMODB_TABLE_NAME:-dev-greetings}
+      ENVIRONMENT: \${ENVIRONMENT:-dev}
+      AWS_REGION: \${AWS_REGION:-us-east-1}
 EOF
     
     if [ -z "$PROD" ]; then
@@ -94,6 +98,8 @@ EOF
     cat >> "$OUTPUT_FILE" << EOF
     depends_on:
       database:
+        condition: service_healthy
+      dynamodb-local:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]

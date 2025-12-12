@@ -1080,6 +1080,11 @@ jobs:
           GIT_COMMIT: ${{ needs.prepare-build.outputs.commit }}
           GIT_BRANCH: ${{ needs.prepare-build.outputs.branch }}
           BUILD_DATE: ${{ needs.prepare-build.outputs.build_date }}
+          # Configure DynamoDB Local endpoint for backend services
+          DYNAMODB_ENDPOINT_URL: http://dynamodb-local:8000
+          DYNAMODB_TABLE_NAME: dev-greetings
+          ENVIRONMENT: dev
+          AWS_REGION: us-east-1
         run: |
           # Build compose file list (base + all app compose files)
           COMPOSE_FILES="-f docker-compose.base.yml"
@@ -1192,6 +1197,42 @@ jobs:
             done
           "
           echo "✓ Database is healthy"
+          
+          echo "=== Waiting for DynamoDB Local ==="
+          timeout 60 bash -c "
+            until docker compose $COMPOSE_FILES ps dynamodb-local | grep -q \"healthy\"; do 
+              echo \"Waiting for DynamoDB Local...\"; 
+              sleep 2; 
+            done
+          "
+          echo "✓ DynamoDB Local is healthy"
+      
+      - name: Install AWS CLI (if not available)
+        run: |
+          if ! command -v aws &> /dev/null; then
+            echo "::notice::Installing AWS CLI..."
+            curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+            unzip -q awscliv2.zip
+            sudo ./aws/install
+            aws --version
+          else
+            echo "::notice::AWS CLI already installed"
+            aws --version
+          fi
+      
+      - name: Initialize DynamoDB Local table
+        env:
+          DYNAMODB_ENDPOINT_URL: http://localhost:8000
+          DYNAMODB_TABLE_NAME: dev-greetings
+          AWS_REGION: us-east-1
+        run: |
+          echo "::notice::Initializing DynamoDB Local table for E2E tests..."
+          chmod +x scripts/init-dynamodb-local.sh
+          scripts/init-dynamodb-local.sh || {
+            echo "::error::Failed to initialize DynamoDB table"
+            echo "::error::E2E tests will fail without the table"
+            exit 1
+          }
           
           # Build compose file list
           COMPOSE_FILES="${{ steps.detect-services.outputs.compose_files }}"
