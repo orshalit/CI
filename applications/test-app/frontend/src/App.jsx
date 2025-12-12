@@ -137,7 +137,7 @@ function App() {
     <div className="app">
       <div className="container">
         <h1>Full-Stack Application</h1>
-        {/* Pipeline test: Dhall validation integrated into CI */}
+        {/* Pipeline fix: Fixed artifact merge for built-images */}
         
         {/* Version Badge - DEPLOY-TEST-1 */}
         <div className="version-badge">

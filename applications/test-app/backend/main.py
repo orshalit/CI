@@ -68,7 +68,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.API_TITLE,
     version=settings.API_VERSION,
-    # Pipeline test: Dhall validation integrated into CI, toMap empty fix applied
+    # Pipeline fix: Fixed artifact merge - built-images.txt no longer overwrites
     lifespan=lifespan,
     docs_url="/docs" if not settings.TESTING else None,
     redoc_url="/redoc" if not settings.TESTING else None,

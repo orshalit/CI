@@ -999,7 +999,8 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           pattern: built-images-*
-          merge-multiple: true
+          # Do NOT use merge-multiple: true - files with same name overwrite each other!
+          # Without merge-multiple, each artifact gets its own subdirectory
           path: collected-built-images
         continue-on-error: true
 
@@ -1009,14 +1010,30 @@ jobs:
           echo "# Images successfully built in this CI run" > "$OUTPUT"
           echo "# Format: image_name (one per line)" >> "$OUTPUT"
           echo "# Used by deployment workflow to filter services" >> "$OUTPUT"
-          if compgen -G "collected-built-images/built-images-*/*.txt" > /dev/null; then
-            find collected-built-images -name "*.txt" -maxdepth 3 -print0 | xargs -0 cat >> "$OUTPUT"
+          
+          # Debug: Show downloaded structure
+          echo "::group::Downloaded artifacts structure"
+          ls -la collected-built-images/ 2>/dev/null || echo "No artifacts downloaded"
+          find collected-built-images -type f -name "*.txt" 2>/dev/null || echo "No .txt files found"
+          echo "::endgroup::"
+          
+          # Find and merge all built-images.txt files from subdirectories
+          # Structure is: collected-built-images/<artifact-name>/built-images.txt
+          if find collected-built-images -name "built-images.txt" -type f 2>/dev/null | grep -q .; then
+            find collected-built-images -name "built-images.txt" -type f -exec cat {} \; >> "$OUTPUT"
+            echo "::notice::Found and merged built-images.txt files"
           else
-            echo "::warning::No built-images-* artifacts found"
+            echo "::warning::No built-images.txt files found in artifacts"
           fi
-          # Remove blank/comment lines
+          
+          # Remove blank/comment lines and deduplicate
           grep -v '^#' "$OUTPUT" | grep -v '^$' | sort -u > "${OUTPUT}.tmp" || true
           mv "${OUTPUT}.tmp" "$OUTPUT"
+          
+          # Debug: Show final content
+          echo "::group::Final built-images.txt content"
+          cat "$OUTPUT" || echo "File is empty"
+          echo "::endgroup::"
 
       - name: Upload merged built images artifact
         uses: actions/upload-artifact@v4
