@@ -2035,6 +2035,18 @@ jobs:
           # Add -no-color for cleaner logs and -input=false to prevent prompts
           echo "::notice::Executing terraform destroy with -refresh=false (state-based)..."
           
+          # Add empty defaults for required variables since we're destroying from state
+          # Terraform will use state values, but still needs variables for config validation
+          if [ -z "$(echo "$DESTROY_ARGS" | grep -o "services")" ]; then
+            DESTROY_ARGS="$DESTROY_ARGS -var=services={}"
+          fi
+          if [ -z "$(echo "$DESTROY_ARGS" | grep -o "albs")" ]; then
+            DESTROY_ARGS="$DESTROY_ARGS -var=albs={}"
+          fi
+          if [ -z "$(echo "$DESTROY_ARGS" | grep -o "terraform_backend_bucket_name")" ]; then
+            DESTROY_ARGS="$DESTROY_ARGS -var=terraform_backend_bucket_name=devops-project-terraform"
+          fi
+          
           # Run destroy and capture output to check for lock errors
           # Use a temp file to capture output and get proper exit code
           TEMP_DESTROY_LOG=$(mktemp)
