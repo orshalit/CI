@@ -2059,10 +2059,12 @@ jobs:
             echo "::notice::✓ Destroy completed successfully"
             rm -f "$TEMP_DESTROY_LOG"
           else
+            # Disable exit on error for error handling section
+            set +e
             # Debug: Show what we're checking
-            echo "::notice::=== DESTROY FAILED ===" || true
-            echo "::notice::Destroy failed with exit code: $DESTROY_EXIT" || true
-            echo "::notice::Checking for state lock error..." || true
+            echo "::notice::=== DESTROY FAILED ==="
+            echo "::notice::Destroy failed with exit code: $DESTROY_EXIT"
+            echo "::notice::Checking for state lock error..."
             
             # Check temp file directly for lock errors (most reliable method)
             HAS_LOCK_ERROR=false
@@ -2176,6 +2178,9 @@ jobs:
               echo "::error::Terraform destroy failed"
               echo "::error::Some resources may have been destroyed. Review state and AWS console."
               rm -f "$TEMP_DESTROY_LOG"
+              set -e
               exit 1
             fi
+            # Re-enable exit on error
+            set -e
           fi
