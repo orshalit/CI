@@ -105,6 +105,7 @@ jobs:
       - uses: dorny/paths-filter@v2
         id: filter
         with:
+          base: ${{ github.event.before || github.event.pull_request.base.sha || 'HEAD~1' }}
           filters: |
             app-code:
               - 'applications/**'  # All application code
