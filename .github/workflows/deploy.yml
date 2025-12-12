@@ -398,11 +398,12 @@ jobs:
             exit 1
           }
 
-          # Extract image_repo values from the JSON file using jq
-          IMAGE_NAMES=$(jq -r '.[].image_repo' "$SERVICES_JSON")
+          # Extract container_image values from the JSON file using jq
+          # JSON structure: { "services": { "key": { "container_image": "..." } } }
+          IMAGE_NAMES=$(jq -r '.services[].container_image' "$SERVICES_JSON")
 
           if [ -z "$IMAGE_NAMES" ]; then
-            echo "::error::Could not extract any image_repo from $SERVICES_JSON."
+            echo "::error::Could not extract any container_image from $SERVICES_JSON."
             exit 1
           fi
 

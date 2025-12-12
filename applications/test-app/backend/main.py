@@ -68,7 +68,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.API_TITLE,
     version=settings.API_VERSION,
-    # Pipeline fix: Optional.fold function-before-default order fixed
+    # Pipeline fix: jq path corrected to .services[].container_image
     lifespan=lifespan,
     docs_url="/docs" if not settings.TESTING else None,
     redoc_url="/redoc" if not settings.TESTING else None,
