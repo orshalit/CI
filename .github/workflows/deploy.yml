@@ -930,11 +930,6 @@ jobs:
             echo "::notice::✓ No existing services in state"
             echo "::notice::✓ Safe to proceed with empty services config (fresh deployment)"
           fi
-          # For destroy, include services.generated.json even if empty (needed for proper cleanup)
-          if [ "${{ steps.vars.outputs.module_path }}" == "04-ecs-fargate" ] && [ -f "DEVOPS/live/${{ steps.vars.outputs.environment }}/04-ecs-fargate/services.generated.json" ]; then
-            VAR_FILES="$VAR_FILES services.generated.json"
-          fi
-          echo "var_files=$VAR_FILES" >> $GITHUB_OUTPUT
 
       - name: Comprehensive State Validation and Auto-Import
         id: validate_state
