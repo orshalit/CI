@@ -2075,18 +2075,33 @@ jobs:
             if [ "$HAS_LOCK_ERROR" = "true" ]; then
               echo "::warning::State lock detected. Attempting to force unlock stale lock..."
               
-              # Extract lock ID from error message - try multiple patterns
-              # Pattern 1: Look for "ID:" followed by the UUID (most common format)
-              LOCK_ID=$(echo "$DESTROY_OUTPUT" | grep -A 10 "Lock Info:" | grep -i "ID:" | awk '{print $2}' | head -1 | tr -d '[:space:]' || echo "")
+              # Extract lock ID from error message - check temp file first, then output variable
+              LOCK_ID=""
               
-              # Pattern 2: Alternative extraction using sed with UUID pattern
-              if [ -z "$LOCK_ID" ] || [ "$LOCK_ID" = "" ]; then
-                LOCK_ID=$(echo "$DESTROY_OUTPUT" | grep -A 10 "Lock Info:" | grep -i "ID:" | sed -n 's/.*ID:[[:space:]]*\([a-f0-9-]\{36\}\).*/\1/p' | head -1 || echo "")
+              # Try extraction from temp file (most reliable)
+              if [ -f "$TEMP_DESTROY_LOG" ]; then
+                # Pattern 1: Look for "ID:" followed by the UUID
+                LOCK_ID=$(grep -A 10 "Lock Info:" "$TEMP_DESTROY_LOG" 2>/dev/null | grep -i "ID:" | awk '{print $2}' | head -1 | tr -d '[:space:]' || echo "")
+                
+                # Pattern 2: Alternative extraction using sed
+                if [ -z "$LOCK_ID" ] || [ "$LOCK_ID" = "" ]; then
+                  LOCK_ID=$(grep -A 10 "Lock Info:" "$TEMP_DESTROY_LOG" 2>/dev/null | grep -i "ID:" | sed -n 's/.*ID:[[:space:]]*\([a-f0-9-]\{36\}\).*/\1/p' | head -1 || echo "")
+                fi
+                
+                # Pattern 3: Direct grep for UUID pattern
+                if [ -z "$LOCK_ID" ] || [ "$LOCK_ID" = "" ]; then
+                  LOCK_ID=$(grep -oE '[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}' "$TEMP_DESTROY_LOG" 2>/dev/null | head -1 || echo "")
+                fi
               fi
               
-              # Pattern 3: Direct grep for UUID pattern (36 chars with hyphens)
+              # Fallback to output variable if temp file extraction failed
               if [ -z "$LOCK_ID" ] || [ "$LOCK_ID" = "" ]; then
-                LOCK_ID=$(echo "$DESTROY_OUTPUT" | grep -oE '[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}' | head -1 || echo "")
+                if [ -n "$DESTROY_OUTPUT" ]; then
+                  LOCK_ID=$(echo "$DESTROY_OUTPUT" | grep -A 10 "Lock Info:" | grep -i "ID:" | awk '{print $2}' | head -1 | tr -d '[:space:]' || echo "")
+                  if [ -z "$LOCK_ID" ] || [ "$LOCK_ID" = "" ]; then
+                    LOCK_ID=$(echo "$DESTROY_OUTPUT" | grep -oE '[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}' | head -1 || echo "")
+                  fi
+                fi
               fi
               
               # Debug: Show what we found
@@ -2094,8 +2109,12 @@ jobs:
                 echo "::notice::Extracted lock ID: $LOCK_ID"
               else
                 echo "::warning::Could not extract lock ID automatically"
-                echo "::notice::Lock Info section from output:"
-                echo "$DESTROY_OUTPUT" | grep -A 10 "Lock Info:" || echo "No Lock Info section found"
+                echo "::notice::Lock Info section from temp file:"
+                if [ -f "$TEMP_DESTROY_LOG" ]; then
+                  grep -A 10 "Lock Info:" "$TEMP_DESTROY_LOG" 2>/dev/null || echo "No Lock Info section found in temp file"
+                else
+                  echo "Temp file not found"
+                fi
               fi
               
               if [ -n "$LOCK_ID" ] && [ "$LOCK_ID" != "" ]; then
