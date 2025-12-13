@@ -4,7 +4,7 @@ import logging
 import os
 import uuid
 from datetime import UTC, datetime
-from typing import Optional
+from typing import Optional  # noqa: UP007 - Keep for compatibility
 
 import boto3
 from botocore.exceptions import ClientError, NoCredentialsError
@@ -20,21 +20,21 @@ dynamodb_resource = None
 table_name = None
 database_available = False
 
-def get_table_name_from_ssm(environment: str, table_key: str = "greetings") -> Optional[str]:
+def get_table_name_from_ssm(environment: str, table_key: str = "greetings") -> str | None:
     """
     Get DynamoDB table name from SSM Parameter Store.
-    
+
     Args:
         environment: Environment name (e.g., 'dev', 'staging', 'prod')
         table_key: Table identifier (e.g., 'greetings')
-    
+
     Returns:
         Table name from SSM Parameter Store, or None if not found
     """
     try:
         ssm_client = boto3.client("ssm", region_name=os.getenv("AWS_REGION", "us-east-1"))
         parameter_name = f"/{environment}/dynamodb/{table_key}/table_name"
-        
+
         response = ssm_client.get_parameter(Name=parameter_name)
         return response["Parameter"]["Value"]
     except ClientError as e:

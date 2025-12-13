@@ -35,13 +35,13 @@ def _get_secret_key() -> str:
         logger.debug("secrets module not available, using environment variable fallback")
     except Exception as e:
         logger.debug(f"Error importing secrets module: {e}")
-    
+
     # Fallback to environment variable
     env_secret = os.getenv("SECRET_KEY")
     if env_secret:
         logger.info("Using SECRET_KEY from environment variable")
         return env_secret
-    
+
     # Final fallback (should only be used in local development/testing)
     logger.warning(
         "SECRET_KEY not found in Secrets Manager or environment variable. "
