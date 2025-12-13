@@ -20,7 +20,7 @@ from auth import get_auth_dependency
 from config import settings
 from database import (
     create_greeting,
-    database_available,
+    ensure_database_available,
     init_db,
     table_name,
 )
@@ -82,7 +82,7 @@ async def lifespan(app: FastAPI):
     # Startup: Initialize database only if available and not in testing mode
     # CI/CD Pipeline Test: Full pipeline validation with Dhall fixes
     # Pipeline run: Testing full deployment cycle after health diagnostics
-    if not settings.TESTING and database_available:
+    if not settings.TESTING and ensure_database_available():
         logger.info("Initializing database...")
         try:
             init_db()
@@ -90,7 +90,7 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"Failed to initialize database: {e}", exc_info=True)
             raise
-    elif not settings.TESTING and not database_available:
+    elif not settings.TESTING and not ensure_database_available():
         logger.warning(
             "Database is not available (DATABASE_URL is empty). "
             "Application will run without database features."
@@ -161,8 +161,8 @@ async def health_check():
     # Log version info for debugging
     logger.debug(f"Health check version info: {version_info}")
 
-    # Check if database is available
-    if not database_available:
+    # Check if database is available (refreshes automatically in DynamoDB Local mode)
+    if not ensure_database_available():
         return HealthResponse(
             status="healthy",
             database="unavailable",
@@ -174,7 +174,6 @@ async def health_check():
     try:
         from database import dynamodb_client
         if dynamodb_client and table_name:
-            dynamodb_client.describe_table(TableName=table_name)
             return HealthResponse(
                 status="healthy",
                 database="connected",
@@ -521,7 +520,7 @@ async def greet_user(
 ):
     """Personalized greeting endpoint that stores greetings in DynamoDB"""
     # Check if database is available
-    if not database_available:
+    if not ensure_database_available():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="DynamoDB is not available. Please ensure the table is created and IAM permissions are configured."
@@ -605,7 +604,7 @@ async def get_greetings(
     ),
 ):
     """Get all greetings from DynamoDB with pagination"""
-    if not database_available:
+    if not ensure_database_available():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="DynamoDB is not available. Please ensure the table is created and IAM permissions are configured."
@@ -667,7 +666,7 @@ async def get_user_greetings(
     user: str = Path(..., min_length=1, max_length=100, description="User name"),
 ):
     """Get all greetings for a specific user from DynamoDB"""
-    if not database_available:
+    if not ensure_database_available():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="DynamoDB is not available. Please ensure the table is created and IAM permissions are configured."
@@ -769,12 +768,12 @@ async def get_dynamodb_status(request: Request):
     """Get DynamoDB connection status and table information"""
     import os
 
-    from database import database_available, dynamodb_client, table_name
+    from database import dynamodb_client, table_name
 
     endpoint_url = os.getenv("DYNAMODB_ENDPOINT_URL")
     region = os.getenv("AWS_REGION", "us-east-1")
 
-    if not database_available:
+    if not ensure_database_available():
         return DynamoDBStatusResponse(
             available=False,
             table_name=table_name,

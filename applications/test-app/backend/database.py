@@ -18,6 +18,8 @@ dynamodb_client = None
 dynamodb_resource = None
 table_name = None
 database_available = False
+# DynamoDB Local endpoint (if configured)
+dynamodb_endpoint_url = os.getenv("DYNAMODB_ENDPOINT_URL")
 
 def get_table_name_from_ssm(environment: str, table_key: str = "greetings") -> str | None:
     """
@@ -54,9 +56,6 @@ try:
     environment = os.getenv("ENVIRONMENT", "dev")
     table_key = os.getenv("DYNAMODB_TABLE_KEY", "greetings")  # Configurable table key
 
-    # Check if DynamoDB Local endpoint is configured (for local testing/E2E)
-    dynamodb_endpoint_url = os.getenv("DYNAMODB_ENDPOINT_URL")
-
     # Try SSM Parameter Store first (best practice) - skip in testing/local mode
     if not settings.TESTING and not dynamodb_endpoint_url:
         # SSM Parameter path: /{environment}/dynamodb/{table_key}/table_name
@@ -79,6 +78,11 @@ try:
         client_config["endpoint_url"] = dynamodb_endpoint_url
         resource_config["endpoint_url"] = dynamodb_endpoint_url
         logger.info(f"Using DynamoDB Local endpoint: {dynamodb_endpoint_url}")
+        # DynamoDB Local typically requires credentials for request signing, but any dummy values work.
+        client_config["aws_access_key_id"] = os.getenv("AWS_ACCESS_KEY_ID", "dummy")
+        client_config["aws_secret_access_key"] = os.getenv("AWS_SECRET_ACCESS_KEY", "dummy")
+        resource_config["aws_access_key_id"] = client_config["aws_access_key_id"]
+        resource_config["aws_secret_access_key"] = client_config["aws_secret_access_key"]
 
     dynamodb_client = boto3.client("dynamodb", **client_config)
     dynamodb_resource = boto3.resource("dynamodb", **resource_config)
@@ -101,20 +105,56 @@ try:
             logger.error(f"Error checking DynamoDB table: {e}")
             database_available = False
     except NoCredentialsError:
-        # In DynamoDB Local mode, credentials are not required
-        if dynamodb_endpoint_url:
-            logger.info("DynamoDB Local mode: credentials not required")
-            # Table might not exist yet, but client is available
-            database_available = False  # Will be set to True after table creation
-        else:
-            logger.warning(
-                "AWS credentials not found. DynamoDB features will be unavailable. "
-                "Ensure ECS task role has DynamoDB permissions."
-            )
-            database_available = False
+        logger.warning(
+            "AWS credentials not found. DynamoDB features will be unavailable. "
+            "Ensure ECS task role has DynamoDB permissions, or set dummy AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY for DynamoDB Local."
+        )
+        database_available = False
 except Exception as e:
     logger.error(f"Failed to initialize DynamoDB client: {e}")
     database_available = False
+
+
+def refresh_database_availability() -> bool:
+    """
+    Re-check whether the configured DynamoDB table exists.
+
+    This is primarily used in E2E / local mode where the DynamoDB table is created
+    *after* the backend container starts (so initial import-time checks can be stale).
+    """
+    global database_available
+
+    if dynamodb_client is None or table_name is None:
+        database_available = False
+        return False
+
+    try:
+        dynamodb_client.describe_table(TableName=table_name)
+        if not database_available:
+            logger.info(f"DynamoDB table '{table_name}' is now available")
+        database_available = True
+        return True
+    except ClientError as e:
+        error_code = e.response.get("Error", {}).get("Code", "")
+        if error_code == "ResourceNotFoundException":
+            database_available = False
+            return False
+        logger.warning(f"Error refreshing DynamoDB availability: {e}")
+        database_available = False
+        return False
+    except Exception as e:
+        logger.warning(f"Unexpected error refreshing DynamoDB availability: {e}")
+        database_available = False
+        return False
+
+
+def ensure_database_available() -> bool:
+    """Return True if DynamoDB is available; refresh once in DynamoDB Local mode."""
+    if database_available:
+        return True
+    if dynamodb_endpoint_url:
+        return refresh_database_availability()
+    return False
 
 
 # =============================================================================
@@ -205,7 +245,7 @@ def get_db():
     Raises:
         RuntimeError: If DynamoDB is not available.
     """
-    if not database_available or dynamodb_resource is None or table_name is None:
+    if not ensure_database_available() or dynamodb_resource is None or table_name is None:
         raise RuntimeError(
             "DynamoDB is not available. Table name is not configured or table does not exist."
         )
@@ -228,7 +268,7 @@ def create_greeting(user_name: str, message: str) -> Greeting:
     Raises:
         ClientError: If DynamoDB operation fails
     """
-    if not database_available or dynamodb_resource is None or table_name is None:
+    if not ensure_database_available() or dynamodb_resource is None or table_name is None:
         raise RuntimeError("DynamoDB is not available")
 
     greeting = Greeting(
@@ -261,7 +301,7 @@ def get_greetings(skip: int = 0, limit: int = 10) -> tuple[list[Greeting], int]:
     Raises:
         ClientError: If DynamoDB operation fails
     """
-    if not database_available or dynamodb_resource is None or table_name is None:
+    if not ensure_database_available() or dynamodb_resource is None or table_name is None:
         raise RuntimeError("DynamoDB is not available")
 
     table = dynamodb_resource.Table(table_name)
@@ -308,7 +348,7 @@ def get_user_greetings(user_name: str) -> list[Greeting]:
     Raises:
         ClientError: If DynamoDB operation fails
     """
-    if not database_available or dynamodb_resource is None or table_name is None:
+    if not ensure_database_available() or dynamodb_resource is None or table_name is None:
         raise RuntimeError("DynamoDB is not available")
 
     table = dynamodb_resource.Table(table_name)
@@ -341,7 +381,7 @@ def get_user_greetings(user_name: str) -> list[Greeting]:
 
 def _get_user_greetings_scan(user_name: str) -> list[Greeting]:
     """Fallback method using scan (less efficient)."""
-    if not database_available or dynamodb_resource is None or table_name is None:
+    if not ensure_database_available() or dynamodb_resource is None or table_name is None:
         raise RuntimeError("DynamoDB is not available")
 
     table = dynamodb_resource.Table(table_name)
