@@ -19,6 +19,7 @@ from collections.abc import AsyncGenerator
 import httpx
 import pytest
 
+
 # Set TESTING mode for integration tests to bypass authentication
 os.environ.setdefault("TESTING", "True")
 os.environ.setdefault("AUTH_REQUIRED", "False")
@@ -96,11 +97,11 @@ async def async_client(backend_url: str) -> AsyncGenerator[httpx.AsyncClient, No
     # Get API key from environment (for cases where auth is enabled)
     # In TESTING mode, auth is bypassed, but this allows tests to work with auth enabled
     api_key = os.getenv("BACKEND_API_KEY") or os.getenv("TEST_API_KEY")
-    
+
     headers = {}
     if api_key:
         headers["X-API-Key"] = api_key
-    
+
     async with httpx.AsyncClient(
         base_url=backend_url,
         timeout=REQUEST_TIMEOUT,

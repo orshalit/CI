@@ -330,7 +330,7 @@ def get_user_greetings(user_name: str) -> list[Greeting]:
         error_code = e.response.get("Error", {}).get("Code", "")
         if error_code == "ResourceNotFoundException":
             logger.warning(
-                f"GSI 'user-name-index' not found. "
+                "GSI 'user-name-index' not found. "
                 "Falling back to scan (less efficient)."
             )
             # Fallback to scan if GSI doesn't exist

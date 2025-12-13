@@ -99,9 +99,9 @@ def get_auth_dependency():
     if settings.TESTING:
         logger.debug("TESTING mode: Authentication bypassed")
         return Depends(_noop_auth_dependency)
-    
+
     if not settings.AUTH_REQUIRED:
         logger.debug("AUTH_REQUIRED=false: Authentication bypassed")
         return Depends(_noop_auth_dependency)
-    
+
     return Depends(verify_api_key)

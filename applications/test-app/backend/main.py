@@ -1,15 +1,15 @@
 import json
 import logging
 import os
-import psutil
 import sys
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path as PathLib
 
+import psutil
 from botocore.exceptions import ClientError
-from fastapi import Depends, FastAPI, HTTPException, Path, Query, Request, status
+from fastapi import FastAPI, HTTPException, Path, Query, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -19,14 +19,16 @@ from slowapi.util import get_remote_address
 from auth import get_auth_dependency
 from config import settings
 from database import (
-    Greeting,
     create_greeting,
     database_available,
-    get_db,
-    get_greetings as db_get_greetings,
-    get_user_greetings as db_get_user_greetings,
     init_db,
     table_name,
+)
+from database import (
+    get_greetings as db_get_greetings,
+)
+from database import (
+    get_user_greetings as db_get_user_greetings,
 )
 from logging_config import setup_logging
 from middleware import (
@@ -155,7 +157,7 @@ async def health_check():
     else:
         version_info["version"] = os.getenv("APP_VERSION") or settings.API_VERSION or "dev"
         version_info["commit"] = os.getenv("GIT_COMMIT") or "unknown"
-    
+
     # Log version info for debugging
     logger.debug(f"Health check version info: {version_info}")
 
@@ -217,30 +219,30 @@ async def health_check():
 async def get_config():  # Pipeline trigger: test port discovery fix
     """
     Public configuration endpoint for frontend runtime configuration.
-    
+
     This endpoint provides the API key and other public configuration
     that the frontend needs at runtime. The API key is fetched from
     Secrets Manager and returned securely.
-    
+
     Note: This endpoint does NOT require authentication (it's public config).
     The API key returned here is used by the frontend to authenticate
     subsequent API requests.
     """
     try:
         from secrets import get_backend_api_key
-        
+
         # Get API key from Secrets Manager
         api_key = get_backend_api_key()
-        
+
         # Get backend URL from environment or settings
         backend_url = os.getenv(
             "BACKEND_API_URL",
             os.getenv("API_BASE_URL", "https://test-api.app.dev.light-solutions.org")
         )
-        
+
         # Get environment
         environment = os.getenv("ENVIRONMENT", "development")
-        
+
         return ConfigResponse(
             api_key=api_key,
             backend_url=backend_url,
@@ -251,7 +253,7 @@ async def get_config():  # Pipeline trigger: test port discovery fix
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve configuration",
-        )
+        ) from e
 
 
 @app.get(
@@ -347,7 +349,7 @@ async def hello(request: Request):
     """Simple hello endpoint (DEPLOY-TEST-1: Version info added)"""
     global request_count
     request_count += 1
-    
+
     # DEPLOY-TEST-1: Show build info only in non-production environments
     # For security: Don't expose deployment timestamps in production
     environment = os.getenv("ENVIRONMENT", "development")
@@ -417,7 +419,7 @@ async def deploy_test_3(request: Request):
 async def secrets_test(request: Request):
     """
     Test endpoint to verify secrets management integration.
-    
+
     This endpoint demonstrates:
     - Dynamic secret discovery via SSM Parameter Store
     - Secret retrieval from AWS Secrets Manager
@@ -428,20 +430,20 @@ async def secrets_test(request: Request):
         get_jwt_signing_key,
         get_session_secret,
     )
-    
+
     results = {
         "status": "success",
         "secrets_tested": [],
         "errors": [],
     }
-    
+
     # Test each pre-configured secret
     secret_tests = [
         ("session-secret", get_session_secret, "SESSION_SECRET"),
         ("jwt-signing-key", get_jwt_signing_key, "JWT_SIGNING_KEY"),
         ("external-api-key", get_external_api_key, "EXTERNAL_API_KEY"),
     ]
-    
+
     for secret_name, secret_func, env_var in secret_tests:
         try:
             secret_value = secret_func()
@@ -481,7 +483,7 @@ async def secrets_test(request: Request):
             })
             results["errors"].append(f"{secret_name}: {str(e)}")
             logger.error(f"Error retrieving {secret_name}: {e}", exc_info=True)
-    
+
     # Also verify SECRET_KEY from config uses secrets
     try:
         from config import settings
@@ -494,11 +496,11 @@ async def secrets_test(request: Request):
         })
     except Exception as e:
         results["errors"].append(f"SECRET_KEY config error: {str(e)}")
-    
+
     # Set overall status
     if results["errors"]:
         results["status"] = "partial_success" if results["secrets_tested"] else "failed"
-    
+
     return results
 
 
@@ -728,22 +730,22 @@ async def get_metrics(request: Request):
     - Memory usage
     """
     global request_count
-    
+
     # Calculate uptime
     uptime_seconds = time.time() - app_start_time
-    
+
     # Get memory usage
     process = psutil.Process(os.getpid())
     memory_info = process.memory_info()
     memory_usage_mb = memory_info.rss / (1024 * 1024)  # Convert to MB
-    
+
     # Get active connections (approximate from process connections)
     try:
         connections = process.connections()
         active_connections = len(connections)
     except Exception:
         active_connections = 0
-    
+
     return MetricsResponse(
         uptime_seconds=round(uptime_seconds, 2),
         total_requests=request_count,
@@ -766,11 +768,12 @@ async def get_metrics(request: Request):
 async def get_dynamodb_status(request: Request):
     """Get DynamoDB connection status and table information"""
     import os
-    from database import database_available, table_name, dynamodb_client
-    
+
+    from database import database_available, dynamodb_client, table_name
+
     endpoint_url = os.getenv("DYNAMODB_ENDPOINT_URL")
     region = os.getenv("AWS_REGION", "us-east-1")
-    
+
     if not database_available:
         return DynamoDBStatusResponse(
             available=False,
@@ -779,7 +782,7 @@ async def get_dynamodb_status(request: Request):
             region=region,
             message="DynamoDB is not available. Table may not exist or IAM permissions may be missing.",
         )
-    
+
     # Try to get table status
     table_status = None
     try:
@@ -788,7 +791,7 @@ async def get_dynamodb_status(request: Request):
             table_status = response.get("Table", {}).get("TableStatus", "UNKNOWN")
     except Exception as e:
         logger.warning(f"Could not get table status: {e}")
-    
+
     return DynamoDBStatusResponse(
         available=True,
         table_name=table_name,

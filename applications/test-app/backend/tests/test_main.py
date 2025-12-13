@@ -120,17 +120,17 @@ class TestMetricsEndpoint:
         """Test that request count increments with each request."""
         # Make a request to increment the counter
         client.get("/api/hello")
-        
+
         response1 = client.get("/api/metrics", headers={"X-API-Key": "test-key"})
         data1 = response1.json()
         initial_count = data1["total_requests"]
-        
+
         # Make another request
         client.get("/api/hello")
-        
+
         response2 = client.get("/api/metrics", headers={"X-API-Key": "test-key"})
         data2 = response2.json()
-        
+
         # Request count should have increased
         assert data2["total_requests"] >= initial_count
 
