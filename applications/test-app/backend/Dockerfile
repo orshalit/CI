@@ -103,7 +103,8 @@ RUN useradd -m -u 1000 -s /bin/bash appuser
 COPY --from=builder /app/.venv /app/.venv
 
 # Copy application code
-COPY main.py database.py config.py schemas.py middleware.py logging_config.py ./
+# NOTE: Keep this list in sync with `main.py` imports. Missing modules cause container crash loops in CI.
+COPY main.py auth.py secrets.py database.py config.py schemas.py middleware.py logging_config.py ./
 COPY --from=builder /app/version.json ./version.json
 
 # Set ownership (single layer for efficiency)
