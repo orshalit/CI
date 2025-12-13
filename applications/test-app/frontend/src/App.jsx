@@ -230,11 +230,11 @@ function App() {
         <h1>Full-Stack Application</h1>
         {/* Pipeline fix: Fixed artifact merge for built-images */}
         {/* Pipeline run: Testing full deployment cycle after health diagnostics */}
-        {/* Test: Frontend-only change to verify build matrix filters correctly */}
+        {/* CI trigger: Frontend-only change to force full run */}
         
         {/* Version Badge - DEPLOY-TEST-1 */}
         <div className="version-badge">
-          <span className="version-label">Version:</span>
+          <span className="version-label" title="Frontend build info">Frontend:</span>
           <span className="version-value">{versionInfo.version || 'loading...'}</span>
           {versionInfo.commit && versionInfo.commit !== 'unknown' && (
             <span className="version-commit">({versionInfo.commit.substring(0, 7)})</span>
