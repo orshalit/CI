@@ -23,14 +23,15 @@ ARG PYTHON_VERSION
 
 WORKDIR /app
 
-# Install uv from official image
-COPY --from=ghcr.io/astral-sh/uv:debian /uv /usr/local/bin/uv
-
-# Install only build dependencies needed for compilation
+# Install build dependencies and uv
 # Note: gcc needed for some Python packages with C extensions
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
     gcc \
     libpq-dev \
+    && curl -LsSf https://astral.sh/uv/install.sh | sh \
+    && mv /root/.cargo/bin/uv /usr/local/bin/uv \
+    && rm -rf /root/.cargo \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy dependency files first (better caching)
