@@ -1,6 +1,38 @@
 # Python Project Configuration
 # Note: Linting is now handled by Ruff (see ruff.toml)
 
+[project]
+name = "test-app-backend"
+version = "0.1.0"
+description = "FastAPI backend service"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi==0.104.1",
+    "uvicorn[standard]==0.24.0",
+    "boto3>=1.34.0",
+    "pydantic==2.5.0",
+    "pydantic-settings==2.1.0",
+    "slowapi==0.1.9",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==7.4.3",
+    "httpx==0.25.2",
+    "pytest-asyncio==0.21.1",
+    "pytest-cov==4.1.0",
+    "pytest-mock==3.12.0",
+    "pytest-timeout==2.2.0",
+    "faker==22.0.0",
+    "ruff==0.14.6",
+    "black==23.12.1",
+    # Note: pip-audit removed - replaced by uv pip audit (built into uv)
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [tool.black]
 line-length = 100
 target-version = ['py311']

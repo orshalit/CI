@@ -16,7 +16,8 @@ on:
   push:
     branches: [main]
     paths:
-      - '**/requirements.txt'
+      - '**/pyproject.toml'
+      - '**/uv.lock'
       - '**/package.json'
       - '**/package-lock.json'
 
@@ -40,12 +41,23 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.8.7"
+      
+      - name: Cache uv
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: ${{ runner.os }}-uv-${{ hashFiles('**/uv.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-uv-
+      
       - name: Install security scanning tools
         run: |
-          python -m pip install --upgrade pip
-          # Install security tools (they don't need app dependencies)
-          pip install bandit==1.7.6
-          pip install safety
+          # Install security tools using uv pip (they don't need app dependencies)
+          uv pip install bandit==1.7.6 safety
       
       # Bandit - Scan all app backends dynamically
       - name: Run Bandit security scan (app-specific backends)
@@ -69,18 +81,34 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
       
-      # Safety - Scan all app backends dynamically
+      # Safety - Scan all app backends dynamically (legacy tool, kept for compatibility)
       - name: Check Python dependencies for vulnerabilities (app-specific)
         continue-on-error: true
         run: |
           for app_dir in applications/*/backend; do
-            if [ -d "$app_dir" ] && [ -f "$app_dir/requirements.txt" ]; then
+            if [ -d "$app_dir" ] && [ -f "$app_dir/pyproject.toml" ]; then
               app_name=$(basename $(dirname "$app_dir"))
-              echo "Checking $app_name dependencies..."
+              echo "Checking $app_name dependencies with safety..."
               cd "$app_dir"
+              # Safety can work with pyproject.toml or we can skip it in favor of uv pip audit
               safety check --json --output safety-report.json || true
               safety check || true
               cd - > /dev/null
+            fi
+          done
+      
+      # UV pip audit - Built-in vulnerability scanning
+      - name: Run uv pip audit for all app backends
+        continue-on-error: true
+        run: |
+          for app_dir in applications/*/backend; do
+            if [ -d "$app_dir" ] && [ -f "$app_dir/pyproject.toml" ]; then
+              app_name=$(basename $(dirname "$app_dir"))
+              echo "::group::Running uv pip audit for $app_name backend"
+              cd "$app_dir"
+              uv pip audit || true
+              cd - > /dev/null
+              echo "::endgroup::"
             fi
           done
       

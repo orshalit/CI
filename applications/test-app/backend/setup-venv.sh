@@ -1,5 +1,6 @@
 #!/bin/bash
 # Setup script for CI Backend Virtual Environment
+# Uses uv for fast dependency management
 
 set -e  # Exit on any error
 
@@ -8,14 +9,14 @@ echo "CI Backend - Virtual Environment Setup"
 echo "=========================================="
 echo ""
 
-# Check if python3-venv is installed
-if ! dpkg -l | grep -q python3.*-venv; then
-    echo "Installing python3-venv package..."
-    sudo apt update
-    sudo apt install -y python3.10-venv
-    echo "✓ python3-venv installed"
+# Install uv if not present
+if ! command -v uv &> /dev/null; then
+    echo "Installing uv..."
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    export PATH="$HOME/.cargo/bin:$PATH"
+    echo "✓ uv installed"
 else
-    echo "✓ python3-venv already installed"
+    echo "✓ uv already installed"
 fi
 
 echo ""
@@ -25,31 +26,22 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 # Remove old venv if exists
-if [ -d "venv" ]; then
+if [ -d ".venv" ]; then
     echo "Removing old virtual environment..."
-    rm -rf venv
+    rm -rf .venv
 fi
 
-# Create virtual environment
-echo "Creating virtual environment..."
-python3 -m venv venv
-
-# Ensure pip is available
-if [ ! -f "venv/bin/pip" ]; then
-    echo "pip not found in venv, installing..."
-    venv/bin/python -m ensurepip --upgrade
-    venv/bin/python -m pip install --upgrade pip
-fi
+# Create virtual environment using uv
+echo "Creating virtual environment with uv..."
+uv venv
 
 echo "✓ Virtual environment created"
 
 echo ""
 
-# Activate and install requirements
-echo "Installing Python packages..."
-source venv/bin/activate
-pip install --upgrade pip
-pip install -r requirements-dev.txt
+# Install dependencies using uv
+echo "Installing Python packages with uv..."
+uv sync
 echo "✓ Packages installed"
 
 echo ""
@@ -58,9 +50,11 @@ echo "Setup Complete!"
 echo "=========================================="
 echo ""
 echo "To activate the virtual environment, run:"
-echo "  source venv/bin/activate"
+echo "  source .venv/bin/activate"
 echo ""
 echo "To deactivate, run:"
 echo "  deactivate"
+echo ""
+echo "Note: uv uses .venv by default (not venv)"
 echo ""
 

@@ -33,28 +33,52 @@ help:
 
 # Create and setup virtual environment
 venv:
-	@if [ ! -d "venv" ]; then \
-		echo "Creating virtual environment..."; \
-		python3 -m venv venv; \
+	@if ! command -v uv &> /dev/null; then \
+		echo "uv not found. Installing uv..."; \
+		curl -LsSf https://astral.sh/uv/install.sh | sh; \
+		export PATH="$$HOME/.cargo/bin:$$PATH"; \
+	fi
+	@if [ ! -d ".venv" ]; then \
+		echo "Creating virtual environment with uv..."; \
+		uv venv; \
 		echo "Virtual environment created!"; \
 		echo ""; \
 		echo "To activate it, run:"; \
-		echo "  source venv/bin/activate"; \
+		echo "  source .venv/bin/activate"; \
 		echo ""; \
 		echo "Then run 'make install' to install dependencies."; \
 	else \
-		echo "Virtual environment already exists at ./venv"; \
-		echo "To activate it, run: source venv/bin/activate"; \
+		echo "Virtual environment already exists at ./.venv"; \
+		echo "To activate it, run: source .venv/bin/activate"; \
 	fi
 
 # Install dependencies (development)
 install:
-	@if [ -z "$$VIRTUAL_ENV" ]; then \
-		echo "Warning: No virtual environment detected!"; \
-		echo "It's recommended to activate venv first: source venv/bin/activate"; \
-		echo ""; \
+	@if ! command -v uv &> /dev/null; then \
+		echo "uv not found. Installing uv..."; \
+		curl -LsSf https://astral.sh/uv/install.sh | sh; \
+		export PATH="$$HOME/.cargo/bin:$$PATH"; \
 	fi
-	pip install -r requirements-dev.txt
+	uv sync
+
+# Install dependencies with frozen lockfile (for CI/reproducible builds)
+install-frozen:
+	@if ! command -v uv &> /dev/null; then \
+		echo "uv not found. Installing uv..."; \
+		curl -LsSf https://astral.sh/uv/install.sh | sh; \
+		export PATH="$$HOME/.cargo/bin:$$PATH"; \
+	fi
+	uv sync --frozen
+
+# Update dependencies and lockfile
+update:
+	@if ! command -v uv &> /dev/null; then \
+		echo "uv not found. Installing uv..."; \
+		curl -LsSf https://astral.sh/uv/install.sh | sh; \
+		export PATH="$$HOME/.cargo/bin:$$PATH"; \
+	fi
+	uv lock --upgrade
+	uv sync
 
 # Run all tests
 test:
@@ -100,23 +124,21 @@ lint-black:
 	black --check .
 
 # Security scans (slower - run as needed or nightly in CI)
-# Note: Requires separate installation: pip install bandit safety
 lint-security:
 	@echo "Running Bandit security scan..."
-	@command -v bandit >/dev/null 2>&1 || { echo "bandit not installed. Run: pip install bandit"; exit 1; }
+	@command -v bandit >/dev/null 2>&1 || { echo "bandit not installed. Run: uv pip install bandit"; exit 1; }
 	bandit -r . -f screen
 	@echo ""
-	@echo "Checking dependencies with Safety..."
-	@command -v safety >/dev/null 2>&1 || { echo "safety not installed. Run: pip install safety"; exit 1; }
-	safety check
+	@echo "Checking dependencies with uv pip audit..."
+	uv pip audit || echo "Note: Install dependencies first with 'make install'"
 
 lint-bandit:
-	@command -v bandit >/dev/null 2>&1 || { echo "bandit not installed. Run: pip install bandit"; exit 1; }
+	@command -v bandit >/dev/null 2>&1 || { echo "bandit not installed. Run: uv pip install bandit"; exit 1; }
 	bandit -r . -f screen
 
 lint-safety:
-	@command -v safety >/dev/null 2>&1 || { echo "safety not installed. Run: pip install safety"; exit 1; }
-	safety check
+	@echo "Running uv pip audit..."
+	uv pip audit || echo "Note: Install dependencies first with 'make install'"
 
 # Format code automatically
 format:

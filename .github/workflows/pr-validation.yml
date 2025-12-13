@@ -55,6 +55,21 @@ jobs:
         with:
           python-version: '3.11'
       
+      - name: Install uv
+        if: steps.detect-apps.outputs.backend_apps != '[]'
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.8.7"
+      
+      - name: Cache uv
+        if: steps.detect-apps.outputs.backend_apps != '[]'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: ${{ runner.os }}-uv-${{ hashFiles('**/uv.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-uv-
+      
       - name: Set up Node.js
         if: steps.detect-apps.outputs.frontend_apps != '[]'
         uses: actions/setup-node@v4
@@ -66,10 +81,11 @@ jobs:
         run: |
           for app_name in $(echo "${{ steps.detect-apps.outputs.backend_apps }}" | jq -r '.[]'); do
             app_backend_dir="applications/$app_name/backend"
-            if [ -d "$app_backend_dir" ] && [ -f "$app_backend_dir/requirements-dev.txt" ]; then
+            if [ -d "$app_backend_dir" ] && [ -f "$app_backend_dir/pyproject.toml" ]; then
               echo "::group::Installing dependencies for $app_name backend"
-              python -m pip install --upgrade pip
-              pip install -r "$app_backend_dir/requirements-dev.txt"
+              cd "$app_backend_dir"
+              uv sync --frozen
+              cd - > /dev/null
               echo "::endgroup::"
             fi
           done

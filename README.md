@@ -81,7 +81,9 @@ CI/
 ├── backend/          # Python FastAPI backend
 │   ├── main.py      # FastAPI application
 │   ├── database.py  # Database models and connection
-│   ├── requirements.txt
+│   ├── pyproject.toml  # Project definition and dependencies
+│   ├── uv.lock      # Lockfile for reproducible builds
+│   ├── .python-version  # Python version specification (3.11)
 │   ├── Dockerfile   # Multistage Docker build
 │   └── tests/       # Unit and integration tests
 ├── frontend/        # React frontend
@@ -127,9 +129,11 @@ The application consists of three containers:
 ### Prerequisites
 
 - Docker and Docker Compose
-- Python 3.11 (exact version required for consistency)
+- Python 3.11+ (specified in `.python-version` and `pyproject.toml` - uv/pyenv/asdf will auto-detect)
 - Node.js 20 (exact version required for consistency)
 - Make (optional, for convenience commands)
+
+**Note**: The `.python-version` file ensures consistent Python version across environments. uv, pyenv, and asdf automatically respect this file, making version management dynamic and resilient.
 
 ### Quick Setup
 
@@ -138,11 +142,13 @@ The application consists of three containers:
 make install
 
 # Or manually:
-# Backend
-cd backend && python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt
+# Backend (using uv - 10-100x faster than pip)
+cd backend && uv venv && source .venv/bin/activate && uv sync
 # Frontend  
 cd frontend && npm ci
 ```
+
+**Note:** This project uses [uv](https://docs.astral.sh/uv/) for Python package management, which provides 10-100x faster dependency resolution and installation compared to pip. The `uv.lock` file ensures reproducible builds across all environments.
 
 ### Ensuring CI Consistency
 
@@ -150,9 +156,11 @@ To avoid "works locally but fails in CI" issues:
 
 1. **Install pre-commit hooks** (recommended):
    ```bash
-   pip install pre-commit
+   uv tool install pre-commit
    pre-commit install
    ```
+   Or: `uv pip install pre-commit && pre-commit install`
+   
    This automatically runs linters before each commit.
 
 2. **Run local CI checks before pushing**:
@@ -326,10 +334,13 @@ make lint-security
 ```
 
 **Tools:**
+- **uv** ⚡ - Ultra-fast Python package manager (10-100x faster than pip)
 - **Ruff** ⚡ - Lightning-fast linter (replaces Flake8, Pylint, isort)
 - **Black** - Code formatting (100 char lines)
 - **Bandit** - Security scanning (nightly in CI)
-- **Safety** - Dependency security (nightly in CI)
+- **uv pip audit** - Built-in dependency security auditing (replaces Safety)
+
+**Why uv?** 10-100x faster dependency resolution, universal lockfiles for reproducible builds, built-in security auditing, and replaces multiple tools (pip, pip-tools, pipx, poetry, pyenv, virtualenv) with a single unified tool.
 
 **Why Ruff?** 10-100x faster than traditional linters, written in Rust, modern Python best practices.
 
@@ -460,26 +471,33 @@ The project uses GitHub Actions for automated CI/CD:
 
 ### Running Backend Locally
 
-**Recommended: Using Virtual Environment**
+**Recommended: Using uv (Fast Python Package Manager)**
 
 ```bash
 cd backend
 
-# Quick setup (automated)
+# Quick setup (automated) - uses uv for 10-100x faster installs
 ./setup-venv.sh    # or: make venv
 
-# Activate virtual environment
-source venv/bin/activate
+# Activate virtual environment (uv uses .venv by default)
+source .venv/bin/activate
 
 # Start the server
 uvicorn main:app --reload
 ```
 
+**Why uv?**
+- ⚡ **10-100x faster** dependency resolution and installation
+- 🔒 **Reproducible builds** with `uv.lock` file
+- 🛡️ **Built-in security** auditing with `uv pip audit`
+- 📦 **Single tool** replaces pip, pip-tools, pipx, poetry, pyenv, and virtualenv
+- 🐍 **Python version management** - Automatically uses `.python-version` file (works with pyenv, asdf)
+
 **Alternative: Direct Installation** (not recommended)
 
 ```bash
 cd backend
-pip install -r requirements.txt
+uv sync  # Uses pyproject.toml and uv.lock for reproducible installs
 uvicorn main:app --reload
 ```
 
@@ -499,7 +517,7 @@ npm run dev
 
 ```bash
 cd backend
-source venv/bin/activate  # Activate virtual environment first
+source .venv/bin/activate  # Activate virtual environment first (uv uses .venv)
 
 # Run tests
 pytest tests/test_main.py -v          # Unit tests
@@ -510,6 +528,8 @@ make test              # Run all tests
 make test-unit         # Unit tests only
 make test-integration  # Integration tests only
 make test-cov          # Tests with coverage report
+make install-frozen    # Install with frozen lockfile (for CI/reproducible builds)
+make update            # Update dependencies and regenerate lockfile
 ```
 
 ### Frontend Tests
@@ -525,7 +545,7 @@ The GitHub Actions workflow (`.github/workflows/ci.yml`) follows CI best practic
 
 1. **Backend Unit Tests** (runs first, in parallel with frontend tests)
    - Runs pytest unit tests with in-memory SQLite database
-   - Uses pip caching for faster builds
+   - Uses uv with lockfile caching for faster builds (10-100x faster than pip)
    
 2. **Frontend Unit Tests** (runs in parallel with backend tests)
    - Runs Jest tests with React Testing Library

@@ -8,8 +8,12 @@ install: install-backend install-frontend ## Install all dependencies
 
 install-backend: ## Install Python dependencies (dev)
 	@echo "Installing backend dependencies..."
-	cd backend && python3 -m venv venv || true
-	cd backend && source venv/bin/activate && pip install --upgrade pip && pip install -r requirements-dev.txt
+	@if ! command -v uv &> /dev/null; then \
+		echo "uv not found. Installing uv..."; \
+		curl -LsSf https://astral.sh/uv/install.sh | sh; \
+		export PATH="$$HOME/.cargo/bin:$$PATH"; \
+	fi
+	cd backend && uv sync
 
 install-frontend: ## Install Node.js dependencies
 	@echo "Installing frontend dependencies..."
@@ -50,7 +54,12 @@ audit: audit-backend audit-frontend ## Run security audit on all dependencies
 
 audit-backend: ## Audit Python dependencies for vulnerabilities
 	@echo "Auditing Python dependencies..."
-	cd backend && source venv/bin/activate && pip-audit -r requirements.txt --desc on || echo "⚠️  Vulnerabilities found"
+	@if ! command -v uv &> /dev/null; then \
+		echo "uv not found. Installing uv..."; \
+		curl -LsSf https://astral.sh/uv/install.sh | sh; \
+		export PATH="$$HOME/.cargo/bin:$$PATH"; \
+	fi
+	cd backend && uv pip audit || echo "⚠️  Vulnerabilities found"
 
 audit-frontend: ## Audit Node.js dependencies for vulnerabilities
 	@echo "Auditing Node.js dependencies..."

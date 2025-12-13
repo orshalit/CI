@@ -6,19 +6,19 @@
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   WSL:           ./setup-venv.sh
   Windows:       .\setup-venv.bat
-  Make:          make venv && source venv/bin/activate && make install
+  Make:          make venv && source .venv/bin/activate && make install
 
 🚀 DAILY WORKFLOW
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   1. cd /mnt/e/CI/backend
-  2. source venv/bin/activate     (or: . activate.sh)
+  2. source .venv/bin/activate    (uv uses .venv by default)
   3. Work on your code
   4. deactivate                   (when done)
 
 ✅ CHECK IF ACTIVE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  echo $VIRTUAL_ENV               (should show venv path)
-  which python                    (should be in venv/bin/)
+  echo $VIRTUAL_ENV               (should show .venv path)
+  which python                    (should be in .venv/bin/)
 
 🧪 COMMON COMMANDS
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -29,20 +29,24 @@
   pytest tests/ -v                Run tests directly
   uvicorn main:app --reload       Start dev server
 
-📦 PACKAGE MANAGEMENT
+📦 PACKAGE MANAGEMENT (using uv - 10-100x faster than pip)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  pip install <package>           Install new package
-  pip install -r requirements.txt Reinstall all packages
-  pip freeze > requirements.txt   Update requirements
-  pip list                        List installed packages
+  uv sync                         Install/update dependencies
+  uv sync --frozen                Install with lockfile (CI/reproducible)
+  uv add <package>                Add new package to pyproject.toml
+  uv remove <package>             Remove package from pyproject.toml
+  uv lock                         Regenerate lockfile
+  uv lock --upgrade               Update lockfile with latest versions
+  uv pip list                     List installed packages
 
 🔧 TROUBLESHOOTING
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Command not found:
-    → Make sure venv is activated: source venv/bin/activate
+    → Make sure venv is activated: source .venv/bin/activate
   
-  python3-venv not available:
-    → sudo apt update && sudo apt install python3.10-venv
+  uv not installed:
+    → curl -LsSf https://astral.sh/uv/install.sh | sh
+    → Or: make venv (auto-installs uv)
   
   Reset everything:
     → make clean-venv && make venv && make install
@@ -52,11 +56,18 @@
   make clean                      Clean cache/temp files
   make clean-venv                 Remove virtual environment
 
+🐍 PYTHON VERSION MANAGEMENT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  .python-version file specifies Python 3.11
+  uv/pyenv/asdf automatically use this file
+  Ensures consistent Python version across environments
+  Dynamic and resilient - allows any 3.11.x patch version
+
 📚 MORE INFO
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   See: VENV-SETUP.md for detailed documentation
   See: Makefile for all available commands (make help)
 
 💡 PRO TIP: Add to ~/.bashrc for quick activation:
-    alias venv='source venv/bin/activate'
+    alias venv='source .venv/bin/activate'
 

@@ -166,15 +166,31 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       
+      - name: Install uv
+        if: steps.detect-apps.outputs.backend_apps != '[]'
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.8.7"
+      
+      - name: Cache uv
+        if: steps.detect-apps.outputs.backend_apps != '[]'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: ${{ runner.os }}-uv-${{ hashFiles('**/uv.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-uv-
+      
       - name: Install Python dependencies for all apps
         if: steps.detect-apps.outputs.backend_apps != '[]'
         run: |
           for app_name in $(echo "${{ steps.detect-apps.outputs.backend_apps }}" | jq -r '.[]'); do
             app_backend_dir="applications/$app_name/backend"
-            if [ -d "$app_backend_dir" ] && [ -f "$app_backend_dir/requirements-dev.txt" ]; then
+            if [ -d "$app_backend_dir" ] && [ -f "$app_backend_dir/pyproject.toml" ]; then
               echo "::group::Installing dependencies for $app_name backend"
-              python -m pip install --upgrade pip
-              pip install -r "$app_backend_dir/requirements-dev.txt"
+              cd "$app_backend_dir"
+              uv sync --frozen
+              cd - > /dev/null
               echo "::endgroup::"
             fi
           done
@@ -204,8 +220,7 @@ jobs:
       - name: Install Ruff
         if: steps.detect-apps.outputs.backend_apps != '[]'
         run: |
-          python -m pip install --upgrade pip
-          pip install ruff
+          uv tool install ruff==0.14.6
       
       - name: Run Ruff linter for app backends
         continue-on-error: true
@@ -390,6 +405,21 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       
+      - name: Install uv
+        if: steps.detect-apps.outputs.apps != '[]'
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.8.7"
+      
+      - name: Cache uv
+        if: steps.detect-apps.outputs.apps != '[]'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: ${{ runner.os }}-uv-${{ hashFiles('**/uv.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-uv-
+      
       - name: Run tests for each app backend
         if: steps.detect-apps.outputs.apps != '[]'
         continue-on-error: true
@@ -409,13 +439,11 @@ jobs:
             
             echo "::group::Testing $app_name backend"
             
-            # Install dependencies
-            if [ -f "$app_backend_dir/requirements-dev.txt" ]; then
-              python -m pip install --upgrade pip
-              pip install -r "$app_backend_dir/requirements-dev.txt"
-            elif [ -f "$app_backend_dir/requirements.txt" ]; then
-              python -m pip install --upgrade pip
-              pip install -r "$app_backend_dir/requirements.txt"
+            # Install dependencies using uv
+            if [ -f "$app_backend_dir/pyproject.toml" ]; then
+              cd "$app_backend_dir"
+              uv sync --frozen
+              cd - > /dev/null
             fi
             
             # Run unit tests
@@ -516,6 +544,19 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.8.7"
+      
+      - name: Cache uv
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: ${{ runner.os }}-uv-${{ hashFiles('**/uv.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-uv-
+      
       - name: Detect app backends with tests
         id: detect-apps
         run: |
@@ -542,15 +583,11 @@ jobs:
             
             echo "::group::Testing $app_name backend"
             
-            # Install dependencies if requirements exist
-            if [ -f "$app_backend_dir/requirements.txt" ]; then
-              echo "Installing dependencies for $app_name..."
-              pip install -r "$app_backend_dir/requirements.txt"
-            fi
-            
-            if [ -f "$app_backend_dir/requirements-dev.txt" ]; then
-              echo "Installing dev dependencies for $app_name..."
-              pip install -r "$app_backend_dir/requirements-dev.txt"
+            # Install dependencies using uv
+            if [ -f "$app_backend_dir/pyproject.toml" ]; then
+              cd "$app_backend_dir"
+              uv sync --frozen
+              cd - > /dev/null
             fi
             
             # Run tests

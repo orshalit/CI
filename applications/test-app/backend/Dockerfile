@@ -23,17 +23,23 @@ ARG PYTHON_VERSION
 
 WORKDIR /app
 
-# Install only build dependencies needed for pip compilation
+# Install uv from official image
+COPY --from=ghcr.io/astral-sh/uv:debian /uv /usr/local/bin/uv
+
+# Install only build dependencies needed for compilation
 # Note: gcc needed for some Python packages with C extensions
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements and install dependencies
+# Copy dependency files first (better caching)
+# uv.lock ensures reproducible builds
+COPY pyproject.toml uv.lock ./
+
+# Install dependencies using uv (much faster than pip)
 # Clean up __pycache__ and .pyc files to reduce image size
-COPY requirements.txt .
-RUN pip install --no-cache-dir --user -r requirements.txt && \
+RUN uv sync --frozen --no-dev && \
     find /root/.local -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true && \
     find /root/.local -type f -name "*.pyc" -delete 2>/dev/null || true
 

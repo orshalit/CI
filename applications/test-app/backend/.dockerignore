@@ -52,15 +52,14 @@ docs/
 
 # Development files
 *.txt
-!requirements.txt
 Makefile
 *.sh
 *.bat
-pyproject.toml
 pytest.ini
 ruff.toml
 setup.py
 setup.cfg
+# Note: pyproject.toml and uv.lock are needed for Docker builds
 
 # Temporary files
 *.log
