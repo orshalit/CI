@@ -1,0 +1,342 @@
+name: 'ECS Service Image Tags (per-service)'
+description: 'Resolve per-service image tags (pin unchanged services to currently deployed tags) and optionally verify updated images exist.'
+
+inputs:
+  plan_dir:
+    description: 'Terraform directory for the ECS module (e.g., DEVOPS/live/dev/04-ecs-fargate)'
+    required: true
+  services_json:
+    description: 'Path to services.generated.json (Terraform JSON tfvars)'
+    required: true
+  event_name:
+    description: 'GitHub event name (workflow_run/workflow_dispatch)'
+    required: true
+  application:
+    description: 'Application name to update (workflow_dispatch only); use "all" for all apps'
+    required: false
+    default: 'all'
+  update_images:
+    description: 'Whether to update image tags (workflow_dispatch only). If false, pins all services to current tags.'
+    required: false
+    default: 'true'
+  desired_tag:
+    description: 'Desired image tag to apply to updated services'
+    required: false
+    default: ''
+  built_images_file:
+    description: 'Path to built-images.txt (workflow_run only)'
+    required: false
+    default: 'built-images.txt'
+  verify_images:
+    description: 'Whether to verify updated images exist in registry'
+    required: false
+    default: 'true'
+  github_token:
+    description: 'GitHub token (packages:read) for GHCR docker manifest checks'
+    required: false
+    default: ''
+
+outputs:
+  updated_services_count:
+    description: 'Count of services that will be updated to desired_tag'
+    value: ${{ steps.resolve.outputs.updated_services_count }}
+  updated_services_keys_file:
+    description: 'Path to JSON file containing updated service keys array'
+    value: ${{ steps.resolve.outputs.updated_services_keys_file }}
+  updated_services_images_file:
+    description: 'Path to JSON file containing updated services map (container_image + image_tag)'
+    value: ${{ steps.resolve.outputs.updated_services_images_file }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Resolve per-service image tags
+      id: resolve
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        PLAN_DIR="${{ inputs.plan_dir }}"
+        SERVICES_JSON="${{ inputs.services_json }}"
+        EVENT_NAME="${{ inputs.event_name }}"
+        APPLICATION="${{ inputs.application }}"
+        UPDATE_IMAGES="${{ inputs.update_images }}"
+        DESIRED_TAG="${{ inputs.desired_tag }}"
+        BUILT_IMAGES_FILE="${{ inputs.built_images_file }}"
+
+        if [ ! -d "$PLAN_DIR" ]; then
+          echo "::error::Terraform directory not found: $PLAN_DIR"
+          exit 1
+        fi
+
+        if [ ! -f "$SERVICES_JSON" ]; then
+          echo "::error::services.generated.json not found: $SERVICES_JSON"
+          exit 1
+        fi
+
+        # Determine which services should be UPDATED to DESIRED_TAG
+        # - workflow_run: only services whose image basename is listed in built-images.txt
+        # - workflow_dispatch:
+        #   - update_images=false: update none (infra-only), pin all to current tags
+        #   - update_images=true: update only services matching selected application (or all if application=all)
+        BUILT_IMAGES_JSON="[]"
+        UPDATED_KEYS_JSON="[]"
+
+        if [ "$EVENT_NAME" == "workflow_run" ]; then
+          if [ ! -f "$BUILT_IMAGES_FILE" ]; then
+            echo "::error::built-images.txt not found: $BUILT_IMAGES_FILE"
+            echo "::error::Cannot determine which services were built in CI."
+            exit 1
+          fi
+
+          BUILT_IMAGES_JSON=$(grep -v '^#' "$BUILT_IMAGES_FILE" | grep -v '^$' | sort -u | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          BUILT_COUNT=$(echo "$BUILT_IMAGES_JSON" | jq -r 'length')
+          if [ "$BUILT_COUNT" -eq 0 ]; then
+            echo "::error::built-images.txt is empty. Cannot determine built images."
+            exit 1
+          fi
+
+          UPDATED_KEYS_JSON=$(jq --argjson built "$BUILT_IMAGES_JSON" -c '
+            .services
+            | to_entries
+            | map(
+                select(
+                  ((.value.container_image | split("/") | .[-1]) as $bn | ($built | index($bn)) != null)
+                )
+              )
+            | map(.key)
+          ' "$SERVICES_JSON")
+        else
+          if [ "$UPDATE_IMAGES" != "true" ]; then
+            UPDATED_KEYS_JSON="[]"
+          else
+            if [ -z "$APPLICATION" ] || [ "$APPLICATION" == "all" ]; then
+              UPDATED_KEYS_JSON=$(jq -c '.services | keys' "$SERVICES_JSON")
+            else
+              UPDATED_KEYS_JSON=$(jq --arg app "$APPLICATION" -c '
+                .services
+                | to_entries
+                | map(select((.value.application // "") == $app))
+                | map(.key)
+              ' "$SERVICES_JSON")
+            fi
+          fi
+        fi
+
+        UPDATED_COUNT=$(echo "$UPDATED_KEYS_JSON" | jq -r 'length')
+
+        if [ "$EVENT_NAME" == "workflow_run" ] && [ "$UPDATED_COUNT" -eq 0 ]; then
+          echo "::error::No services matched the built images list."
+          echo "::error::This indicates a mismatch between built-images.txt and services.generated.json container_image values."
+          echo "::error::Built images:"
+          echo "$BUILT_IMAGES_JSON" | jq -r '.[]' | sed 's/^/  - /' || true
+          echo "::error::Available service images (basenames):"
+          jq -r '.services | to_entries[] | (.value.container_image | split("/") | .[-1])' "$SERVICES_JSON" | sort -u | sed 's/^/  - /' || true
+          exit 1
+        fi
+
+        if [ "$EVENT_NAME" != "workflow_run" ] && [ "$UPDATE_IMAGES" == "true" ] && [ -n "$APPLICATION" ] && [ "$APPLICATION" != "all" ] && [ "$UPDATED_COUNT" -eq 0 ]; then
+          echo "::error::No services matched application='$APPLICATION'."
+          echo "::error::Check that services.generated.json contains services with .application == '$APPLICATION'."
+          echo "::error::Available applications:"
+          jq -r '.services | to_entries | map(.value.application // "") | map(select(length > 0)) | unique | .[]' "$SERVICES_JSON" 2>/dev/null | sed 's/^/  - /' || true
+          exit 1
+        fi
+
+        if [ "$UPDATED_COUNT" -gt 0 ]; then
+          if [ -z "$DESIRED_TAG" ] || [ "$DESIRED_TAG" == "null" ]; then
+            echo "::error::desired_tag is empty/null but $UPDATED_COUNT service(s) are selected for update."
+            exit 1
+          fi
+        fi
+
+        # Services that must stay on their CURRENTLY DEPLOYED tag (not updated this run)
+        CURRENT_KEYS_JSON=$(jq --argjson updated "$UPDATED_KEYS_JSON" -c '
+          .services
+          | keys
+          | map(select(($updated | index(.)) == null))
+        ' "$SERVICES_JSON")
+        CURRENT_NEEDED_COUNT=$(echo "$CURRENT_KEYS_JSON" | jq -r 'length')
+
+        CURRENT_TAG_MAP='{}'
+        if [ "$CURRENT_NEEDED_COUNT" -gt 0 ]; then
+          # Drift-proof current tag discovery:
+          # - Resolve active taskDefinition from aws ecs describe-services
+          # - Then describe-task-definition to extract the image tag
+          CLUSTER_NAME_RAW="$(terraform -chdir="$PLAN_DIR" output -raw ecs_cluster_name 2>&1)" || {
+            echo "::error::Failed to read Terraform output 'ecs_cluster_name' in $PLAN_DIR"
+            echo "$CLUSTER_NAME_RAW" | sed 's/^/::error::  /'
+            exit 1
+          }
+          CLUSTER_NAME="$(echo "$CLUSTER_NAME_RAW" | tr -d '\r')"
+          if [ -z "$CLUSTER_NAME" ] || [ "$CLUSTER_NAME" == "null" ]; then
+            echo "::error::Terraform output ecs_cluster_name is empty."
+            exit 1
+          fi
+
+          SERVICE_NAMES_RAW="$(terraform -chdir="$PLAN_DIR" output -json service_names 2>&1)" || {
+            echo "::error::Failed to read Terraform output 'service_names' in $PLAN_DIR"
+            echo "$SERVICE_NAMES_RAW" | sed 's/^/::error::  /'
+            exit 1
+          }
+          if ! echo "$SERVICE_NAMES_RAW" | jq -e 'type == "object"' >/dev/null 2>&1; then
+            echo "::error::Terraform output 'service_names' is not a JSON object."
+            exit 1
+          fi
+
+          while IFS= read -r svc_key; do
+            [ -z "$svc_key" ] && continue
+
+            AWS_SVC_NAME=$(echo "$SERVICE_NAMES_RAW" | jq -r --arg k "$svc_key" '.[$k] // empty')
+            if [ -z "$AWS_SVC_NAME" ] || [ "$AWS_SVC_NAME" == "null" ]; then
+              echo "::error::Cannot resolve AWS ECS service name for '$svc_key' from Terraform output 'service_names'."
+              exit 1
+            fi
+
+            TD_ARN=$(aws ecs describe-services \
+              --cluster "$CLUSTER_NAME" \
+              --services "$AWS_SVC_NAME" \
+              --query 'services[0].taskDefinition' \
+              --output text 2>/dev/null || true)
+
+            if [ -z "$TD_ARN" ] || [ "$TD_ARN" == "None" ] || [ "$TD_ARN" == "MISSING" ]; then
+              echo "::error::Failed to resolve active task definition for service '$svc_key' (AWS service: $AWS_SVC_NAME)."
+              echo "::error::This usually means the service is not deployed yet."
+              exit 1
+            fi
+
+            IMAGE=$(aws ecs describe-task-definition \
+              --task-definition "$TD_ARN" \
+              --query 'taskDefinition.containerDefinitions[0].image' \
+              --output text 2>/dev/null || true)
+
+            if [ -z "$IMAGE" ] || [ "$IMAGE" == "None" ]; then
+              echo "::error::Failed to read container image from task definition '$TD_ARN' (service '$svc_key')."
+              exit 1
+            fi
+
+            IMAGE_NO_DIGEST="${IMAGE%@*}"
+            if [[ "$IMAGE_NO_DIGEST" == *":"* ]]; then
+              TAG="${IMAGE_NO_DIGEST##*:}"
+            else
+              TAG=""
+            fi
+
+            if [ -z "$TAG" ] || [ "$TAG" == "null" ]; then
+              echo "::error::Could not extract image tag from '$IMAGE' for service '$svc_key'."
+              exit 1
+            fi
+
+            CURRENT_TAG_MAP=$(echo "$CURRENT_TAG_MAP" | jq --arg k "$svc_key" --arg v "$TAG" '. + {($k): $v}')
+          done < <(echo "$CURRENT_KEYS_JSON" | jq -r '.[]')
+        fi
+
+        # Patch services.generated.json (keep full services map; update ONLY intended services)
+        TMP_FILE="$(mktemp)"
+        jq --arg desired "$DESIRED_TAG" --argjson updated "$UPDATED_KEYS_JSON" --argjson current "$CURRENT_TAG_MAP" '
+          .services |= with_entries(
+            .value.image_tag = (
+              if (($updated | index(.key)) != null) then
+                $desired
+              else
+                ($current[.key] // null)
+              end
+            )
+          )
+        ' "$SERVICES_JSON" > "$TMP_FILE"
+
+        # Fail fast if any service ends up with null/empty image_tag
+        MISSING_KEYS=$(jq -r '.services | to_entries | map(select((.value.image_tag // "") == "")) | .[].key' "$TMP_FILE" 2>/dev/null || echo "")
+        if [ -n "$MISSING_KEYS" ]; then
+          echo "::error::One or more services ended up with empty image_tag after resolution:"
+          echo "$MISSING_KEYS" | sed 's/^/  - /'
+          exit 1
+        fi
+
+        mv "$TMP_FILE" "$SERVICES_JSON"
+
+        UPDATED_KEYS_FILE="$PLAN_DIR/updated-services.keys.json"
+        echo "$UPDATED_KEYS_JSON" > "$UPDATED_KEYS_FILE"
+
+        UPDATED_IMAGES_FILE="$PLAN_DIR/updated-services.images.json"
+        jq --argjson updated "$UPDATED_KEYS_JSON" '
+          {services: (.services | to_entries | map(select(($updated | index(.key)) != null)) | from_entries)}
+        ' "$SERVICES_JSON" > "$UPDATED_IMAGES_FILE"
+
+        echo "updated_services_count=$UPDATED_COUNT" >> "$GITHUB_OUTPUT"
+        echo "updated_services_keys_file=$UPDATED_KEYS_FILE" >> "$GITHUB_OUTPUT"
+        echo "updated_services_images_file=$UPDATED_IMAGES_FILE" >> "$GITHUB_OUTPUT"
+
+        if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+          {
+            echo "## Per-service image tag resolution (04-ecs-fargate)"
+            echo ""
+            echo "- Event: \`$EVENT_NAME\`"
+            echo "- update_images: \`$UPDATE_IMAGES\`"
+            echo "- Updated services: **$UPDATED_COUNT**"
+            echo "- Pinned (unchanged) services: **$CURRENT_NEEDED_COUNT**"
+            echo ""
+            if [ "$UPDATED_COUNT" -gt 0 ]; then
+              echo "| Service key | Image |"
+              echo "|---|---|"
+              jq -r '.services | to_entries[] | "| `\(.key)` | `\(.value.container_image):\(.value.image_tag)` |"' "$UPDATED_IMAGES_FILE"
+              echo ""
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+    - name: Verify updated images exist (registry)
+      if: inputs.verify_images == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        UPDATED_COUNT="${{ steps.resolve.outputs.updated_services_count }}"
+        UPDATED_IMAGES_FILE="${{ steps.resolve.outputs.updated_services_images_file }}"
+
+        if [ -z "$UPDATED_COUNT" ] || [ "$UPDATED_COUNT" == "0" ]; then
+          echo "::notice::No services updated - skipping image verification."
+          exit 0
+        fi
+
+        if [ ! -f "$UPDATED_IMAGES_FILE" ]; then
+          echo "::error::Updated images file not found: $UPDATED_IMAGES_FILE"
+          exit 1
+        fi
+
+        if [ -z "${{ inputs.github_token }}" ]; then
+          echo "::error::github_token input is required to verify images."
+          exit 1
+        fi
+
+        echo "${{ inputs.github_token }}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin || {
+          echo "::error::Failed to login to GHCR.io (packages:read required)."
+          exit 1
+        }
+
+        IMAGE_REFS=$(jq -r '.services | to_entries[] | "\(.value.container_image):\(.value.image_tag)"' "$UPDATED_IMAGES_FILE" 2>/dev/null || echo "")
+        if [ -z "$IMAGE_REFS" ]; then
+          echo "::error::No updated images found to verify."
+          exit 1
+        fi
+
+        ALL_IMAGES_EXIST=true
+        while IFS= read -r FULL_IMAGE_PATH; do
+          [ -z "$FULL_IMAGE_PATH" ] && continue
+          echo "::group::Checking for $FULL_IMAGE_PATH"
+          if docker manifest inspect "$FULL_IMAGE_PATH" > /dev/null 2>&1; then
+            echo "::notice::✓ Docker image $FULL_IMAGE_PATH found."
+          else
+            echo "::error::❌ Docker image $FULL_IMAGE_PATH NOT found in GitHub Container Registry."
+            ALL_IMAGES_EXIST=false
+          fi
+          echo "::endgroup::"
+        done <<< "$IMAGE_REFS"
+
+        if [ "$ALL_IMAGES_EXIST" = "false" ]; then
+          echo "::error::One or more UPDATED Docker images are missing in registry."
+          exit 1
+        fi
+
+        echo "::notice::✓ All updated Docker images found in registry."
+

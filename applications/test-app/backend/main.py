@@ -54,7 +54,7 @@ from schemas import (
 # Setup logging
 setup_logging(log_level=settings.LOG_LEVEL, log_format=settings.LOG_FORMAT)
 logger = logging.getLogger(__name__)
-# CI trigger: backend non-functional change to run full pipeline (deploy health gating fix)
+# CI trigger: backend touch to run full pipeline (2025-12-13)
 
 # Runtime metrics
 # These must be defined at module import time (handlers use them).
