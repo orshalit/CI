@@ -321,7 +321,7 @@ async def get_status():
     - System status
     - Status message
     
-            Pipeline Test #7: Fix Docker .venv path and Ruff linting errors
+            Pipeline Test #8: Full pipeline validation after all fixes
     """
     return StatusResponse(
         package_manager="uv",
