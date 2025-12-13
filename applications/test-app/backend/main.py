@@ -209,7 +209,7 @@ async def health_check():
     description="Returns public configuration needed by frontend at runtime (including API key)",
 )
 @rate_limit()  # Rate limit decorator now properly defined before use
-async def get_config():
+async def get_config():  # Pipeline trigger: test port discovery fix
     """
     Public configuration endpoint for frontend runtime configuration.
     
