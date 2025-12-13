@@ -39,10 +39,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY pyproject.toml uv.lock ./
 
 # Install dependencies using uv (much faster than pip)
+# uv sync creates a .venv virtual environment
 # Clean up __pycache__ and .pyc files to reduce image size
 RUN uv sync --frozen --no-dev && \
-    find /root/.local -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true && \
-    find /root/.local -type f -name "*.pyc" -delete 2>/dev/null || true
+    find .venv -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true && \
+    find .venv -type f -name "*.pyc" -delete 2>/dev/null || true
 
 # Create version info file
 RUN echo "{\
