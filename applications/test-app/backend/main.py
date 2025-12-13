@@ -53,6 +53,11 @@ from schemas import (
 setup_logging(log_level=settings.LOG_LEVEL, log_format=settings.LOG_FORMAT)
 logger = logging.getLogger(__name__)
 
+# Runtime metrics
+# These must be defined at module import time (handlers use them).
+request_count = 0
+app_start_time = time.time()
+
 # Initialize rate limiter
 limiter = Limiter(key_func=get_remote_address)
 

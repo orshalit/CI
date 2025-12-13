@@ -1400,8 +1400,31 @@ jobs:
           BACKEND_SERVICES="${{ steps.detect-services.outputs.backend_services }}"
           if [ -n "$BACKEND_SERVICES" ]; then
             for BACKEND_SERVICE in $BACKEND_SERVICES; do
-              # Get port from docker-compose config
-              BACKEND_PORT=$(docker compose $COMPOSE_FILES config | grep -A 30 "^  ${BACKEND_SERVICE}:" | grep -E "^\s+-.*:8000" | head -1 | sed -E 's/.*:([0-9]+):8000/\1/' || echo "8000")
+              # Discover published host port from the running container.
+              # This is more reliable than parsing `docker compose config` (which can truncate service blocks).
+              echo "::group::Debug: Backend port discovery for $BACKEND_SERVICE"
+              docker compose $COMPOSE_FILES ps "$BACKEND_SERVICE" || true
+              CONTAINER_ID=$(docker compose $COMPOSE_FILES ps -q "$BACKEND_SERVICE" 2>/dev/null || true)
+              echo "Container ID: ${CONTAINER_ID:-<empty>}"
+              if [ -n "$CONTAINER_ID" ]; then
+                docker port "$CONTAINER_ID" 8000/tcp || true
+              fi
+              echo "::endgroup::"
+
+              BACKEND_PORT=""
+              if [ -n "$CONTAINER_ID" ]; then
+                PUBLISHED=$(docker port "$CONTAINER_ID" 8000/tcp 2>/dev/null | head -1 || true)
+                if [ -n "$PUBLISHED" ]; then
+                  BACKEND_PORT="${PUBLISHED##*:}"
+                fi
+              fi
+
+              if [ -z "$BACKEND_PORT" ]; then
+                BACKEND_PORT="8000"
+                echo "::warning::Could not discover published backend port for $BACKEND_SERVICE; defaulting to $BACKEND_PORT"
+              else
+                echo "::notice::Discovered published backend port for $BACKEND_SERVICE: $BACKEND_PORT"
+              fi
               
               echo -e "\n=== ${BACKEND_SERVICE} Health (port ${BACKEND_PORT}) ==="
               curl -f "http://localhost:${BACKEND_PORT}/health" | jq . || echo "Health check failed"
@@ -1415,8 +1438,30 @@ jobs:
           FRONTEND_SERVICES="${{ steps.detect-services.outputs.frontend_services }}"
           if [ -n "$FRONTEND_SERVICES" ]; then
             for FRONTEND_SERVICE in $FRONTEND_SERVICES; do
-              # Get port from docker-compose config
-              FRONTEND_PORT=$(docker compose $COMPOSE_FILES config | grep -A 30 "^  ${FRONTEND_SERVICE}:" | grep -E "^\s+-.*:3000" | head -1 | sed -E 's/.*:([0-9]+):3000/\1/' || echo "3000")
+              # Discover published host port from the running container.
+              echo "::group::Debug: Frontend port discovery for $FRONTEND_SERVICE"
+              docker compose $COMPOSE_FILES ps "$FRONTEND_SERVICE" || true
+              CONTAINER_ID=$(docker compose $COMPOSE_FILES ps -q "$FRONTEND_SERVICE" 2>/dev/null || true)
+              echo "Container ID: ${CONTAINER_ID:-<empty>}"
+              if [ -n "$CONTAINER_ID" ]; then
+                docker port "$CONTAINER_ID" 3000/tcp || true
+              fi
+              echo "::endgroup::"
+
+              FRONTEND_PORT=""
+              if [ -n "$CONTAINER_ID" ]; then
+                PUBLISHED=$(docker port "$CONTAINER_ID" 3000/tcp 2>/dev/null | head -1 || true)
+                if [ -n "$PUBLISHED" ]; then
+                  FRONTEND_PORT="${PUBLISHED##*:}"
+                fi
+              fi
+
+              if [ -z "$FRONTEND_PORT" ]; then
+                FRONTEND_PORT="3000"
+                echo "::warning::Could not discover published frontend port for $FRONTEND_SERVICE; defaulting to $FRONTEND_PORT"
+              else
+                echo "::notice::Discovered published frontend port for $FRONTEND_SERVICE: $FRONTEND_PORT"
+              fi
               
               echo -e "\n=== ${FRONTEND_SERVICE} Health (port ${FRONTEND_PORT}) ==="
               curl -f "http://localhost:${FRONTEND_PORT}/" > /dev/null || echo "Health check failed"
