@@ -4,7 +4,6 @@ import logging
 import os
 import uuid
 from datetime import UTC, datetime
-from typing import Optional  # noqa: UP007 - Keep for compatibility
 
 import boto3
 from botocore.exceptions import ClientError, NoCredentialsError
@@ -54,36 +53,36 @@ try:
     # Get table name from SSM Parameter Store (preferred) or environment variable (fallback)
     environment = os.getenv("ENVIRONMENT", "dev")
     table_key = os.getenv("DYNAMODB_TABLE_KEY", "greetings")  # Configurable table key
-    
+
     # Check if DynamoDB Local endpoint is configured (for local testing/E2E)
     dynamodb_endpoint_url = os.getenv("DYNAMODB_ENDPOINT_URL")
-    
+
     # Try SSM Parameter Store first (best practice) - skip in testing/local mode
     if not settings.TESTING and not dynamodb_endpoint_url:
         # SSM Parameter path: /{environment}/dynamodb/{table_key}/table_name
         table_name = get_table_name_from_ssm(environment, table_key)
     else:
         table_name = None
-    
+
     # Fallback to environment variable if SSM parameter not found
     if table_name is None:
         table_name = os.getenv("DYNAMODB_TABLE_NAME", f"{environment}-{table_key}")
         logger.info(f"Using table name from environment variable: {table_name}")
     else:
         logger.info(f"Using table name from SSM Parameter Store: {table_name} (key: {table_key})")
-    
+
     # Initialize boto3 clients with optional endpoint URL for DynamoDB Local
     client_config = {"region_name": os.getenv("AWS_REGION", "us-east-1")}
     resource_config = {"region_name": os.getenv("AWS_REGION", "us-east-1")}
-    
+
     if dynamodb_endpoint_url:
         client_config["endpoint_url"] = dynamodb_endpoint_url
         resource_config["endpoint_url"] = dynamodb_endpoint_url
         logger.info(f"Using DynamoDB Local endpoint: {dynamodb_endpoint_url}")
-    
+
     dynamodb_client = boto3.client("dynamodb", **client_config)
     dynamodb_resource = boto3.resource("dynamodb", **resource_config)
-    
+
     # Verify table exists
     try:
         dynamodb_client.describe_table(TableName=table_name)
@@ -126,7 +125,7 @@ except Exception as e:
 class Greeting:
     """Greeting model for DynamoDB items."""
 
-    def __init__(self, id: str, user_name: str, message: str, created_at: Optional[str] = None):
+    def __init__(self, id: str, user_name: str, message: str, created_at: str | None = None):
         self.id = id
         self.user_name = user_name
         self.message = message
@@ -166,7 +165,7 @@ class Greeting:
 def init_db():
     """
     Verify DynamoDB table exists (tables are created via Terraform).
-    
+
     Raises:
         Exception: If table verification fails.
     """
@@ -199,10 +198,10 @@ def init_db():
 def get_db():
     """
     Get DynamoDB table resource.
-    
+
     Yields:
         Table: DynamoDB table resource.
-    
+
     Raises:
         RuntimeError: If DynamoDB is not available.
     """
@@ -218,14 +217,14 @@ def get_db():
 def create_greeting(user_name: str, message: str) -> Greeting:
     """
     Create a new greeting in DynamoDB.
-    
+
     Args:
         user_name: Name of the user
         message: Greeting message
-    
+
     Returns:
         Greeting: Created greeting object
-    
+
     Raises:
         ClientError: If DynamoDB operation fails
     """
@@ -251,14 +250,14 @@ def create_greeting(user_name: str, message: str) -> Greeting:
 def get_greetings(skip: int = 0, limit: int = 10) -> tuple[list[Greeting], int]:
     """
     Get all greetings with pagination.
-    
+
     Args:
         skip: Number of items to skip
         limit: Maximum number of items to return
-    
+
     Returns:
         tuple: (list of greetings, total count)
-    
+
     Raises:
         ClientError: If DynamoDB operation fails
     """
@@ -266,28 +265,28 @@ def get_greetings(skip: int = 0, limit: int = 10) -> tuple[list[Greeting], int]:
         raise RuntimeError("DynamoDB is not available")
 
     table = dynamodb_resource.Table(table_name)
-    
+
     try:
         # Scan table (for small datasets, consider using Query with GSI for better performance)
         # Note: Scan is expensive for large tables - consider pagination with LastEvaluatedKey
         response = table.scan(
             Limit=limit + skip,  # Get more items to account for skip
         )
-        
+
         items = response.get("Items", [])
-        
+
         # Apply skip and limit manually (DynamoDB doesn't support offset natively)
         # For production, use LastEvaluatedKey for proper pagination
         items = items[skip : skip + limit]
-        
+
         greetings = [Greeting.from_dict(item) for item in items]
-        
+
         # Get total count (approximate for large tables)
         # For exact count, use a separate count operation or maintain count in separate item
         # Note: Scan with Select="COUNT" returns approximate count for large tables
         # For now, use the count from the scan response
         total_count = response.get("Count", 0)
-        
+
         # If there are more items, we need to paginate (for now, return approximate count)
         # In production, consider maintaining a separate count item or using a more efficient method
         return greetings, total_count
@@ -299,13 +298,13 @@ def get_greetings(skip: int = 0, limit: int = 10) -> tuple[list[Greeting], int]:
 def get_user_greetings(user_name: str) -> list[Greeting]:
     """
     Get all greetings for a specific user using GSI.
-    
+
     Args:
         user_name: Name of the user
-    
+
     Returns:
         list: List of greetings for the user
-    
+
     Raises:
         ClientError: If DynamoDB operation fails
     """
@@ -313,7 +312,7 @@ def get_user_greetings(user_name: str) -> list[Greeting]:
         raise RuntimeError("DynamoDB is not available")
 
     table = dynamodb_resource.Table(table_name)
-    
+
     try:
         # Query using GSI on user_name
         response = table.query(
@@ -321,10 +320,10 @@ def get_user_greetings(user_name: str) -> list[Greeting]:
             KeyConditionExpression="user_name = :user_name",
             ExpressionAttributeValues={":user_name": user_name},
         )
-        
+
         items = response.get("Items", [])
         greetings = [Greeting.from_dict(item) for item in items]
-        
+
         logger.info(f"Found {len(greetings)} greetings for user: {user_name}")
         return greetings
     except ClientError as e:
@@ -346,13 +345,13 @@ def _get_user_greetings_scan(user_name: str) -> list[Greeting]:
         raise RuntimeError("DynamoDB is not available")
 
     table = dynamodb_resource.Table(table_name)
-    
+
     try:
         response = table.scan(
             FilterExpression="user_name = :user_name",
             ExpressionAttributeValues={":user_name": user_name},
         )
-        
+
         items = response.get("Items", [])
         greetings = [Greeting.from_dict(item) for item in items]
         return greetings

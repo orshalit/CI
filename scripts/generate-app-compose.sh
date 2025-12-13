@@ -164,9 +164,11 @@ EOF
     environment:
       VITE_BACKEND_URL: \${${APP_NAME_UPPER}_BACKEND_URL:-http://${APP_NAME}-backend:8000}
       VITE_API_KEY: \${${APP_NAME_UPPER}_API_KEY:-}
+    # NOTE: Use service_started (not service_healthy) so `docker compose up` doesn't fail early in CI.
+    # The CI workflow performs explicit health waits and prints debug logs on failures.
     depends_on:
       ${APP_NAME}-backend:
-        condition: service_healthy
+        condition: service_started
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/"]
       interval: 10s

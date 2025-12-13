@@ -1153,7 +1153,16 @@ jobs:
               COMPOSE_FILES="$COMPOSE_FILES -f $APP_COMPOSE"
             fi
           done
-          docker compose $COMPOSE_FILES up -d --build
+          docker compose $COMPOSE_FILES up -d --build || {
+            echo "::error::docker compose up failed"
+            echo "::group::docker compose ps"
+            docker compose $COMPOSE_FILES ps || true
+            echo "::endgroup::"
+            echo "::group::backend logs (tail)"
+            docker compose $COMPOSE_FILES logs --tail=200 --no-color $(docker compose $COMPOSE_FILES config --services | grep -E -- "-backend$" || true) || true
+            echo "::endgroup::"
+            exit 1
+          }
       
       - name: Detect application services from docker-compose
         id: detect-services
@@ -1304,10 +1313,33 @@ jobs:
             # Convert space-separated to array for iteration
             for BACKEND_SERVICE in $BACKEND_SERVICES; do
               echo "=== Waiting for $BACKEND_SERVICE ==="
-              timeout 120 bash -c "
-                until docker compose $COMPOSE_FILES ps $BACKEND_SERVICE | grep -q \"healthy\"; do 
-                  echo \"Waiting for $BACKEND_SERVICE...\"; 
-                  sleep 2; 
+              timeout 180 bash -c "
+                counter=0
+                until docker compose $COMPOSE_FILES ps \"$BACKEND_SERVICE\" | grep -q \"healthy\"; do
+                  counter=\$((counter + 1))
+                  echo \"Waiting for $BACKEND_SERVICE... (attempt \$counter)\"
+
+                  # If the container exited, dump logs and fail fast
+                  if docker compose $COMPOSE_FILES ps \"$BACKEND_SERVICE\" | grep -q \"Exit\"; then
+                    echo \"::error::${BACKEND_SERVICE} exited while waiting for health\"
+                    docker compose $COMPOSE_FILES ps \"$BACKEND_SERVICE\" || true
+                    docker compose $COMPOSE_FILES logs --tail=200 \"$BACKEND_SERVICE\" || true
+                    exit 1
+                  fi
+
+                  # Every 10 attempts, show detailed debug info
+                  if [ \$((counter % 10)) -eq 0 ]; then
+                    echo \"--- Debug Info (attempt \$counter) ---\"
+                    echo \"Container status:\"
+                    docker compose $COMPOSE_FILES ps \"$BACKEND_SERVICE\" || true
+                    echo \"Health check status:\"
+                    docker inspect --format='{{json .State.Health}}' \"$BACKEND_SERVICE\" 2>/dev/null | jq . || echo \"No health info available\"
+                    echo \"Recent logs:\"
+                    docker compose $COMPOSE_FILES logs --tail=100 \"$BACKEND_SERVICE\" || true
+                    echo \"---\"
+                  fi
+
+                  sleep 2
                 done
               "
               echo "✓ $BACKEND_SERVICE is healthy"
