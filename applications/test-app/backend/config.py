@@ -11,18 +11,18 @@ logger = logging.getLogger(__name__)
 def _get_secret_key() -> str:
     """
     Get SECRET_KEY from Secrets Manager or fallback to environment variable.
-    
+
     This function attempts to retrieve the session secret from AWS Secrets Manager
     using dynamic discovery. If that fails, it falls back to the SECRET_KEY
     environment variable, and finally to a default value.
-    
+
     Returns:
         str: Secret key value
     """
     try:
         # Try to import secrets module (may not be available in all environments)
         from secrets import get_session_secret
-        
+
         try:
             # Try to get from Secrets Manager via dynamic discovery
             secret_key = get_session_secret()

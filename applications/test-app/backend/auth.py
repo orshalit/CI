@@ -4,7 +4,6 @@ This module provides API key authentication using the X-API-Key header.
 It integrates with the existing Secrets Manager infrastructure for key retrieval.
 """
 
-import hashlib
 import hmac
 import logging
 
@@ -65,7 +64,7 @@ async def verify_api_key(api_key: str | None = Security(api_key_header)) -> str:
             detail="Missing API key. Please provide X-API-Key header.",
             headers={"WWW-Authenticate": "ApiKey"},
         )
-    
+
     # Compare API keys (use constant-time comparison to prevent timing attacks)
     # Use constant-time comparison
     if not hmac.compare_digest(api_key.encode(), expected_key.encode()):
@@ -75,7 +74,7 @@ async def verify_api_key(api_key: str | None = Security(api_key_header)) -> str:
             detail="Invalid API key",
             headers={"WWW-Authenticate": "ApiKey"},
         )
-    
+
     logger.debug("API key validated successfully")
     return api_key
 
