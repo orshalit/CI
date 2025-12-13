@@ -94,9 +94,9 @@ def get_auth_dependency():
     if settings.TESTING:
         logger.debug("TESTING mode: Authentication bypassed")
         return None
-    
+
     if not settings.AUTH_REQUIRED:
         logger.debug("AUTH_REQUIRED=false: Authentication bypassed")
         return None
-    
+
     return Depends(verify_api_key)

@@ -99,22 +99,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Create non-root user for security (before copying files)
 RUN useradd -m -u 1000 -s /bin/bash appuser
 
-# Copy installed Python packages from builder to user's home
-COPY --from=builder /root/.local /home/appuser/.local
+# Copy virtual environment from builder (uv sync installs into .venv)
+COPY --from=builder /app/.venv /app/.venv
 
 # Copy application code
 COPY main.py database.py config.py schemas.py middleware.py logging_config.py ./
 COPY --from=builder /app/version.json ./version.json
 
 # Set ownership (single layer for efficiency)
-RUN chown -R appuser:appuser /app /home/appuser/.local && \
+RUN chown -R appuser:appuser /app && \
     chmod -R 755 /app
 
 # Set environment variables for version info, PATH, and Python optimization
 ENV APP_VERSION="${BUILD_VERSION}" \
     GIT_COMMIT="${GIT_COMMIT}" \
     BUILD_DATE="${BUILD_DATE}" \
-    PATH=/home/appuser/.local/bin:$PATH \
+    PATH=/app/.venv/bin:$PATH \
     # Prevent Python from writing .pyc files (smaller image, faster startup)
     PYTHONDONTWRITEBYTECODE=1 \
     # Force Python stdout/stderr to be unbuffered (better for Docker logs)

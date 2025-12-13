@@ -57,7 +57,8 @@ jobs:
       - name: Install security scanning tools
         run: |
           # Install security tools using uv pip (they don't need app dependencies)
-          uv pip install bandit==1.7.6 safety
+          # Use --system flag since we're installing globally, not in a venv
+          uv pip install --system bandit==1.7.6 safety
       
       # Bandit - Scan all app backends dynamically
       - name: Run Bandit security scan (app-specific backends)
