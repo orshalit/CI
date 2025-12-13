@@ -1605,9 +1605,15 @@ jobs:
           
           echo "::notice::🔐 Generating secure secrets for database module..."
           
-          if [ -f "DEVOPS/scripts/generate-secrets.sh" ]; then
-            chmod +x DEVOPS/scripts/generate-secrets.sh
+          if [ -d "DEVOPS" ]; then
             cd DEVOPS
+          else
+            echo "::error::DEVOPS checkout directory not found at ./DEVOPS"
+            exit 1
+          fi
+
+          if [ -f "scripts/generate-secrets.sh" ]; then
+            chmod +x scripts/generate-secrets.sh
             if scripts/generate-secrets.sh "${{ steps.vars.outputs.environment }}" "live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}"; then
               echo "::notice::✓ Secret generation completed successfully"
               echo "secrets_generated=true" >> $GITHUB_OUTPUT
@@ -1845,24 +1851,30 @@ jobs:
       - name: Verify Service Health and Connectivity
         id: verify_service_health
         if: steps.vars.outputs.action == 'apply' && steps.apply.outcome == 'success' && steps.vars.outputs.module_path == '04-ecs-fargate'
-        continue-on-error: true
+        env:
+          VERIFY_MAX_WAIT_SECONDS: "900"
+          VERIFY_INTERVAL_SECONDS: "15"
         run: |
           PLAN_DIR="DEVOPS/live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}"
           
           echo "::notice::Verifying service health and connectivity after deployment..."
           
-          if [ -f "DEVOPS/scripts/verify-service-health.sh" ]; then
-            chmod +x DEVOPS/scripts/verify-service-health.sh
+          if [ -d "DEVOPS" ]; then
             cd DEVOPS
-            if DEVOPS/scripts/verify-service-health.sh "${{ steps.vars.outputs.environment }}" "${{ steps.vars.outputs.module_path }}" "${{ secrets.AWS_REGION }}"; then
-              echo "::notice::✓ All services are healthy and accessible"
-            else
-              echo "::warning::⚠ Some services may be unhealthy or inaccessible. Check the output above for details."
-              echo "::notice::This is often normal immediately after deployment - DNS propagation and container startup can take a few minutes."
-            fi
           else
-            echo "::notice::Service health verification script not found, skipping..."
+            echo "::error::DEVOPS checkout directory not found at ./DEVOPS"
+            exit 1
           fi
+
+          if [ ! -f "scripts/verify-service-health.sh" ]; then
+            echo "::error::Service health verification script not found at DEVOPS/scripts/verify-service-health.sh"
+            exit 1
+          fi
+
+          chmod +x scripts/verify-service-health.sh
+
+          # This step MUST gate deployment success on real health.
+          scripts/verify-service-health.sh "${{ steps.vars.outputs.environment }}" "${{ steps.vars.outputs.module_path }}" "${{ secrets.AWS_REGION }}"
 
       - name: Targeted Cleanup on Apply Failure
         if: steps.vars.outputs.action == 'apply' && steps.apply.outcome == 'failure' && steps.vars.outputs.environment != 'production'
