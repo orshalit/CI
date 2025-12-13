@@ -57,6 +57,18 @@ logger = logging.getLogger(__name__)
 limiter = Limiter(key_func=get_remote_address)
 
 
+def rate_limit():
+    """Conditional rate limiting decorator."""
+    if settings.RATE_LIMIT_ENABLED:
+        return limiter.limit(f"{settings.RATE_LIMIT_PER_MINUTE}/minute")
+
+    # Return a no-op decorator if rate limiting is disabled
+    def noop_decorator(func):
+        return func
+
+    return noop_decorator
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan event handler for startup and shutdown"""
@@ -196,7 +208,7 @@ async def health_check():
     summary="Public configuration endpoint",
     description="Returns public configuration needed by frontend at runtime (including API key)",
 )
-@rate_limit()
+@rate_limit()  # Rate limit decorator now properly defined before use
 async def get_config():
     """
     Public configuration endpoint for frontend runtime configuration.
@@ -290,19 +302,6 @@ async def get_version():
         python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
         environment=os.getenv("ENVIRONMENT", "development"),
     )
-
-
-def rate_limit():
-    """Conditional rate limiting decorator"""
-    if settings.RATE_LIMIT_ENABLED:
-        return limiter.limit(f"{settings.RATE_LIMIT_PER_MINUTE}/minute")
-
-    # Return a no-op decorator if rate limiting is disabled
-    def noop_decorator(func):
-        return func
-
-    return noop_decorator
-
 
 @app.get(
     "/api/status",

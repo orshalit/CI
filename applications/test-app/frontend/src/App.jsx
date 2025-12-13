@@ -14,7 +14,7 @@ function App() {
   // Health check hook
   const { healthStatus, checkHealth, healthData } = useHealthCheck();
   
-  // Version state (DEPLOY-TEST-1)
+  // Version state (DEPLOY-TEST-1) - Pipeline trigger: rate_limit fix validation
   const [versionInfo, setVersionInfo] = useState({ version: null, commit: null });
 
   // API hooks for status, hello, deploy-test-2, deploy-test-3, greet, metrics, and DynamoDB endpoints
