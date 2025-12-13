@@ -511,16 +511,30 @@ jobs:
             exit 0
           fi
           
-          if [ "$FMT_CHECK_EXIT" -ne 3 ]; then
+          # NOTE: When hashicorp/setup-terraform wrapper is enabled, the wrapper may return exit code 1
+          # even when the underlying Terraform exit code is 3 (formatting needed). In that case the
+          # wrapper typically prints the list of files that need formatting.
+          #
+          # We treat "exit 1 + file list output" as "formatting needed" rather than a hard failure.
+          SANITIZED_FMT_OUTPUT="$(echo "$FMT_CHECK_OUTPUT" | tr -d '\r' | sed '/Terraform exited with code 3/d')"
+          FORMATTING_FILES="$(echo "$SANITIZED_FMT_OUTPUT" | sed -E 's/^[[:space:]]*Error:[[:space:]]*//g' | sed '/^\s*$/d' | grep -E '\.tf(vars)?(\.json)?$' || true)"
+          
+          FORMAT_NEEDED=false
+          if [ "$FMT_CHECK_EXIT" -eq 3 ]; then
+            FORMAT_NEEDED=true
+          elif [ "$FMT_CHECK_EXIT" -eq 1 ] && [ -n "$FORMATTING_FILES" ]; then
+            FORMAT_NEEDED=true
+            echo "::notice::terraform fmt -check returned exit code 1 (wrapper) but produced a file list; treating as formatting needed."
+          fi
+          
+          if [ "$FORMAT_NEEDED" != "true" ]; then
             echo "::error::terraform fmt -check failed with exit code $FMT_CHECK_EXIT"
             echo "::error::Sanitized output:"
-            echo "$FMT_CHECK_OUTPUT" | tr -d '\r' | sed '/Terraform exited with code 3/d' | sed 's/^/::error::  /'
+            echo "$SANITIZED_FMT_OUTPUT" | sed 's/^/::error::  /'
             exit "$FMT_CHECK_EXIT"
           fi
           
-          echo "::warning::Terraform formatting issues detected (exit code 3). Auto-formatting will run (no commit)."
-          
-          FORMATTING_FILES="$(echo "$FMT_CHECK_OUTPUT" | tr -d '\r' | sed '/Terraform exited with code 3/d' | sed '/^\s*$/d' | grep -E '\.tf(vars)?(\.json)?$' || true)"
+          echo "::warning::Terraform formatting issues detected. Auto-formatting will run (no commit)."
           if [ -n "$FORMATTING_FILES" ]; then
             echo "$FORMATTING_FILES" | while IFS= read -r f; do
               [ -z "$f" ] && continue
@@ -529,7 +543,7 @@ jobs:
           else
             echo "::warning::terraform fmt -check did not output a file list (sanitized)."
             echo "::group::terraform fmt -check (sanitized output)"
-            echo "$FMT_CHECK_OUTPUT" | tr -d '\r' | sed '/Terraform exited with code 3/d'
+            echo "$SANITIZED_FMT_OUTPUT"
             echo "::endgroup::"
           fi
           
