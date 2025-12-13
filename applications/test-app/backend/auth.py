@@ -4,9 +4,9 @@ This module provides API key authentication using the X-API-Key header.
 It integrates with the existing Secrets Manager infrastructure for key retrieval.
 """
 
+import hashlib
+import hmac
 import logging
-import os
-from typing import Optional
 
 from fastapi import Depends, HTTPException, Security, status
 from fastapi.security import APIKeyHeader
@@ -22,27 +22,27 @@ API_KEY_HEADER_NAME = "X-API-Key"
 api_key_header = APIKeyHeader(name=API_KEY_HEADER_NAME, auto_error=False)
 
 
-async def verify_api_key(api_key: Optional[str] = Security(api_key_header)) -> str:
+async def verify_api_key(api_key: str | None = Security(api_key_header)) -> str:
     """
     Verify API key from request header.
-    
+
     This function:
     1. Retrieves the expected API key from Secrets Manager (via SSM discovery)
     2. Compares it with the provided API key from X-API-Key header
     3. Raises HTTPException if invalid or missing
-    
+
     Args:
         api_key: API key from X-API-Key header (None if not provided)
-    
+
     Returns:
         str: The validated API key (for logging/audit purposes)
-    
+
     Raises:
         HTTPException: 401 if API key is missing or invalid
     """
     # Import here to avoid circular dependencies
     from secrets import get_backend_api_key
-    
+
     # Get expected API key from Secrets Manager (with fallback to env var)
     try:
         expected_key = get_backend_api_key()
@@ -55,8 +55,8 @@ async def verify_api_key(api_key: Optional[str] = Security(api_key_header)) -> s
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="API authentication configuration error",
-        )
-    
+        ) from e
+
     # Check if API key is provided
     if not api_key:
         logger.warning("API request missing X-API-Key header")
@@ -67,9 +67,6 @@ async def verify_api_key(api_key: Optional[str] = Security(api_key_header)) -> s
         )
     
     # Compare API keys (use constant-time comparison to prevent timing attacks)
-    import hmac
-    import hashlib
-    
     # Use constant-time comparison
     if not hmac.compare_digest(api_key.encode(), expected_key.encode()):
         logger.warning(f"Invalid API key provided (key length: {len(api_key)})")
@@ -86,10 +83,10 @@ async def verify_api_key(api_key: Optional[str] = Security(api_key_header)) -> s
 def get_auth_dependency():
     """
     Get authentication dependency based on configuration.
-    
+
     Returns:
         Dependency or None: FastAPI dependency if auth is required, None otherwise
-    
+
     This function allows conditional authentication:
     - TESTING mode: No authentication (for E2E tests)
     - AUTH_REQUIRED=false: No authentication (for gradual rollout)
