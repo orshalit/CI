@@ -259,7 +259,7 @@ function App() {
 
         <div className="card">
           <h2>System Status</h2>
-          <p className="deploy-info">Pipeline Test #5: Full CI/CD validation after Docker and security fixes</p>
+          <p className="deploy-info">Pipeline Test #6: E2E fixes - DynamoDB health check and hatchling config</p>
           <button onClick={() => getStatus()} disabled={statusState.loading}>
             {statusState.loading ? 'Loading...' : 'Get System Status'}
           </button>
