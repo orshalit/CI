@@ -39,6 +39,7 @@ from schemas import (
     GreetingsListResponse,
     HealthResponse,
     HelloResponse,
+    StatusResponse,
     UserGreetingsResponse,
     VersionResponse,
 )
@@ -297,6 +298,30 @@ def rate_limit():
         return func
 
     return noop_decorator
+
+
+@app.get(
+    "/api/status",
+    response_model=StatusResponse,
+    tags=["info"],
+    summary="System status",
+    description="Get system status including package manager information",
+    dependencies=[get_auth_dependency()],
+)
+async def get_status():
+    """
+    Returns system status information including package manager details.
+    
+    This endpoint provides information about:
+    - Package manager in use (uv)
+    - System status
+    - Status message
+    """
+    return StatusResponse(
+        package_manager="uv",
+        status="operational",
+        message="System is running with uv package manager (10-100x faster than pip)"
+    )
 
 
 @app.get(

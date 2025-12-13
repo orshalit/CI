@@ -61,6 +61,24 @@ class ApiService {
   }
 
   /**
+   * System status endpoint
+   * @returns {Promise<{package_manager: string, status: string, message: string}>}
+   */
+  async getStatus() {
+    try {
+      logger.debug('Calling status endpoint');
+      const backendUrl = await this.getBackendUrl();
+      const data = await httpClient.get(`${backendUrl}/api/status`);
+
+      logger.info('Status endpoint called successfully', { package_manager: data.package_manager });
+      return data;
+    } catch (error) {
+      logger.error('Status endpoint failed', error);
+      throw new Error(error.message || 'Failed to call status endpoint');
+    }
+  }
+
+  /**
    * Hello endpoint
    * @returns {Promise<{message: string}>}
    */

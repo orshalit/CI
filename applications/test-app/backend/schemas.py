@@ -143,3 +143,11 @@ class ConfigResponse(BaseModel):
             ]
         }
     }
+
+
+class StatusResponse(BaseModel):
+    """System status response schema"""
+
+    package_manager: str = Field(..., description="Package manager in use")
+    status: str = Field(..., description="System status")
+    message: str = Field(..., description="Status message")

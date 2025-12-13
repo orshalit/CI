@@ -57,6 +57,32 @@ class TestHealthEndpoint:
 
 
 @pytest.mark.unit
+class TestStatusEndpoint:
+    """Test suite for the /api/status endpoint."""
+
+    def test_status_returns_200(self, client: TestClient):
+        """Test that status endpoint returns 200 status code."""
+        response = client.get("/api/status", headers={"X-API-Key": "test-key"})
+        assert response.status_code == 200
+
+    def test_status_response_content(self, client: TestClient):
+        """Test that status endpoint returns expected content."""
+        response = client.get("/api/status", headers={"X-API-Key": "test-key"})
+        assert response.status_code == 200
+        data = response.json()
+        assert "package_manager" in data
+        assert "status" in data
+        assert "message" in data
+        assert data["package_manager"] == "uv"
+        assert data["status"] == "operational"
+
+    def test_status_response_headers(self, client: TestClient):
+        """Test that status endpoint returns proper content type."""
+        response = client.get("/api/status", headers={"X-API-Key": "test-key"})
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "application/json"
+
+
 class TestHelloEndpoint:
     """Test suite for the /api/hello endpoint."""
 

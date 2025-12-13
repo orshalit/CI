@@ -17,8 +17,9 @@ function App() {
   // Version state (DEPLOY-TEST-1)
   const [versionInfo, setVersionInfo] = useState({ version: null, commit: null });
 
-  // API hooks for hello, deploy-test-2, deploy-test-3, greet, and DynamoDB endpoints
+  // API hooks for status, hello, deploy-test-2, deploy-test-3, greet, and DynamoDB endpoints
   // Bind methods to ensure proper 'this' context
+  const [getStatus, statusState] = useApi(apiService.getStatus.bind(apiService));
   const [callHelloApi, helloState] = useApi(apiService.callHello.bind(apiService));
   const [callDeployTest2Api, deployTest2State] = useApi(apiService.callDeployTest2.bind(apiService));
   const [callDeployTest3Api, deployTest3State] = useApi(apiService.callDeployTest3.bind(apiService));
@@ -251,6 +252,26 @@ function App() {
           {healthData?.version && (
             <p className="version-info">
               Backend: {healthData.version} ({healthData.commit?.substring(0, 7) || 'unknown'})
+            </p>
+          )}
+        </div>
+
+        <div className="card">
+          <h2>System Status</h2>
+          <p className="deploy-info">UV Migration Test: Package manager status endpoint</p>
+          <button onClick={() => getStatus()} disabled={statusState.loading}>
+            {statusState.loading ? 'Loading...' : 'Get System Status'}
+          </button>
+          {statusState.data && (
+            <div className="result success">
+              <p><strong>Package Manager:</strong> {statusState.data.package_manager}</p>
+              <p><strong>Status:</strong> {statusState.data.status}</p>
+              <p><strong>Message:</strong> {statusState.data.message}</p>
+            </div>
+          )}
+          {statusState.error && (
+            <p className="result error" role="alert">
+              Error: {statusState.error}
             </p>
           )}
         </div>
