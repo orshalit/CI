@@ -230,7 +230,7 @@ function App() {
         <h1>Full-Stack Application</h1>
         {/* Pipeline fix: Fixed artifact merge for built-images */}
         {/* Pipeline run: Testing full deployment cycle after health diagnostics */}
-        {/* CI trigger: Frontend touch to run full pipeline (2025-12-13) */}
+        {/* CI trigger: Frontend touch to run full pipeline (services normalization 2025-12-13) */}
         
         {/* Version Badge - DEPLOY-TEST-1 */}
         <div className="version-badge">
