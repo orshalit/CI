@@ -11,12 +11,21 @@ AWS_REGION="${AWS_REGION:-us-east-1}"
 echo "::notice::Initializing DynamoDB Local table: $TABLE_NAME"
 echo "::notice::DynamoDB endpoint: $DYNAMODB_ENDPOINT"
 
+# DynamoDB Local still expects signed requests; dummy credentials are fine.
+# Also disable IMDS to avoid credential resolution timeouts in CI.
+export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-test}"
+export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-test}"
+export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-$AWS_REGION}"
+export AWS_EC2_METADATA_DISABLED="${AWS_EC2_METADATA_DISABLED:-true}"
+
 # Wait for DynamoDB Local to be ready
 echo "Waiting for DynamoDB Local to be ready..."
 max_attempts=30
 attempt=0
 while [ $attempt -lt $max_attempts ]; do
-  if curl -f -s "$DYNAMODB_ENDPOINT" > /dev/null 2>&1; then
+  # DynamoDB Local doesn't respond 200 OK to a plain GET / request.
+  # We only need to know the TCP connection succeeds (curl exit 0 without -f).
+  if curl -s --connect-timeout 1 --max-time 2 "$DYNAMODB_ENDPOINT" > /dev/null 2>&1; then
     echo "✓ DynamoDB Local is ready"
     break
   fi
