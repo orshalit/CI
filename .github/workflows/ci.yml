@@ -1144,6 +1144,12 @@ jobs:
           COMPOSE_FILES="-f docker-compose.base.yml"
           for APP_COMPOSE in applications/*/docker-compose.yml; do
             if [ -f "$APP_COMPOSE" ]; then
+              # In CI, avoid binding fixed host ports (8000/3000) which may already be in use on the runner.
+              # Our generated compose files use ${VAR-DEFAULT} so setting VAR="" results in ":PORT" (random host port).
+              app_name=$(basename "$(dirname "$APP_COMPOSE")")
+              app_name_upper=$(echo "$app_name" | tr '[:lower:]' '[:upper:]' | tr '-' '_')
+              export "${app_name_upper}_BACKEND_PORT="
+              export "${app_name_upper}_FRONTEND_PORT="
               COMPOSE_FILES="$COMPOSE_FILES -f $APP_COMPOSE"
             fi
           done

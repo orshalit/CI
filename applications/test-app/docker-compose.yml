@@ -20,7 +20,8 @@ services:
     image: test-app-backend:${BUILD_VERSION:-dev}
     container_name: test-app-backend
     ports:
-      - "${TEST_APP_BACKEND_PORT:-8000}:8000"
+      # Use a fixed port by default, but allow CI to set an empty host port (":8000") for random assignment
+      - "${TEST_APP_BACKEND_PORT-8000}:8000"
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-appuser}:${POSTGRES_PASSWORD:-apppassword}@database:5432/${POSTGRES_DB:-appdb}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
@@ -65,7 +66,8 @@ services:
     image: test-app-frontend:${BUILD_VERSION:-dev}
     container_name: test-app-frontend
     ports:
-      - "${TEST_APP_FRONTEND_PORT:-3000}:3000"
+      # Use a fixed port by default, but allow CI to set an empty host port (":3000") for random assignment
+      - "${TEST_APP_FRONTEND_PORT-3000}:3000"
     environment:
       VITE_BACKEND_URL: ${TEST_APP_BACKEND_URL:-http://test-app-backend:8000}
     depends_on:

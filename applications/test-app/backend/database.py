@@ -278,7 +278,6 @@ def get_greetings(skip: int = 0, limit: int = 10) -> tuple[list[Greeting], int]:
         
         # Apply skip and limit manually (DynamoDB doesn't support offset natively)
         # For production, use LastEvaluatedKey for proper pagination
-        total = len(items)
         items = items[skip : skip + limit]
         
         greetings = [Greeting.from_dict(item) for item in items]

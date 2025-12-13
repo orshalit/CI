@@ -8,13 +8,13 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path as PathLib
 
+from botocore.exceptions import ClientError
 from fastapi import Depends, FastAPI, HTTPException, Path, Query, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
-from botocore.exceptions import ClientError
 
 from auth import get_auth_dependency
 from config import settings
@@ -313,21 +313,21 @@ def rate_limit():
     dependencies=[get_auth_dependency()],
 )
 async def get_status():
-            """
-            Returns system status information including package manager details.
-            
-            This endpoint provides information about:
-            - Package manager in use (uv)
-            - System status
-            - Status message
-            
-            Pipeline Test #9: Fix port conflicts and ensure frontend/backend tests run
-            """
-            return StatusResponse(
-                package_manager="uv",
-                status="operational",
-                message="System is running with uv package manager (10-100x faster than pip) - Pipeline Test #9"
-            )
+    """
+    Returns system status information including package manager details.
+
+    This endpoint provides information about:
+    - Package manager in use (uv)
+    - System status
+    - Status message
+
+    Pipeline Test #9: Fix port conflicts and ensure frontend/backend tests run
+    """
+    return StatusResponse(
+        package_manager="uv",
+        status="operational",
+        message="System is running with uv package manager (10-100x faster than pip) - Pipeline Test #9",
+    )
 
 
 @app.get(

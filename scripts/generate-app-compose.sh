@@ -78,7 +78,8 @@ EOF
     cat >> "$OUTPUT_FILE" << EOF
     container_name: ${APP_NAME}-backend
     ports:
-      - "\${${APP_NAME_UPPER}_BACKEND_PORT:-8000}:8000"
+      # Use a fixed port by default, but allow CI to set an empty host port (":8000") for random assignment
+      - "\${${APP_NAME_UPPER}_BACKEND_PORT-8000}:8000"
     environment:
       DATABASE_URL: postgresql://\${POSTGRES_USER:-appuser}:\${POSTGRES_PASSWORD:-apppassword}@database:5432/\${POSTGRES_DB:-appdb}
       LOG_LEVEL: \${LOG_LEVEL:-INFO}
@@ -158,7 +159,8 @@ EOF
     cat >> "$OUTPUT_FILE" << EOF
     container_name: ${APP_NAME}-frontend
     ports:
-      - "\${${APP_NAME_UPPER}_FRONTEND_PORT:-3000}:3000"
+      # Use a fixed port by default, but allow CI to set an empty host port (":3000") for random assignment
+      - "\${${APP_NAME_UPPER}_FRONTEND_PORT-3000}:3000"
     environment:
       VITE_BACKEND_URL: \${${APP_NAME_UPPER}_BACKEND_URL:-http://${APP_NAME}-backend:8000}
       VITE_API_KEY: \${${APP_NAME_UPPER}_API_KEY:-}
