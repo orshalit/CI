@@ -321,12 +321,12 @@ async def get_status():
     - System status
     - Status message
     
-    Pipeline Test #5: Full CI/CD validation after Docker and security fixes
+            Pipeline Test #7: Fix Docker .venv path and Ruff linting errors
     """
     return StatusResponse(
         package_manager="uv",
         status="operational",
-        message="System is running with uv package manager (10-100x faster than pip) - Pipeline Test #6"
+        message="System is running with uv package manager (10-100x faster than pip) - Pipeline Test #7"
     )
 
 
