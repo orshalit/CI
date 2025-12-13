@@ -30,8 +30,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libpq-dev \
     && curl -LsSf https://astral.sh/uv/install.sh | sh \
-    && mv /root/.cargo/bin/uv /usr/local/bin/uv \
-    && rm -rf /root/.cargo \
+    && mv /root/.local/bin/uv /usr/local/bin/uv \
+    && rm -rf /root/.local/bin/uvx \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy dependency files first (better caching)
