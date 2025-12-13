@@ -67,24 +67,24 @@ jobs:
 
       - name: Set up Python
         if: |
-          (github.event_name == 'workflow_dispatch' && github.event.inputs.action != 'destroy') ||
-          (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+          github.event_name == 'workflow_dispatch' &&
+          github.event.inputs.action != 'destroy'
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: Install uv
         if: |
-          (github.event_name == 'workflow_dispatch' && github.event.inputs.action != 'destroy') ||
-          (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+          github.event_name == 'workflow_dispatch' &&
+          github.event.inputs.action != 'destroy'
         uses: astral-sh/setup-uv@v6
         with:
           version: "0.8.7"
 
       - name: Cache uv
         if: |
-          (github.event_name == 'workflow_dispatch' && github.event.inputs.action != 'destroy') ||
-          (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+          github.event_name == 'workflow_dispatch' &&
+          github.event.inputs.action != 'destroy'
         uses: actions/cache@v4
         with:
           path: ~/.cache/uv
@@ -94,24 +94,24 @@ jobs:
 
       - name: Install backend dependencies
         if: |
-          (github.event_name == 'workflow_dispatch' && github.event.inputs.action != 'destroy') ||
-          (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+          github.event_name == 'workflow_dispatch' &&
+          github.event.inputs.action != 'destroy'
         working-directory: applications/test-app/backend
         run: |
-          uv sync --frozen
+          uv sync --frozen --extra dev
 
       - name: Run backend tests
         if: |
-          (github.event_name == 'workflow_dispatch' && github.event.inputs.action != 'destroy') ||
-          (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+          github.event_name == 'workflow_dispatch' &&
+          github.event.inputs.action != 'destroy'
         working-directory: applications/test-app/backend
         run: |
-          pytest tests/test_main.py
+          uv run python -m pytest tests/test_main.py
 
       - name: Set up Node
         if: |
-          (github.event_name == 'workflow_dispatch' && github.event.inputs.action != 'destroy') ||
-          (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+          github.event_name == 'workflow_dispatch' &&
+          github.event.inputs.action != 'destroy'
         uses: actions/setup-node@v4
         with:
           node-version: 18
@@ -120,15 +120,15 @@ jobs:
 
       - name: Install frontend dependencies
         if: |
-          (github.event_name == 'workflow_dispatch' && github.event.inputs.action != 'destroy') ||
-          (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+          github.event_name == 'workflow_dispatch' &&
+          github.event.inputs.action != 'destroy'
         working-directory: applications/test-app/frontend
         run: npm ci
 
       - name: Run frontend tests
         if: |
-          (github.event_name == 'workflow_dispatch' && github.event.inputs.action != 'destroy') ||
-          (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+          github.event_name == 'workflow_dispatch' &&
+          github.event.inputs.action != 'destroy'
         working-directory: applications/test-app/frontend
         env:
           CI: "true"
