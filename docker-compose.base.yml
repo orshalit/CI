@@ -41,11 +41,13 @@ services:
       - "${DYNAMODB_PORT:-8000}:8000"
     command: "-jar DynamoDBLocal.jar -sharedDb -inMemory"
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000 || exit 1"]
+      # DynamoDB Local health check: use bash TCP redirection (more reliable than curl)
+      # Check if port 8000 is listening - DynamoDB Local starts quickly but needs a moment
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/8000' || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 10s
+      start_period: 20s
     networks:
       - app-network
     restart: unless-stopped
