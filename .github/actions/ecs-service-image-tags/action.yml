@@ -74,6 +74,47 @@ runs:
           exit 1
         fi
 
+        # Normalize .services into a canonical JSON object map (Terraform map(object(...)) friendly).
+        # Supported encodings:
+        # - object: { "svc": {..}, ... } (no-op)
+        # - array of {mapKey,mapValue}: Dhall Map JSON encoding
+        # - array of {key,value}: jq from_entries input
+        # - array of [key,value]: tuple entries
+        SERVICES_TYPE="$(jq -r '.services | type' "$SERVICES_JSON" 2>/dev/null || echo "missing")"
+        if [ "$SERVICES_TYPE" = "missing" ]; then
+          echo "::error::.services not found or unreadable in $SERVICES_JSON"
+          exit 1
+        fi
+
+        TMP_NORMALIZED="$(mktemp)"
+        jq -c '
+          def normalize_services:
+            if (.services | type) == "object" then
+              .
+            elif (.services | type) == "array" then
+              (.services) as $s
+              | if ($s | length) == 0 then
+                  .services = {}
+                elif ($s | all(type == "object" and has("mapKey") and has("mapValue"))) then
+                  .services = ($s | map({key: .mapKey, value: .mapValue}) | from_entries)
+                elif ($s | all(type == "object" and has("key") and has("value"))) then
+                  .services = ($s | from_entries)
+                elif ($s | all(type == "array" and length == 2)) then
+                  .services = ($s | map({key: .[0], value: .[1]}) | from_entries)
+                else
+                  error("Unsupported .services array encoding; expected object map or array of {mapKey,mapValue}, {key,value}, or [key,value]")
+                end
+            else
+              error("Unsupported .services type; expected object or array")
+            end;
+          normalize_services
+        ' "$SERVICES_JSON" > "$TMP_NORMALIZED"
+        mv "$TMP_NORMALIZED" "$SERVICES_JSON"
+
+        NORMALIZED_KEYS_COUNT="$(jq -r '.services | keys | length' "$SERVICES_JSON" 2>/dev/null || echo "0")"
+        echo "::notice::.services type detected: $SERVICES_TYPE"
+        echo "::notice::Normalized services keys count: $NORMALIZED_KEYS_COUNT"
+
         # Determine which services should be UPDATED to DESIRED_TAG
         # - workflow_run: only services whose image basename is listed in built-images.txt
         # - workflow_dispatch:
@@ -97,14 +138,13 @@ runs:
           fi
 
           UPDATED_KEYS_JSON=$(jq --argjson built "$BUILT_IMAGES_JSON" -c '
-            .services
-            | to_entries
-            | map(
-                select(
-                  ((.value.container_image | split("/") | .[-1]) as $bn | ($built | index($bn)) != null)
-                )
-              )
-            | map(.key)
+            (.services // {}) as $svcs
+            | [
+                ($svcs | keys[]) as $k
+                | (($svcs[$k].container_image // "") | split("/") | .[-1]) as $bn
+                | select(($built | index($bn)) != null)
+                | $k
+              ]
           ' "$SERVICES_JSON")
         else
           if [ "$UPDATE_IMAGES" != "true" ]; then
@@ -114,10 +154,12 @@ runs:
               UPDATED_KEYS_JSON=$(jq -c '.services | keys' "$SERVICES_JSON")
             else
               UPDATED_KEYS_JSON=$(jq --arg app "$APPLICATION" -c '
-                .services
-                | to_entries
-                | map(select((.value.application // "") == $app))
-                | map(.key)
+                (.services // {}) as $svcs
+                | [
+                    ($svcs | keys[]) as $k
+                    | select(($svcs[$k].application // "") == $app)
+                    | $k
+                  ]
               ' "$SERVICES_JSON")
             fi
           fi
@@ -131,7 +173,7 @@ runs:
           echo "::error::Built images:"
           echo "$BUILT_IMAGES_JSON" | jq -r '.[]' | sed 's/^/  - /' || true
           echo "::error::Available service images (basenames):"
-          jq -r '.services | to_entries[] | (.value.container_image | split("/") | .[-1])' "$SERVICES_JSON" | sort -u | sed 's/^/  - /' || true
+          jq -r '(.services // {}) as $svcs | ($svcs | keys[]) as $k | ($svcs[$k].container_image // "" | split("/") | .[-1])' "$SERVICES_JSON" | sort -u | sed 's/^/  - /' || true
           exit 1
         fi
 
@@ -152,7 +194,7 @@ runs:
 
         # Services that must stay on their CURRENTLY DEPLOYED tag (not updated this run)
         CURRENT_KEYS_JSON=$(jq --argjson updated "$UPDATED_KEYS_JSON" -c '
-          .services
+          (.services // {})
           | keys
           | map(select(($updated | index(.)) == null))
         ' "$SERVICES_JSON")
@@ -234,19 +276,30 @@ runs:
         # Patch services.generated.json (keep full services map; update ONLY intended services)
         TMP_FILE="$(mktemp)"
         jq --arg desired "$DESIRED_TAG" --argjson updated "$UPDATED_KEYS_JSON" --argjson current "$CURRENT_TAG_MAP" '
-          .services |= with_entries(
-            .value.image_tag = (
-              if (($updated | index(.key)) != null) then
-                $desired
-              else
-                ($current[.key] // null)
-              end
+          (.services // {}) as $svcs
+          | .services = (
+              reduce ($svcs | keys[]) as $k
+                ({}; . + {
+                  ($k): (
+                    $svcs[$k]
+                    | .image_tag = (
+                        if (($updated | index($k)) != null) then
+                          $desired
+                        else
+                          ($current[$k] // null)
+                        end
+                      )
+                  )
+                })
             )
-          )
         ' "$SERVICES_JSON" > "$TMP_FILE"
 
         # Fail fast if any service ends up with null/empty image_tag
-        MISSING_KEYS=$(jq -r '.services | to_entries | map(select((.value.image_tag // "") == "")) | .[].key' "$TMP_FILE" 2>/dev/null || echo "")
+        MISSING_KEYS=$(jq -r '
+          (.services // {}) as $svcs
+          | [($svcs | keys[]) as $k | select(($svcs[$k].image_tag // "") == "") | $k]
+          | .[]
+        ' "$TMP_FILE" 2>/dev/null || echo "")
         if [ -n "$MISSING_KEYS" ]; then
           echo "::error::One or more services ended up with empty image_tag after resolution:"
           echo "$MISSING_KEYS" | sed 's/^/  - /'
@@ -260,7 +313,8 @@ runs:
 
         UPDATED_IMAGES_FILE="$PLAN_DIR/updated-services.images.json"
         jq --argjson updated "$UPDATED_KEYS_JSON" '
-          {services: (.services | to_entries | map(select(($updated | index(.key)) != null)) | from_entries)}
+          (.services // {}) as $svcs
+          | {services: (reduce ($updated[]?) as $k ({}; . + {($k): ($svcs[$k])}))}
         ' "$SERVICES_JSON" > "$UPDATED_IMAGES_FILE"
 
         echo "updated_services_count=$UPDATED_COUNT" >> "$GITHUB_OUTPUT"

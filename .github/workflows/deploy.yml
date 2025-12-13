@@ -496,44 +496,68 @@ jobs:
           
           echo "::notice::Checking Terraform formatting in $TERRAFORM_DIR..."
           
-          # First, check formatting without modifying files (faster feedback)
-          if terraform fmt -check -recursive "$TERRAFORM_DIR" 2>&1; then
+          # IMPORTANT: terraform fmt -check exits with code 3 when files need formatting.
+          # The Terraform wrapper can emit noisy "Terraform exited with code 3" lines.
+          # We capture output + exit code and re-emit only the actionable file list.
+          set +e
+          FMT_CHECK_OUTPUT="$(terraform fmt -check -recursive "$TERRAFORM_DIR" 2>&1)"
+          FMT_CHECK_EXIT=$?
+          set -e
+          
+          if [ "$FMT_CHECK_EXIT" -eq 0 ]; then
             echo "::notice::✓ All Terraform files are properly formatted"
             echo "needs_formatting=false" >> $GITHUB_OUTPUT
             echo "changes_made=false" >> $GITHUB_OUTPUT
             exit 0
           fi
           
-          echo "::warning::Formatting issues detected. Auto-formatting files..."
+          if [ "$FMT_CHECK_EXIT" -ne 3 ]; then
+            echo "::error::terraform fmt -check failed with exit code $FMT_CHECK_EXIT"
+            echo "::error::Sanitized output:"
+            echo "$FMT_CHECK_OUTPUT" | tr -d '\r' | sed '/Terraform exited with code 3/d' | sed 's/^/::error::  /'
+            exit "$FMT_CHECK_EXIT"
+          fi
           
-          # Format all Terraform files
-          terraform fmt -recursive "$TERRAFORM_DIR"
+          echo "::warning::Terraform formatting issues detected (exit code 3). Auto-formatting will run (no commit)."
           
-          # Check if any files were modified by comparing before/after
-          cd DEVOPS
-          
-          # Check git status for changes in the terraform directory
-          if git diff --quiet "live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}"; then
-            echo "::notice::✓ Files were auto-formatted and are now correct"
-            echo "needs_formatting=false" >> $GITHUB_OUTPUT
-            echo "changes_made=false" >> $GITHUB_OUTPUT
+          FORMATTING_FILES="$(echo "$FMT_CHECK_OUTPUT" | tr -d '\r' | sed '/Terraform exited with code 3/d' | sed '/^\s*$/d' | grep -E '\.tf(vars)?(\.json)?$' || true)"
+          if [ -n "$FORMATTING_FILES" ]; then
+            echo "$FORMATTING_FILES" | while IFS= read -r f; do
+              [ -z "$f" ] && continue
+              echo "::warning::terraform fmt required: $f"
+            done
           else
+            echo "::warning::terraform fmt -check did not output a file list (sanitized)."
+            echo "::group::terraform fmt -check (sanitized output)"
+            echo "$FMT_CHECK_OUTPUT" | tr -d '\r' | sed '/Terraform exited with code 3/d'
+            echo "::endgroup::"
+          fi
+          
+          echo "::notice::Auto-formatting Terraform files..."
+          terraform fmt -recursive "$TERRAFORM_DIR" >/dev/null 2>&1 || terraform fmt -recursive "$TERRAFORM_DIR"
+          
+          # Optionally restore tracked .tf files to keep the DEVOPS checkout clean
+          # (formatting is non-semantic; deploy uses generated var files anyway).
+          cd DEVOPS
+          MODULE_PATH="live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}"
+          
+          CHANGED_TRACKED_FILES="$(git diff --name-only "$MODULE_PATH" | tr -d '\r' || true)"
+          if [ -n "$CHANGED_TRACKED_FILES" ]; then
             echo "needs_formatting=true" >> $GITHUB_OUTPUT
             echo "changes_made=true" >> $GITHUB_OUTPUT
             
-            # Show what changed
-            echo "::notice::╔══════════════════════════════════════════════════════════════╗"
-            echo "::notice::║  🔧 AUTO-FORMATTING TERRAFORM FILES  🔧  ║"
-            echo "::notice::╚══════════════════════════════════════════════════════════════╝"
-            echo ""
-            echo "::notice::The following files were auto-formatted:"
-            git status --short "live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}" | while read -r line; do
-              echo "::notice::  • $line"
+            echo "::notice::The following tracked files were auto-formatted (not committed):"
+            echo "$CHANGED_TRACKED_FILES" | while IFS= read -r f; do
+              [ -z "$f" ] && continue
+              echo "::warning::auto-formatted: $f"
             done
-            echo ""
-            echo "::group::Show formatted changes"
-            git diff "live/${{ steps.vars.outputs.environment }}/${{ steps.vars.outputs.module_path }}"
-            echo "::endgroup::"
+            
+            echo "::notice::Restoring tracked files to keep checkout clean..."
+            git restore --worktree -- "$MODULE_PATH" 2>/dev/null || git checkout -- "$MODULE_PATH" || true
+          else
+            # Formatting issues were reported, but no tracked .tf changes remained after fmt.
+            echo "needs_formatting=true" >> $GITHUB_OUTPUT
+            echo "changes_made=false" >> $GITHUB_OUTPUT
           fi
 
       - name: Note formatting changes (no commit during deploy)
