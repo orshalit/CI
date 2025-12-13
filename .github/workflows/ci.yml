@@ -1110,6 +1110,21 @@ jobs:
           bash scripts/generate-app-compose.sh
           echo "::notice::Per-app docker-compose files regenerated with latest application structure"
       
+      - name: Clean up any existing containers (prevent port conflicts)
+        run: |
+          # Build compose file list (base + all app compose files)
+          COMPOSE_FILES="-f docker-compose.base.yml"
+          for APP_COMPOSE in applications/*/docker-compose.yml; do
+            if [ -f "$APP_COMPOSE" ]; then
+              COMPOSE_FILES="$COMPOSE_FILES -f $APP_COMPOSE"
+            fi
+          done
+          # Stop and remove any existing containers to prevent port conflicts
+          docker compose $COMPOSE_FILES down -v || echo "No existing containers to clean up"
+          # Also kill any containers using port 8000 (backend) or 3000 (frontend)
+          docker ps --filter "publish=8000" --format "{{.ID}}" | xargs -r docker kill || true
+          docker ps --filter "publish=3000" --format "{{.ID}}" | xargs -r docker kill || true
+      
       - name: Start services with docker compose
         env:
           BUILD_VERSION: ${{ needs.prepare-build.outputs.version }}

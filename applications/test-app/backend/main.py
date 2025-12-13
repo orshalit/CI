@@ -313,21 +313,21 @@ def rate_limit():
     dependencies=[get_auth_dependency()],
 )
 async def get_status():
-    """
-    Returns system status information including package manager details.
-    
-    This endpoint provides information about:
-    - Package manager in use (uv)
-    - System status
-    - Status message
-    
-            Pipeline Test #8: Full pipeline validation after all fixes
-    """
-    return StatusResponse(
-        package_manager="uv",
-        status="operational",
-        message="System is running with uv package manager (10-100x faster than pip) - Pipeline Test #8"
-    )
+            """
+            Returns system status information including package manager details.
+            
+            This endpoint provides information about:
+            - Package manager in use (uv)
+            - System status
+            - Status message
+            
+            Pipeline Test #9: Fix port conflicts and ensure frontend/backend tests run
+            """
+            return StatusResponse(
+                package_manager="uv",
+                status="operational",
+                message="System is running with uv package manager (10-100x faster than pip) - Pipeline Test #9"
+            )
 
 
 @app.get(
