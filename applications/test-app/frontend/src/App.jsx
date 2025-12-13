@@ -259,7 +259,7 @@ function App() {
 
         <div className="card">
           <h2>System Status</h2>
-          <p className="deploy-info">Pipeline Test #9: Fix port conflicts and ensure frontend/backend tests run</p>
+          <p className="deploy-info">Pipeline Test #10: Trigger full pipeline validation after DynamoDB init fix</p>
           <button onClick={() => getStatus()} disabled={statusState.loading}>
             {statusState.loading ? 'Loading...' : 'Get System Status'}
           </button>

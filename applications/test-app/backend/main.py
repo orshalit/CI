@@ -321,12 +321,12 @@ async def get_status():
     - System status
     - Status message
 
-    Pipeline Test #9: Fix port conflicts and ensure frontend/backend tests run
+    Pipeline Test #10: Trigger full pipeline validation after DynamoDB init fix
     """
     return StatusResponse(
         package_manager="uv",
         status="operational",
-        message="System is running with uv package manager (10-100x faster than pip) - Pipeline Test #9",
+        message="System is running with uv package manager (10-100x faster than pip) - Pipeline Test #10",
     )
 
 
