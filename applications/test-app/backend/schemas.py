@@ -151,3 +151,13 @@ class StatusResponse(BaseModel):
     package_manager: str = Field(..., description="Package manager in use")
     status: str = Field(..., description="System status")
     message: str = Field(..., description="Status message")
+
+
+class MetricsResponse(BaseModel):
+    """System metrics response schema"""
+
+    uptime_seconds: float = Field(..., description="Application uptime in seconds")
+    total_requests: int = Field(..., description="Total number of requests processed")
+    active_connections: int = Field(..., description="Current active connections")
+    memory_usage_mb: float = Field(..., description="Memory usage in MB")
+    timestamp: str = Field(..., description="Timestamp when metrics were collected")

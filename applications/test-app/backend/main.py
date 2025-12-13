@@ -1,8 +1,11 @@
 import json
 import logging
 import os
+import psutil
 import sys
+import time
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path as PathLib
 
 from fastapi import Depends, FastAPI, HTTPException, Path, Query, Request, status
@@ -39,6 +42,7 @@ from schemas import (
     GreetingsListResponse,
     HealthResponse,
     HelloResponse,
+    MetricsResponse,
     StatusResponse,
     UserGreetingsResponse,
     VersionResponse,
@@ -335,6 +339,9 @@ async def get_status():
 @rate_limit()
 async def hello(request: Request):
     """Simple hello endpoint (DEPLOY-TEST-1: Version info added)"""
+    global request_count
+    request_count += 1
+    
     # DEPLOY-TEST-1: Show build info only in non-production environments
     # For security: Don't expose deployment timestamps in production
     environment = os.getenv("ENVIRONMENT", "development")
@@ -695,6 +702,49 @@ async def get_user_greetings(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error",
         ) from e
+
+
+@app.get(
+    "/api/metrics",
+    response_model=MetricsResponse,
+    tags=["info"],
+    summary="System metrics",
+    description="Get system metrics including uptime, request count, and resource usage",
+    dependencies=[get_auth_dependency()],
+)
+@rate_limit()
+async def get_metrics(request: Request):
+    """
+    Returns system metrics including:
+    - Application uptime
+    - Total requests processed
+    - Active connections
+    - Memory usage
+    """
+    global request_count
+    
+    # Calculate uptime
+    uptime_seconds = time.time() - app_start_time
+    
+    # Get memory usage
+    process = psutil.Process(os.getpid())
+    memory_info = process.memory_info()
+    memory_usage_mb = memory_info.rss / (1024 * 1024)  # Convert to MB
+    
+    # Get active connections (approximate from process connections)
+    try:
+        connections = process.connections()
+        active_connections = len(connections)
+    except Exception:
+        active_connections = 0
+    
+    return MetricsResponse(
+        uptime_seconds=round(uptime_seconds, 2),
+        total_requests=request_count,
+        active_connections=active_connections,
+        memory_usage_mb=round(memory_usage_mb, 2),
+        timestamp=datetime.utcnow().isoformat() + "Z",
+    )
 
 
 @app.get(

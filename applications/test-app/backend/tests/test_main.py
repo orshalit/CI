@@ -83,6 +83,58 @@ class TestStatusEndpoint:
         assert response.headers["content-type"] == "application/json"
 
 
+@pytest.mark.unit
+class TestMetricsEndpoint:
+    """Test suite for the /api/metrics endpoint."""
+
+    def test_metrics_returns_200(self, client: TestClient):
+        """Test that metrics endpoint returns 200 status code."""
+        response = client.get("/api/metrics", headers={"X-API-Key": "test-key"})
+        assert response.status_code == 200
+
+    def test_metrics_response_content(self, client: TestClient):
+        """Test that metrics endpoint returns expected content."""
+        response = client.get("/api/metrics", headers={"X-API-Key": "test-key"})
+        assert response.status_code == 200
+        data = response.json()
+        assert "uptime_seconds" in data
+        assert "total_requests" in data
+        assert "active_connections" in data
+        assert "memory_usage_mb" in data
+        assert "timestamp" in data
+        assert isinstance(data["uptime_seconds"], (int, float))
+        assert isinstance(data["total_requests"], int)
+        assert isinstance(data["active_connections"], int)
+        assert isinstance(data["memory_usage_mb"], (int, float))
+        assert data["uptime_seconds"] >= 0
+        assert data["total_requests"] >= 0
+        assert data["memory_usage_mb"] > 0
+
+    def test_metrics_response_headers(self, client: TestClient):
+        """Test that metrics endpoint returns proper content type."""
+        response = client.get("/api/metrics", headers={"X-API-Key": "test-key"})
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "application/json"
+
+    def test_metrics_request_count_increments(self, client: TestClient):
+        """Test that request count increments with each request."""
+        # Make a request to increment the counter
+        client.get("/api/hello")
+        
+        response1 = client.get("/api/metrics", headers={"X-API-Key": "test-key"})
+        data1 = response1.json()
+        initial_count = data1["total_requests"]
+        
+        # Make another request
+        client.get("/api/hello")
+        
+        response2 = client.get("/api/metrics", headers={"X-API-Key": "test-key"})
+        data2 = response2.json()
+        
+        # Request count should have increased
+        assert data2["total_requests"] >= initial_count
+
+
 class TestHelloEndpoint:
     """Test suite for the /api/hello endpoint."""
 

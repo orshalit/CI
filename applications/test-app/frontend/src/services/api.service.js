@@ -186,6 +186,27 @@ class ApiService {
   }
 
   /**
+   * Get system metrics
+   * @returns {Promise<{uptime_seconds: number, total_requests: number, active_connections: number, memory_usage_mb: number, timestamp: string}>}
+   */
+  async getMetrics() {
+    try {
+      logger.debug('Calling metrics endpoint');
+      const backendUrl = await this.getBackendUrl();
+      const data = await httpClient.get(`${backendUrl}/api/metrics`);
+
+      logger.info('Metrics retrieved successfully', {
+        uptime: data.uptime_seconds,
+        requests: data.total_requests,
+      });
+      return data;
+    } catch (error) {
+      logger.error('Failed to get metrics', error);
+      throw new Error(error.message || 'Failed to get metrics');
+    }
+  }
+
+  /**
    * Get all greetings from DynamoDB
    * @param {number} skip - Number of records to skip (default: 0)
    * @param {number} limit - Maximum number of records to return (default: 10)

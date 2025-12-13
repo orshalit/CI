@@ -17,13 +17,14 @@ function App() {
   // Version state (DEPLOY-TEST-1)
   const [versionInfo, setVersionInfo] = useState({ version: null, commit: null });
 
-  // API hooks for status, hello, deploy-test-2, deploy-test-3, greet, and DynamoDB endpoints
+  // API hooks for status, hello, deploy-test-2, deploy-test-3, greet, metrics, and DynamoDB endpoints
   // Bind methods to ensure proper 'this' context
   const [getStatus, statusState] = useApi(apiService.getStatus.bind(apiService));
   const [callHelloApi, helloState] = useApi(apiService.callHello.bind(apiService));
   const [callDeployTest2Api, deployTest2State] = useApi(apiService.callDeployTest2.bind(apiService));
   const [callDeployTest3Api, deployTest3State] = useApi(apiService.callDeployTest3.bind(apiService));
   const [callGreetApi, greetState] = useApi(apiService.callGreet.bind(apiService));
+  const [getMetrics, metricsState] = useApi(apiService.getMetrics.bind(apiService));
   const [getDynamoDBStatus, dynamodbStatusState] = useApi(apiService.getDynamoDBStatus.bind(apiService));
   const [getGreetings, greetingsState] = useApi(apiService.getGreetings.bind(apiService));
 
@@ -189,7 +190,7 @@ function App() {
   );
 
   // Determine if any operation is loading
-  const isLoading = helloState.loading || deployTest2State.loading || deployTest3State.loading || greetState.loading || greetingsState.loading;
+  const isLoading = helloState.loading || deployTest2State.loading || deployTest3State.loading || greetState.loading || metricsState.loading || greetingsState.loading;
 
   // Show loading state while config is being fetched
   if (!configLoaded) {
@@ -272,6 +273,44 @@ function App() {
           {statusState.error && (
             <p className="result error" role="alert">
               Error: {statusState.error}
+            </p>
+          )}
+        </div>
+
+        <div className="card">
+          <h2>System Metrics</h2>
+          <p className="deploy-info" style={{ color: '#9b59b6', fontWeight: 'bold' }}>
+            📊 Pipeline Test: Real-time system metrics and performance monitoring
+          </p>
+          <button 
+            onClick={() => getMetrics()} 
+            disabled={metricsState.loading}
+            style={{ backgroundColor: '#9b59b6', color: 'white', fontWeight: 'bold' }}
+          >
+            {metricsState.loading ? 'Loading...' : 'Get Metrics'}
+          </button>
+          {metricsState.data && (
+            <div style={{ marginTop: '1rem', padding: '0.75rem', backgroundColor: '#f0f0f0', borderRadius: '4px' }}>
+              <p style={{ margin: '0.5rem 0' }}>
+                <strong>Uptime:</strong> {Math.floor(metricsState.data.uptime_seconds / 60)}m {Math.floor(metricsState.data.uptime_seconds % 60)}s
+              </p>
+              <p style={{ margin: '0.5rem 0' }}>
+                <strong>Total Requests:</strong> {metricsState.data.total_requests}
+              </p>
+              <p style={{ margin: '0.5rem 0' }}>
+                <strong>Active Connections:</strong> {metricsState.data.active_connections}
+              </p>
+              <p style={{ margin: '0.5rem 0' }}>
+                <strong>Memory Usage:</strong> {metricsState.data.memory_usage_mb} MB
+              </p>
+              <p style={{ margin: '0.5rem 0', fontSize: '0.85em', color: '#666' }}>
+                <strong>Timestamp:</strong> {new Date(metricsState.data.timestamp).toLocaleString()}
+              </p>
+            </div>
+          )}
+          {metricsState.error && (
+            <p className="result error" role="alert" style={{ marginTop: '1rem' }}>
+              Error: {metricsState.error}
             </p>
           )}
         </div>
