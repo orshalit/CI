@@ -259,7 +259,7 @@ function App() {
 
         <div className="card">
           <h2>System Status</h2>
-          <p className="deploy-info">UV Migration Test: Package manager status endpoint</p>
+          <p className="deploy-info">Pipeline Test #4: UV Migration + Metrics endpoint validation</p>
           <button onClick={() => getStatus()} disabled={statusState.loading}>
             {statusState.loading ? 'Loading...' : 'Get System Status'}
           </button>

@@ -320,11 +320,13 @@ async def get_status():
     - Package manager in use (uv)
     - System status
     - Status message
+    
+    Pipeline Test #4: Full CI/CD validation with metrics endpoint
     """
     return StatusResponse(
         package_manager="uv",
         status="operational",
-        message="System is running with uv package manager (10-100x faster than pip)"
+        message="System is running with uv package manager (10-100x faster than pip) - Pipeline Test #4"
     )
 
 
