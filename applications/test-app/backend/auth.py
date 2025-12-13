@@ -21,28 +21,32 @@ API_KEY_HEADER_NAME = "X-API-Key"
 # Create API key header dependency
 api_key_header = APIKeyHeader(name=API_KEY_HEADER_NAME, auto_error=False)
 
+async def _noop_auth_dependency() -> None:
+    """No-op auth dependency used when auth is disabled (e.g., TESTING)."""
+    return None
+
 
 async def verify_api_key(api_key: str | None = Security(api_key_header)) -> str:
     """
     Verify API key from request header.
-
+    
     This function:
     1. Retrieves the expected API key from Secrets Manager (via SSM discovery)
     2. Compares it with the provided API key from X-API-Key header
     3. Raises HTTPException if invalid or missing
-
+    
     Args:
         api_key: API key from X-API-Key header (None if not provided)
-
+    
     Returns:
         str: The validated API key (for logging/audit purposes)
-
+    
     Raises:
         HTTPException: 401 if API key is missing or invalid
     """
     # Import here to avoid circular dependencies
     from secrets import get_backend_api_key
-
+    
     # Get expected API key from Secrets Manager (with fallback to env var)
     try:
         expected_key = get_backend_api_key()
@@ -56,7 +60,7 @@ async def verify_api_key(api_key: str | None = Security(api_key_header)) -> str:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="API authentication configuration error",
         ) from e
-
+    
     # Check if API key is provided
     if not api_key:
         logger.warning("API request missing X-API-Key header")
@@ -65,7 +69,7 @@ async def verify_api_key(api_key: str | None = Security(api_key_header)) -> str:
             detail="Missing API key. Please provide X-API-Key header.",
             headers={"WWW-Authenticate": "ApiKey"},
         )
-
+    
     # Compare API keys (use constant-time comparison to prevent timing attacks)
     # Use constant-time comparison
     if not hmac.compare_digest(api_key.encode(), expected_key.encode()):
@@ -75,7 +79,7 @@ async def verify_api_key(api_key: str | None = Security(api_key_header)) -> str:
             detail="Invalid API key",
             headers={"WWW-Authenticate": "ApiKey"},
         )
-
+    
     logger.debug("API key validated successfully")
     return api_key
 
@@ -83,10 +87,10 @@ async def verify_api_key(api_key: str | None = Security(api_key_header)) -> str:
 def get_auth_dependency():
     """
     Get authentication dependency based on configuration.
-
+    
     Returns:
-        Dependency or None: FastAPI dependency if auth is required, None otherwise
-
+        Depends: A FastAPI dependency object (never None)
+    
     This function allows conditional authentication:
     - TESTING mode: No authentication (for E2E tests)
     - AUTH_REQUIRED=false: No authentication (for gradual rollout)
@@ -94,10 +98,10 @@ def get_auth_dependency():
     """
     if settings.TESTING:
         logger.debug("TESTING mode: Authentication bypassed")
-        return None
-
+        return Depends(_noop_auth_dependency)
+    
     if not settings.AUTH_REQUIRED:
         logger.debug("AUTH_REQUIRED=false: Authentication bypassed")
-        return None
-
+        return Depends(_noop_auth_dependency)
+    
     return Depends(verify_api_key)
