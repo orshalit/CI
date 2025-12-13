@@ -216,7 +216,7 @@ async def health_check():
     description="Returns public configuration needed by frontend at runtime (including API key)",
 )
 @rate_limit()  # Rate limit decorator now properly defined before use
-async def get_config():  # Pipeline trigger: test port discovery fix
+async def get_config(request: Request):  # Pipeline trigger: test port discovery fix
     """
     Public configuration endpoint for frontend runtime configuration.
 
@@ -228,6 +228,7 @@ async def get_config():  # Pipeline trigger: test port discovery fix
     The API key returned here is used by the frontend to authenticate
     subsequent API requests.
     """
+    _ = request  # Required for slowapi rate limiting decorator
     try:
         from secrets import get_backend_api_key
 
